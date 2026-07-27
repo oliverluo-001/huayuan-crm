@@ -1,0 +1,136 @@
+name: 部署 huayuan-crm 到腾讯云
+
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all packages
+        run: npm run build
+
+      - name: Package artifacts
+        run: |
+          mkdir -p deploy-artifacts/backend deploy-artifacts/frontend
+          cp -r backend/dist deploy-artifacts/backend/
+          cp backend/package.json deploy-artifacts/backend/
+          cp -r frontend/dist deploy-artifacts/frontend/
+          cp package.json deploy-artifacts/
+          cp ecosystem.config.js deploy-artifacts/
+
+      - name: Upload to Tencent Cloud
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          source: 'deploy-artifacts/*'
+          target: ${{ secrets.SERVER_PROJECT_PATH }}
+          strip_components: 1
+
+      - name: Remote deploy
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            set -e
+
+            DEPLOY_DIR=${{ secrets.SERVER_PROJECT_PATH }}
+            cd $DEPLOY_DIR
+
+            # ----- 后端部署 -----
+            # 写入生产环境配置
+            cat > backend/.env << EOF
+            PORT=9528
+            NODE_ENV=production
+            DB_TYPE=mysql
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_PORT=${{ secrets.DB_PORT || 3306 }}
+            DB_USERNAME=${{ secrets.DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_DATABASE=${{ secrets.DB_DATABASE }}
+            DB_SYNCHRONIZE=false
+            DB_LOGGING=false
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN || '7d' }}
+            DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+            DEEPSEEK_BASE_URL=${{ secrets.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1' }}
+            EOF
+
+            # 安装生产依赖
+            cd backend
+            npm install --omit=dev
+
+            # 使用 PM2 ecosystem 启动/重启
+            cd $DEPLOY_DIR
+            pm2 describe huayuan-crm-backend > /dev/null 2>&1 \
+              && pm2 restart ecosystem.config.js \
+              || pm2 start ecosystem.config.js
+            pm2 save
+
+            # ----- 前端部署 -----
+            cd $DEPLOY_DIR
+            sudo rm -rf /var/www/huayuan-crm/html
+            sudo mkdir -p /var/www/huayuan-crm/html
+            sudo cp -r frontend/dist/* /var/www/huayuan-crm/html/
+            sudo chown -R www-data:www-data /var/www/huayuan-crm/html
+
+            # ----- Nginx 配置（首次部署自动创建）-----
+            if [ ! -f /etc/nginx/sites-available/huayuan-crm ]; then
+              sudo tee /etc/nginx/sites-available/huayuan-crm > /dev/null << 'NGINX'
+server {
+    listen 80;
+    server_name _;
+
+    root /var/www/huayuan-crm/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:9528;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 120s;
+    }
+
+    client_max_body_size 50m;
+}
+NGINX
+              sudo ln -sf /etc/nginx/sites-available/huayuan-crm /etc/nginx/sites-enabled/
+            fi
+
+            sudo nginx -t && sudo systemctl reload nginx
+
+            # 清理临时文件
+            rm -rf $DEPLOY_DIR/backend/node_modules/.cache
+            rm -rf $DEPLOY_DIR/package.json
+
+            echo "===== Deploy to Tencent Cloud complete ====="
