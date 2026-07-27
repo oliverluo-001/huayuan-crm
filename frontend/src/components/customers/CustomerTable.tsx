@@ -407,7 +407,7 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="p-2 min-w-[200px]">
                   <div className="space-y-2">
-                    <Select value={bulkTag} onValueChange={setBulkTag}>
+                    <Select value={bulkTag} onValueChange={(v) => v !== null && setBulkTag(v)}>
                       <SelectTrigger className="h-8 text-xs">
                         <SelectValue placeholder="选择标签" />
                       </SelectTrigger>
@@ -430,7 +430,7 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent className="p-2 min-w-[200px]">
                   <div className="space-y-2">
-                    <Select value={bulkTier} onValueChange={setBulkTier}>
+                    <Select value={bulkTier} onValueChange={(v) => v !== null && setBulkTier(v)}>
                       <SelectTrigger className="h-8 text-xs">
                         <SelectValue placeholder="选择分层" />
                       </SelectTrigger>

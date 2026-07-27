@@ -225,6 +225,11 @@ export interface B2BAutomationProgress {
   leadsCleaned?: number;
   leadsValidated?: number;
   duplicateRemoved?: number;
+  searchedResults?: number;
+  websitesCrawled?: number;
+  publicEmailsFound?: number;
+  currentQuery?: string;
+  lastError?: string;
 }
 
 export interface LeadAssociation {
@@ -306,6 +311,7 @@ export interface SearchProfile {
   provider: "brave-search" | "serper" | "serpapi" | "generic-json";
   apiUrl: string;
   apiKeySet?: boolean;
+  apiKey?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -315,6 +321,7 @@ export interface AiProfile {
   baseUrl?: string;
   model?: string;
   enabled?: boolean;
+  apiKey?: string;
   credentialStatus?: "saved" | "reentry_required" | "not_set";
 }
 
@@ -379,6 +386,7 @@ export interface AppState {
     aiProfile?: AiProfile;
     smtpProfile?: SmtpProfile;
     imapProfile?: ImapProfile;
+    customerViews?: CustomerView[];
   };
 }
 

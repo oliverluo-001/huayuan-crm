@@ -20,6 +20,7 @@ import {
   type B2BLeadTask,
   type B2BLead,
   type LeadAssociation,
+  type B2BAutomationProgress,
 } from "@/api/client";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ const LEGACY_SEGMENTS = [
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function automationProgressPercent(task: B2BLeadTask): number {
-  const progress = task.automationProgress || {};
+  const progress = task.automationProgress || ({} as B2BAutomationProgress);
   const queryTotal = Math.max(0, Number(progress.totalQueries || task.searchQueries?.length) || 0);
   const queryIndex = Math.max(0, Number(progress.searchedQueries ?? task.automationCursor) || 0);
   if (!task || ["completed", "cancelled", "failed"].includes(task.status) && !queryTotal) return 100;
@@ -79,7 +80,7 @@ function automationProgressPercent(task: B2BLeadTask): number {
 }
 
 function automationStageText(task: B2BLeadTask): string {
-  const progress = task.automationProgress || {};
+  const progress = task.automationProgress || ({} as B2BAutomationProgress);
   if (progress.stage && AUTOMATION_STAGE_LABELS[progress.stage]) {
     return AUTOMATION_STAGE_LABELS[progress.stage];
   }
@@ -94,7 +95,7 @@ function isLeadImportable(lead: B2BLead): boolean {
   return true;
 }
 
-function gradeForConfidence(confidence?: string): string {
+function gradeForConfidence(confidence?: number | string): string {
   if (confidence === "High") return "A";
   if (confidence === "Medium") return "B";
   return "C";
@@ -663,7 +664,7 @@ export function LeadsPage() {
 
   const renderTaskSummary = () => {
     if (!activeTask) return <div className="empty-state">先创建一个获客任务。</div>;
-    const progress = activeTask.automationProgress || {};
+    const progress = activeTask.automationProgress || ({} as B2BAutomationProgress);
     const queryTotal = Math.max(0, Number(progress.totalQueries || activeTask.searchQueries?.length) || 0);
     const queryIndex = Math.max(0, Number(progress.searchedQueries ?? activeTask.automationCursor) || 0);
     const percent = automationProgressPercent(activeTask);
@@ -682,7 +683,7 @@ export function LeadsPage() {
         {(activeTask.buyerIndustries || []).length > 0 && (
           <div className="lead-task-profile">
             <span>下游行业</span>
-            {activeTask.buyerIndustries.slice(0, 6).map((item, i) => (
+            {(activeTask.buyerIndustries || []).slice(0, 6).map((item, i) => (
               <b key={i}>{item}</b>
             ))}
           </div>
@@ -713,7 +714,7 @@ export function LeadsPage() {
   };
 
   const renderLeadSummaryCards = () => {
-    const summary = leadSummary || {};
+    const summary = leadSummary;
     const metrics = [
       ["总线索", summary.total || 0],
       ["已去重", summary.duplicatesRemoved || 0],
