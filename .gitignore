@@ -1,0 +1,13 @@
+node_modules/
+data/*
+!data/.gitkeep
+dist/
+releases/
+waimaoshenqi/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+*.tmp
+*.bak

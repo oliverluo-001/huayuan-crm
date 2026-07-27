@@ -1,0 +1,397 @@
+// Auth types
+export interface AuthStatus {
+  initialized: boolean;
+  authenticated: boolean;
+  username: string;
+}
+
+export interface LoginResult {
+  ok: boolean;
+  username: string;
+}
+
+// Customer types
+export interface Customer {
+  id: string;
+  company: string;
+  business?: string;
+  contact?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  region?: string;
+  timezone?: string;
+  tags?: string[];
+  tier: "A" | "B" | "C" | "D";
+  journeyStage: "new" | "contacted" | "replied" | "qualified" | "opportunity" | "won" | "lost";
+  customerType?: string;
+  product?: string;
+  source?: string;
+  notes?: string;
+  emailStatus?: "verified" | "invalid" | "unknown";
+  createdAt: string;
+  updatedAt: string;
+  // Extended fields from backend
+  nextTodoTitle?: string;
+  nextTodoAt?: string;
+  health?: "healthy" | "attention" | "overdue";
+  openOpportunityCount?: number;
+  openOpportunityValue?: number;
+  lastActivityAt?: string;
+  lastActivityType?: string;
+}
+
+export interface CustomerListResult {
+  customers: Customer[];
+  total: number;
+}
+
+export interface Customer360 {
+  customer: Customer;
+  contacts: Contact[];
+  activities: Activity[];
+  todos: Todo[];
+  opportunities: Opportunity[];
+  sendLogs: SendLog[];
+}
+
+export interface Contact {
+  id: string;
+  customerId: string;
+  name: string;
+  title?: string;
+  email?: string;
+  phone?: string;
+  isPrimary?: boolean;
+  createdAt: string;
+}
+
+export interface Activity {
+  id: string;
+  customerId: string;
+  type: "email" | "call" | "meeting" | "note" | "other";
+  summary: string;
+  content?: string;
+  occurredAt: string;
+  createdAt: string;
+}
+
+export interface Todo {
+  id: string;
+  customerId: string;
+  customerName?: string;
+  title: string;
+  status: "open" | "completed";
+  dueAt?: string;
+  createdAt: string;
+}
+
+export interface Opportunity {
+  id: string;
+  customerId: string;
+  customerName?: string;
+  title: string;
+  stage: "inquiry" | "quoting" | "negotiating" | "closed-won" | "closed-lost";
+  value?: number;
+  currency?: string;
+  probability?: number;
+  expectedCloseDate?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Product types
+export interface Product {
+  id: string;
+  code?: string;
+  name: string;
+  category?: string;
+  unit?: string;
+  referencePrice?: number;
+  currency?: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Quote types
+export interface Quote {
+  id: string;
+  quoteNo?: string;
+  customerId: string;
+  customerName?: string;
+  opportunityId?: string;
+  productId: string;
+  productName?: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  currency: string;
+  discount: number;
+  freight: number;
+  taxRate: number;
+  subtotal: number;
+  taxAmount: number;
+  total: number;
+  validUntil?: string;
+  notes?: string;
+  status: "draft" | "sent" | "accepted" | "rejected" | "expired";
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Sample types
+export interface Sample {
+  id: string;
+  customerId: string;
+  customerName?: string;
+  opportunityId?: string;
+  productId: string;
+  productName?: string;
+  quantity: number;
+  unit: string;
+  status: "requested" | "preparing" | "shipped" | "received" | "approved" | "rejected";
+  requestedAt?: string;
+  shippedAt?: string;
+  trackingNo?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Email template types
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  images?: Array<{ id: string; dataUrl: string }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Email task types
+export interface EmailTask {
+  id: string;
+  name: string;
+  taskMode: "once" | "scheduled";
+  templateId: string;
+  templateName?: string;
+  customerIds: string[];
+  region?: string;
+  business?: string;
+  successfulSendCount?: number;
+  intervalMinutes?: number;
+  totalRuns?: number;
+  startAt?: string;
+  batchSize?: number;
+  smtpProvider?: string;
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUser?: string;
+  smtpFrom?: string;
+  smtpSecure?: boolean;
+  status: "pending" | "active" | "completed" | "cancelled" | "failed";
+  runsCompleted?: number;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SendLog {
+  id: string;
+  email: string;
+  customerId?: string;
+  customerName?: string;
+  templateId?: string;
+  templateName?: string;
+  taskId?: string;
+  taskName?: string;
+  status: "sent" | "failed" | "bounced";
+  message?: string;
+  createdAt: string;
+}
+
+// B2B Lead types
+export interface B2BAutomationProgress {
+  stage: string;
+  progress: number;
+  message?: string;
+  searchedQueries?: number;
+  totalQueries?: number;
+  leadsFound?: number;
+  leadsCleaned?: number;
+  leadsValidated?: number;
+  duplicateRemoved?: number;
+}
+
+export interface LeadAssociation {
+  productName: string;
+  canonicalName: string;
+  aliases: string[];
+  industries: string[];
+  companyTypes: string[];
+  source?: string;
+  warning?: string;
+}
+
+export interface B2BLeadTask {
+  id: string;
+  productName?: string;
+  region?: string;
+  industry?: string;
+  buyerType?: string;
+  targetCount?: number;
+  status: "draft" | "running" | "completed" | "cancelled" | "failed";
+  cleanedLeadCount?: number;
+  automationCursor?: number;
+  automationProgress?: B2BAutomationProgress;
+  searchQueries?: string[];
+  targetRegions?: string[];
+  buyerIndustries?: string[];
+  rawLeadCount?: number;
+  duplicateCount?: number;
+  importedCustomerCount?: number;
+  lastMessage?: string;
+  cancelRequested?: boolean;
+  productAliases?: string[];
+  buyerCompanyTypes?: string[];
+  automationStage?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface B2BLead {
+  id: string;
+  taskId: string;
+  company: string;
+  website?: string;
+  email?: string;
+  phone?: string;
+  contact?: string;
+  industry?: string;
+  business?: string;
+  region?: string;
+  largeRegion?: string;
+  country?: string;
+  buyerType?: string;
+  targetSegment?: string;
+  purchaseScore?: number;
+  leadScore?: number;
+  leadTier?: "high" | "medium" | "review" | "remove";
+  emailStatus?: "verified" | "invalid" | "unknown";
+  emailConfidence?: number;
+  regionStatus?: "confirmed" | "likely" | "unknown";
+  source?: string;
+  sourceType?: string;
+  sourceName?: string;
+  sourcePage?: string;
+  sourceHttpStatus?: number;
+  confidence?: number;
+  recommendedAction?: string;
+  crmCustomerId?: string;
+  cleaningNotes?: string;
+  emailSourceDomainMatch?: boolean;
+  matchedProductKeyword?: string;
+  status: string;
+  createdAt: string;
+}
+
+// Search profile types
+export interface SearchProfile {
+  id: string;
+  name: string;
+  provider: "brave-search" | "serper" | "serpapi" | "generic-json";
+  apiUrl: string;
+  apiKeySet?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiProfile {
+  provider?: "deepseek" | "openai-compatible";
+  baseUrl?: string;
+  model?: string;
+  enabled?: boolean;
+  credentialStatus?: "saved" | "reentry_required" | "not_set";
+}
+
+export interface SmtpProfile {
+  smtpProvider: "qq" | "163" | "126" | "gmail" | "outlook" | "custom";
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpFrom: string;
+  smtpSecure?: boolean;
+  credentialStatus?: "saved" | "reentry_required" | "not_set";
+}
+
+export interface ImapProfile {
+  imapEnabled?: boolean;
+  imapHost?: string;
+  imapPort?: number;
+  imapUser?: string;
+  imapMailbox?: string;
+  imapScanLimit?: number;
+  imapUseSmtpCredentials?: boolean;
+  imapSecure?: boolean;
+}
+
+// Dashboard types
+export interface DashboardData {
+  customerTotal: number;
+  newCustomers7d: number;
+  leadTotal: number;
+  highConfidenceLeads: number;
+  contactableLeads: number;
+  sentTotal: number;
+  failedTotal: number;
+  openTodoCount: number;
+  overdueTodoCount: number;
+  emailActivity?: {
+    days7: { total: number; sent: number; failed: number; rate: number };
+    days30: { total: number; sent: number; failed: number; rate: number };
+    byTemplate: Array<{ name: string; total: number; sent: number; rate: number }>;
+  };
+}
+
+// State types
+export interface AppState {
+  customers: Customer[];
+  customerTotal: number;
+  tags: string[];
+  templates: EmailTemplate[];
+  emailTasks: EmailTask[];
+  sendLogs: SendLog[];
+  products: Product[];
+  quotes: Quote[];
+  samples: Sample[];
+  crm: {
+    openTodos: Todo[];
+    opportunities: Opportunity[];
+  };
+  leadTasks: B2BLeadTask[];
+  dashboard?: DashboardData;
+  settings: {
+    searchProfiles?: SearchProfile[];
+    aiProfile?: AiProfile;
+    smtpProfile?: SmtpProfile;
+    imapProfile?: ImapProfile;
+  };
+}
+
+// Customer view types
+export interface CustomerView {
+  id: string;
+  name: string;
+  filters: Record<string, string>;
+  createdAt: string;
+}
+
+// Tag types
+export interface CustomerTag {
+  name: string;
+  count: number;
+}

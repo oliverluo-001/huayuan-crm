@@ -1,0 +1,505 @@
+import type {
+  AuthStatus,
+  LoginResult,
+  Customer,
+  CustomerListResult,
+  Customer360,
+  Contact,
+  Activity,
+  Todo,
+  Opportunity,
+  Product,
+  Quote,
+  Sample,
+  EmailTemplate,
+  EmailTask,
+  SendLog,
+  B2BLeadTask,
+  B2BLead,
+  B2BAutomationProgress,
+  LeadAssociation,
+  SearchProfile,
+  AiProfile,
+  SmtpProfile,
+  ImapProfile,
+  AppState,
+  CustomerView,
+  DashboardData,
+} from "@/types";
+
+export type {
+  AuthStatus,
+  LoginResult,
+  Customer,
+  CustomerListResult,
+  Customer360,
+  Contact,
+  Activity,
+  Todo,
+  Opportunity,
+  Product,
+  Quote,
+  Sample,
+  EmailTemplate,
+  EmailTask,
+  SendLog,
+  B2BLeadTask,
+  B2BLead,
+  B2BAutomationProgress,
+  LeadAssociation,
+  SearchProfile,
+  AiProfile,
+  SmtpProfile,
+  ImapProfile,
+  AppState,
+  CustomerView,
+  DashboardData,
+};
+
+interface ApiOptions {
+  method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+  body?: unknown;
+  silent?: boolean;
+  rawBody?: BodyInit;
+}
+
+let toastCallback: ((message: string) => void) | null = null;
+let unauthorizedCallback: (() => void) | null = null;
+let setupCallback: (() => void) | null = null;
+
+export function setToastCallback(callback: (message: string) => void) {
+  toastCallback = callback;
+}
+
+export function setUnauthorizedCallback(callback: () => void) {
+  unauthorizedCallback = callback;
+}
+
+export function setSetupCallback(callback: () => void) {
+  setupCallback = callback;
+}
+
+function toast(message: string) {
+  if (toastCallback) {
+    toastCallback(message);
+  }
+}
+
+async function api<T = unknown>(url: string, options: ApiOptions = {}): Promise<T> {
+  const fetchOptions: RequestInit = { method: options.method || "GET" };
+
+  if (options.rawBody) {
+    fetchOptions.body = options.rawBody;
+  } else if (options.body !== undefined) {
+    fetchOptions.headers = { "Content-Type": "application/json" };
+    fetchOptions.body = JSON.stringify(options.body);
+  }
+
+  const response = await fetch(url, { ...fetchOptions, credentials: "include" });
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    if (response.status === 401 && unauthorizedCallback) {
+      unauthorizedCallback();
+    }
+    if (response.status === 428 && setupCallback) {
+      setupCallback();
+    }
+    // Handle wrapped error responses: { statusCode, message, data }
+    const errorMsg = data?.data?.error || data?.message || data?.error || "请求失败";
+    if (!options.silent) {
+      toast(errorMsg);
+    }
+    throw new Error(errorMsg);
+  }
+
+  // Unwrap TransformInterceptor wrapper: { statusCode, message, data, timestamp }
+  if (data && typeof data === "object" && "statusCode" in data && "data" in data && "message" in data) {
+    return data.data as T;
+  }
+
+  return data as T;
+}
+
+// Auth API
+export async function getAuthStatus(): Promise<AuthStatus> {
+  const result = await api<{ hasUser?: boolean; userCount?: number; initialized?: boolean; authenticated?: boolean; username?: string }>("/api/auth/status", { silent: true });
+  // Backend may return { hasUser } (wrapped by TransformInterceptor -> { data: { hasUser } })
+  // or directly { initialized, authenticated, username }
+  return {
+    initialized: result.initialized ?? result.hasUser ?? false,
+    authenticated: result.authenticated ?? false,
+    username: result.username ?? "",
+  };
+}
+
+export async function setup(username: string, password: string): Promise<LoginResult> {
+  const result = await api<{ user?: { username?: string }; username?: string; ok?: boolean }>("/api/auth/setup", {
+    method: "POST",
+    body: { username, password },
+  });
+  return {
+    ok: result.ok ?? true,
+    username: result.username ?? result.user?.username ?? "",
+  };
+}
+
+export async function login(username: string, password: string): Promise<LoginResult> {
+  const result = await api<{ user?: { username?: string }; username?: string; ok?: boolean }>("/api/auth/login", {
+    method: "POST",
+    body: { username, password },
+  });
+  return {
+    ok: result.ok ?? true,
+    username: result.username ?? result.user?.username ?? "",
+  };
+}
+
+export async function logout(): Promise<void> {
+  await api("/api/auth/logout", { method: "POST" });
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await api("/api/auth/change-password", {
+    method: "POST",
+    body: { oldPassword: currentPassword, newPassword },
+  });
+}
+
+// State API
+export async function getState(): Promise<AppState> {
+  return api<AppState>("/api/state");
+}
+
+// Customers API
+export async function getCustomers(
+  offset: number,
+  limit: number,
+  filters: Record<string, string>
+): Promise<CustomerListResult> {
+  const query = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    ...filters,
+  }).toString();
+  return api<CustomerListResult>(`/api/customers?${query}`);
+}
+
+export async function getCustomer360(id: string): Promise<Customer360> {
+  return api<Customer360>(`/api/customers/${encodeURIComponent(id)}/360`);
+}
+
+export async function createCustomer(data: Partial<Customer>): Promise<Customer> {
+  return api<Customer>("/api/customers", { method: "POST", body: data });
+}
+
+export async function updateCustomer(id: string, data: Partial<Customer>): Promise<Customer> {
+  return api<Customer>(`/api/customers/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function deleteCustomer(id: string): Promise<void> {
+  await api(`/api/customers/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function bulkDeleteCustomers(ids: string[]): Promise<void> {
+  await api("/api/customers/bulk-delete", { method: "POST", body: { ids } });
+}
+
+export async function bulkUpdateCustomerTags(ids: string[], tag: string, action: "add" | "remove"): Promise<void> {
+  await api("/api/customers/bulk-tags", { method: "POST", body: { ids, tag, action } });
+}
+
+export async function bulkUpdateCustomerTier(ids: string[], tier: string): Promise<void> {
+  await api("/api/customers/bulk-tier", { method: "POST", body: { ids, tier } });
+}
+
+// Customer Tags API
+export async function createCustomerTag(name: string): Promise<void> {
+  await api("/api/customer-tags", { method: "POST", body: { name } });
+}
+
+export async function deleteCustomerTag(name: string): Promise<void> {
+  await api(`/api/customer-tags/${encodeURIComponent(name)}`, { method: "DELETE" });
+}
+
+// Customer Views API
+export async function getCustomerViews(): Promise<CustomerView[]> {
+  const result = await api<{ views: CustomerView[] }>("/api/customer-views");
+  return result.views || [];
+}
+
+export async function createCustomerView(name: string, filters: Record<string, string>): Promise<CustomerView> {
+  return api<CustomerView>("/api/customer-views", { method: "POST", body: { name, filters } });
+}
+
+export async function deleteCustomerView(id: string): Promise<void> {
+  await api(`/api/customer-views/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Contacts API
+export async function getCustomerContacts(customerId: string): Promise<Contact[]> {
+  const result = await api<{ contacts: Contact[] }>(`/api/customers/${encodeURIComponent(customerId)}/contacts`);
+  return result.contacts || [];
+}
+
+export async function createCustomerContact(customerId: string, data: Partial<Contact>): Promise<Contact> {
+  return api<Contact>(`/api/customers/${encodeURIComponent(customerId)}/contacts`, { method: "POST", body: data });
+}
+
+export async function updateContact(id: string, data: Partial<Contact>): Promise<Contact> {
+  return api<Contact>(`/api/contacts/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function deleteContact(id: string): Promise<void> {
+  await api(`/api/contacts/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Activities API
+export async function getCustomerActivities(customerId: string): Promise<Activity[]> {
+  const result = await api<{ activities: Activity[] }>(`/api/customers/${encodeURIComponent(customerId)}/activities`);
+  return result.activities || [];
+}
+
+export async function createCustomerActivity(customerId: string, data: Partial<Activity>): Promise<Activity> {
+  return api<Activity>(`/api/customers/${encodeURIComponent(customerId)}/activities`, { method: "POST", body: data });
+}
+
+// Todos API
+export async function getCustomerTodos(customerId: string): Promise<Todo[]> {
+  const result = await api<{ todos: Todo[] }>(`/api/customers/${encodeURIComponent(customerId)}/todos`);
+  return result.todos || [];
+}
+
+export async function createCustomerTodo(customerId: string, data: Partial<Todo>): Promise<Todo> {
+  return api<Todo>(`/api/customers/${encodeURIComponent(customerId)}/todos`, { method: "POST", body: data });
+}
+
+export async function updateTodo(id: string, data: Partial<Todo>): Promise<Todo> {
+  return api<Todo>(`/api/todos/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function deleteTodo(id: string): Promise<void> {
+  await api(`/api/todos/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Opportunities API
+export async function getOpportunities(): Promise<Opportunity[]> {
+  const result = await api<{ opportunities: Opportunity[] }>("/api/opportunities");
+  return result.opportunities || [];
+}
+
+export async function createCustomerOpportunity(customerId: string, data: Partial<Opportunity>): Promise<Opportunity> {
+  return api<Opportunity>(`/api/customers/${encodeURIComponent(customerId)}/opportunities`, { method: "POST", body: data });
+}
+
+export async function updateOpportunity(id: string, data: Partial<Opportunity>): Promise<Opportunity> {
+  return api<Opportunity>(`/api/opportunities/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function deleteOpportunity(id: string): Promise<void> {
+  await api(`/api/opportunities/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Products API
+export async function getProducts(): Promise<Product[]> {
+  const result = await api<{ products: Product[] }>("/api/products");
+  return result.products || [];
+}
+
+export async function createProduct(data: Partial<Product>): Promise<Product> {
+  return api<Product>("/api/products", { method: "POST", body: data });
+}
+
+export async function updateProduct(id: string, data: Partial<Product>): Promise<Product> {
+  return api<Product>(`/api/products/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function deleteProduct(id: string): Promise<void> {
+  await api(`/api/products/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Quotes API
+export async function getQuotes(): Promise<Quote[]> {
+  const result = await api<{ quotes: Quote[] }>("/api/quotes");
+  return result.quotes || [];
+}
+
+export async function createQuote(data: Partial<Quote>): Promise<Quote> {
+  return api<Quote>("/api/quotes", { method: "POST", body: data });
+}
+
+export async function updateQuote(id: string, data: Partial<Quote>): Promise<Quote> {
+  return api<Quote>(`/api/quotes/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function deleteQuote(id: string): Promise<void> {
+  await api(`/api/quotes/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Samples API
+export async function getSamples(): Promise<Sample[]> {
+  const result = await api<{ samples: Sample[] }>("/api/samples");
+  return result.samples || [];
+}
+
+export async function createSample(data: Partial<Sample>): Promise<Sample> {
+  return api<Sample>("/api/samples", { method: "POST", body: data });
+}
+
+export async function updateSample(id: string, data: Partial<Sample>): Promise<Sample> {
+  return api<Sample>(`/api/samples/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function deleteSample(id: string): Promise<void> {
+  await api(`/api/samples/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Email Templates API
+export async function getTemplates(): Promise<EmailTemplate[]> {
+  const result = await api<{ templates: EmailTemplate[] }>("/api/templates");
+  return result.templates || [];
+}
+
+export async function createTemplate(data: Partial<EmailTemplate>): Promise<EmailTemplate> {
+  return api<EmailTemplate>("/api/templates", { method: "POST", body: data });
+}
+
+export async function updateTemplate(id: string, data: Partial<EmailTemplate>): Promise<EmailTemplate> {
+  return api<EmailTemplate>(`/api/templates/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  await api(`/api/templates/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Email Tasks API
+export async function getEmailTasks(): Promise<EmailTask[]> {
+  const result = await api<{ tasks: EmailTask[] }>("/api/email-tasks");
+  return result.tasks || [];
+}
+
+export async function createEmailTask(data: Partial<EmailTask>): Promise<EmailTask> {
+  return api<EmailTask>("/api/email-tasks", { method: "POST", body: data });
+}
+
+export async function runEmailTask(id: string): Promise<void> {
+  await api(`/api/email-tasks/${encodeURIComponent(id)}/run`, { method: "POST" });
+}
+
+export async function cancelEmailTask(id: string): Promise<void> {
+  await api(`/api/email-tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+}
+
+export async function deleteEmailTask(id: string): Promise<void> {
+  await api(`/api/email-tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Send Logs API
+export async function deleteSendLog(id: string): Promise<void> {
+  await api(`/api/send-logs/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// B2B Lead Tasks API
+export async function getB2BLeadTasks(): Promise<B2BLeadTask[]> {
+  const result = await api<{ tasks: B2BLeadTask[] }>("/api/lead-tasks");
+  return result.tasks || [];
+}
+
+export async function createB2BLeadTask(data: Partial<B2BLeadTask>): Promise<{ task: B2BLeadTask; queries?: string[] }> {
+  return api("/api/lead-tasks", { method: "POST", body: data });
+}
+
+export async function getB2BLeads(taskId: string, filters?: Record<string, string>): Promise<{ leads: B2BLead[]; summary: Record<string, unknown> }> {
+  const query = filters ? `?${new URLSearchParams(filters).toString()}` : "";
+  return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/leads${query}`);
+}
+
+export async function runB2BLeadTask(id: string): Promise<void> {
+  await api(`/api/lead-tasks/${encodeURIComponent(id)}/run`, { method: "POST" });
+}
+
+export async function cancelB2BLeadTask(id: string): Promise<void> {
+  await api(`/api/lead-tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+}
+
+export async function deleteB2BLeadTask(id: string): Promise<void> {
+  await api(`/api/lead-tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function importB2BLeads(taskId: string, leads: Partial<B2BLead>[]): Promise<{ imported: number }> {
+  return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/import-leads`, { method: "POST", body: { leads } });
+}
+
+export async function cleanB2BLeads(taskId: string): Promise<{ summary: Record<string, unknown> }> {
+  return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/clean`, { method: "POST" });
+}
+
+export async function getLeadAssociation(productName: string): Promise<LeadAssociation> {
+  return api<LeadAssociation>("/api/lead-associations", { method: "POST", body: { productName } });
+}
+
+export async function saveLeadQueries(taskId: string, regenerate?: boolean, queries?: string[]): Promise<{ task: B2BLeadTask }> {
+  return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/generate-queries`, {
+    method: "POST",
+    body: { regenerate, queries },
+  });
+}
+
+export async function importB2BLeadsToCustomers(
+  taskId: string,
+  data: { ids?: string[]; importAll?: boolean }
+): Promise<{ imported: number; merged: number }> {
+  return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/import-customers`, {
+    method: "POST",
+    body: data,
+  });
+}
+
+// Search Profiles API
+export async function createSearchProfile(data: Partial<SearchProfile>): Promise<SearchProfile> {
+  return api<SearchProfile>("/api/settings/search-profiles", { method: "POST", body: data });
+}
+
+export async function testSearchProfile(id: string): Promise<{ ok: boolean; message?: string }> {
+  return api(`/api/settings/search-profiles/${encodeURIComponent(id)}/test`, { method: "POST" });
+}
+
+export async function deleteSearchProfile(id: string): Promise<void> {
+  await api(`/api/settings/search-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// AI Profile API
+export async function saveAiProfile(data: Partial<AiProfile>): Promise<void> {
+  await api("/api/settings/ai-profile", { method: "POST", body: data });
+}
+
+export async function testAiProfile(): Promise<{ ok: boolean; message?: string }> {
+  return api("/api/settings/ai-profile/test", { method: "POST" });
+}
+
+// SMTP Profile API
+export async function saveSmtpProfile(data: Partial<SmtpProfile>): Promise<void> {
+  await api("/api/settings/smtp-profile", { method: "POST", body: data });
+}
+
+// IMAP Profile API
+export async function saveImapProfile(data: Partial<ImapProfile>): Promise<void> {
+  await api("/api/settings/imap-profile", { method: "POST", body: data });
+}
+
+export async function checkMailboxBounces(): Promise<void> {
+  await api("/api/email-bounces/check", { method: "POST" });
+}
+
+// Import API
+export async function importCustomers(file: File): Promise<{ total: number; created: number; updated: number }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return api("/api/import", { method: "POST", rawBody: formData });
+}
+
+export async function previewImport(file: File): Promise<{ duplicateCount: number; duplicateUploadCount: number }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return api("/api/import/preview", { method: "POST", rawBody: formData });
+}

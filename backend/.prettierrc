@@ -1,0 +1,6 @@
+{
+  "envDir": "backend",
+  "schema": "<rootDir>/.env.example",
+  "ignoreEnvFile": false,
+  "ignoreEnvVars": false
+}

@@ -1,0 +1,183 @@
+import { Controller, Get } from '@nestjs/common';
+import { CustomersService } from '../customers/customers.service';
+import { EmailService } from '../email/email.service';
+import { ProductsService } from '../products/products.service';
+import { LeadsService } from '../leads/leads.service';
+import { SettingsService } from '../settings/settings.service';
+
+@Controller('state')
+export class StateController {
+  constructor(
+    private readonly customersService: CustomersService,
+    private readonly emailService: EmailService,
+    private readonly productsService: ProductsService,
+    private readonly leadsService: LeadsService,
+    private readonly settingsService: SettingsService,
+  ) {}
+
+  @Get()
+  async getState() {
+    const [
+      customerResult,
+      tags,
+      templates,
+      tasks,
+      sendLogs,
+      products,
+      quotes,
+      samples,
+      crmTodos,
+      crmOpportunities,
+      leadTasks,
+      searchProfiles,
+      aiProfile,
+      smtpProfile,
+      imapProfile,
+    ] = await Promise.all([
+      this.customersService.findAll({}),
+      this.customersService.getAllTags(),
+      this.emailService.findAllTemplates(),
+      this.emailService.findAllTasks({}),
+      this.emailService.findAllLogs({}),
+      this.productsService.findAll({}),
+      this.customersService.findQuotes({}),
+      this.customersService.findSamples({}),
+      this.customersService.findTodos({ status: 'open' }),
+      this.customersService.findOpportunities({}),
+      this.leadsService.findTasks({}),
+      this.settingsService.getSearchProfiles(),
+      this.settingsService.getAiProfile(),
+      this.settingsService.getSmtpProfile(),
+      this.settingsService.getImapProfile(),
+    ]);
+
+    const customers = (customerResult as any).customers || customerResult;
+    const customerTotal = (customerResult as any).total || (Array.isArray(customers) ? customers.length : 0);
+
+    // Format entities to frontend types
+    const formattedCustomers = (Array.isArray(customers) ? customers : []).map((c: any) => ({
+      ...c,
+      id: c.customerId || String(c.id),
+      customerName: c.company,
+    }));
+
+    const formattedOpportunities = crmOpportunities.map((o: any) => ({
+      id: o.opportunityId || String(o.id),
+      customerId: String(o.customerId),
+      customerName: o.customerName || '',
+      title: o.name || o.title,
+      stage: o.stage,
+      value: o.amount ? Number(o.amount) : o.value,
+      currency: o.currency || 'USD',
+      probability: o.probability,
+      expectedCloseDate: o.expectedCloseDate,
+      notes: o.description || o.notes,
+      createdAt: o.createdAt,
+      updatedAt: o.updatedAt,
+    }));
+
+    const formattedTodos = crmTodos.map((t: any) => ({
+      ...t,
+      id: t.todoId || String(t.id),
+      customerId: String(t.customerId),
+    }));
+
+    const formattedProducts = products.map((p: any) => ({
+      id: p.productId || String(p.id),
+      name: p.name,
+      code: p.code || p.productCode,
+      category: p.category,
+      unit: p.unit,
+      referencePrice: p.referencePrice || p.price,
+      currency: p.currency,
+      description: p.description,
+      createdAt: p.createdAt,
+      updatedAt: p.updatedAt,
+    }));
+
+    const formattedQuotes = quotes.map((q: any) => ({
+      id: q.quoteId || String(q.id),
+      quoteNo: q.quoteNo,
+      customerId: String(q.customerId),
+      customerName: q.customerName || '',
+      status: q.status,
+      total: q.total || q.amount,
+      currency: q.currency,
+      validUntil: q.validUntil,
+      notes: q.notes,
+      createdAt: q.createdAt,
+      updatedAt: q.updatedAt,
+    }));
+
+    const formattedSamples = samples.map((s: any) => ({
+      id: s.sampleId || String(s.id),
+      customerId: String(s.customerId),
+      customerName: s.customerName || '',
+      productName: s.productName,
+      quantity: s.quantity,
+      unit: s.unit,
+      status: s.status,
+      trackingNo: s.trackingNo,
+      notes: s.notes,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    }));
+
+    const formattedTemplates = templates.map((t: any) => ({
+      id: t.templateId || String(t.id),
+      name: t.name,
+      subject: t.subject,
+      body: t.body,
+      images: t.images || [],
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+    }));
+
+    // Compute dashboard data
+    const sentLogs = sendLogs.filter((l: any) => l.status === 'sent');
+    const failedLogs = sendLogs.filter((l: any) => l.status === 'failed');
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const newCustomers7d = (Array.isArray(customers) ? customers : []).filter(
+      (c: any) => new Date(c.createdAt) >= sevenDaysAgo,
+    ).length;
+
+    const allLeads = leadTasks.reduce((sum: number, t: any) => sum + (t.rawLeadCount || t.leadCount || 0), 0);
+    const highConfidenceLeads = leadTasks.reduce((sum: number, t: any) => sum + (t.cleanedLeadCount || 0), 0);
+
+    return {
+      customers: formattedCustomers,
+      customerTotal,
+      tags,
+      templates: formattedTemplates,
+      emailTasks: tasks,
+      sendLogs,
+      products: formattedProducts,
+      quotes: formattedQuotes,
+      samples: formattedSamples,
+      crm: {
+        openTodos: formattedTodos,
+        opportunities: formattedOpportunities,
+      },
+      leadTasks,
+      dashboard: {
+        customerTotal,
+        newCustomers7d,
+        leadTotal: allLeads,
+        highConfidenceLeads,
+        contactableLeads: highConfidenceLeads,
+        sentTotal: sentLogs.length,
+        failedTotal: failedLogs.length,
+        openTodoCount: formattedTodos.length,
+        overdueTodoCount: formattedTodos.filter(
+          (t: any) => t.dueAt && new Date(t.dueAt) < new Date(),
+        ).length,
+      },
+      settings: {
+        searchProfiles,
+        aiProfile,
+        smtpProfile,
+        imapProfile,
+      },
+    };
+  }
+}
