@@ -9,6 +9,7 @@ import {
   AiProfileDto,
   SmtpProfileDto,
   ImapProfileDto,
+  EmailPolicyDto,
 } from './dto';
 
 @Injectable()
@@ -156,5 +157,25 @@ export class SettingsService {
       ...profile,
       pass: '******',
     };
+  }
+
+  // ==================== Email Policy ====================
+
+  async getEmailPolicy() {
+    const policy = await this.findOne('email_policy');
+    return policy || {
+      maxPerHour: 40,
+      maxPerDay: 200,
+      minDelaySeconds: 20,
+      workdayStart: 8,
+      workdayEnd: 18,
+      enforceTimezone: true,
+      allowWeekends: false,
+    };
+  }
+
+  async saveEmailPolicy(policy: EmailPolicyDto) {
+    await this.upsert('email_policy', policy);
+    return policy;
   }
 }

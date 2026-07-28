@@ -8,10 +8,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Edit, Download } from "lucide-react";
 import {
   getQuotes,
   createQuote,
+  updateQuote,
   deleteQuote,
   getCustomers,
   getProducts,
@@ -28,6 +29,7 @@ export function QuotesPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     customerId: "",
     opportunityId: "",
@@ -67,7 +69,7 @@ export function QuotesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await createQuote({
+    const data = {
       customerId: form.customerId,
       opportunityId: form.opportunityId || undefined,
       quoteNo: form.quoteNo || undefined,
@@ -80,7 +82,13 @@ export function QuotesPage() {
       taxRate: parseFloat(form.taxRate),
       validUntil: form.validUntil || undefined,
       notes: form.notes || undefined,
-    });
+    };
+    if (editingId) {
+      await updateQuote(editingId, data);
+    } else {
+      await createQuote(data);
+    }
+    setEditingId(null);
     setForm({
       customerId: "",
       opportunityId: "",
@@ -96,6 +104,24 @@ export function QuotesPage() {
       notes: "",
     });
     fetchData();
+  };
+
+  const handleEdit = (quote: Quote) => {
+    setForm({
+      customerId: quote.customerId || "",
+      opportunityId: "",
+      quoteNo: quote.quoteNo || "",
+      productId: "",
+      quantity: String(quote.quantity || 1),
+      unitPrice: String(quote.total || ""),
+      currency: quote.currency || "USD",
+      discount: "0",
+      freight: "0",
+      taxRate: "13",
+      validUntil: quote.validUntil ? quote.validUntil.split("T")[0] : "",
+      notes: quote.notes || "",
+    });
+    setEditingId(quote.id);
   };
 
   const handleDelete = async (id: string) => {
@@ -116,7 +142,7 @@ export function QuotesPage() {
       {/* Form */}
       <Card>
         <CardHeader>
-          <CardTitle>创建报价</CardTitle>
+          <CardTitle>{editingId ? "编辑报价" : "创建报价"}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -260,10 +286,17 @@ export function QuotesPage() {
                 />
               </div>
             </div>
-            <Button type="submit">
-              <Plus className="mr-2 h-4 w-4" />
-              创建报价
-            </Button>
+            <div className="flex gap-2">
+              <Button type="submit">
+                <Plus className="mr-2 h-4 w-4" />
+                {editingId ? "更新报价" : "创建报价"}
+              </Button>
+              {editingId && (
+                <Button type="button" variant="outline" onClick={() => { setEditingId(null); setForm({ customerId: "", opportunityId: "", quoteNo: "", productId: "", quantity: "1", unitPrice: "", currency: "USD", discount: "0", freight: "0", taxRate: "13", validUntil: "", notes: "" }); }}>
+                  取消编辑
+                </Button>
+              )}
+            </div>
           </form>
         </CardContent>
       </Card>
@@ -319,14 +352,24 @@ export function QuotesPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => handleDelete(quote.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => handleEdit(quote)}>
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="sm" asChild>
+                        <a href={`/api/quotes/${quote.id}/export`} target="_blank" rel="noopener noreferrer">
+                          <Download className="h-4 w-4" />
+                        </a>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => handleDelete(quote.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

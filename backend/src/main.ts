@@ -24,7 +24,7 @@ async function bootstrap() {
   });
 
   // Global prefix
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('api', { exclude: ['unsubscribe'] });
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

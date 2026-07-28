@@ -105,6 +105,15 @@ export class CustomersService {
     if (queryFilters.emailStatus) {
       where.emailStatus = queryFilters.emailStatus as any;
     }
+    if (queryFilters.ownerId) {
+      where.ownerId = queryFilters.ownerId;
+    }
+    if (queryFilters.health) {
+      where.health = queryFilters.health as any;
+    }
+    if (queryFilters.tag) {
+      return this.findByTag(queryFilters.tag, skip, take);
+    }
 
     if (take > 0) {
       const [customers, total] = await this.customerRepository.findAndCount({
@@ -183,10 +192,49 @@ export class CustomersService {
   }
 
   async remove(id: number) {
-    const result = await this.customerRepository.delete(id);
-    if (result.affected === 0) {
-      throw new NotFoundException('客户不存在');
-    }
+    const customer = await this.customerRepository.findOne({ where: { id } });
+    if (!customer) throw new NotFoundException('客户不存在');
+    // Soft delete
+    await this.customerRepository.softDelete(id);
+    return { deleted: true };
+  }
+
+  // ==================== Trash / Recycle Bin ====================
+
+  async findTrash() {
+    const customers = await this.customerRepository.find({
+      withDeleted: true,
+      where: { deletedAt: Not(IsNull()) } as any,
+      order: { deletedAt: 'DESC' },
+    });
+    return customers.map((c) => ({
+      id: c.customerId || String(c.id),
+      name: c.company,
+      company: c.company,
+      email: c.email,
+      type: '客户',
+      deletedAt: c.deletedAt,
+    }));
+  }
+
+  async restore(id: number) {
+    const customer = await this.customerRepository.findOne({
+      withDeleted: true,
+      where: { id },
+    });
+    if (!customer) throw new NotFoundException('客户不存在');
+    if (!customer.deletedAt) throw new BadRequestException('该客户不在回收站中');
+    await this.customerRepository.restore(id);
+    return { restored: true };
+  }
+
+  async deletePermanent(id: number) {
+    const customer = await this.customerRepository.findOne({
+      withDeleted: true,
+      where: { id },
+    });
+    if (!customer) throw new NotFoundException('客户不存在');
+    await this.customerRepository.remove(customer);
     return { deleted: true };
   }
 
@@ -210,11 +258,24 @@ export class CustomersService {
     return this.customerRepository.save(customer);
   }
 
+  private async findByTag(tagName: string, skip: number, take: number) {
+    const qb = this.customerRepository
+      .createQueryBuilder('customer')
+      .leftJoinAndSelect('customer.tags', 'tag')
+      .where('tag.name = :tagName', { tagName })
+      .orderBy('customer.createdAt', 'DESC');
+
+    if (take > 0) qb.skip(skip).take(take);
+    const [customers, total] = await qb.getManyAndCount();
+    return { customers, total };
+  }
+
   async bulkDelete(bulkDeleteDto: BulkDeleteDto) {
-    const result = await this.customerRepository.delete({
-      id: In(bulkDeleteDto.ids),
-    });
-    return { deleted: result.affected || 0 };
+    const ids = bulkDeleteDto.ids;
+    for (const id of ids) {
+      await this.customerRepository.softDelete(id);
+    }
+    return { deleted: ids.length };
   }
 
   async bulkTags(bulkTagsDto: BulkTagsDto) {

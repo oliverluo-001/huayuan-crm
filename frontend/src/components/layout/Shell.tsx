@@ -1,20 +1,26 @@
 import { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "next-themes";
-import { LayoutDashboard, Users, Target, FileText, Package, Mail, Database, Settings, LogOut, RefreshCw, Sun, Moon } from "lucide-react";
+import { LayoutDashboard, Users, Target, FileText, Package, Mail, Settings, LogOut, Sun, Moon, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
-const navItems = [
+const mainNavItems = [
   { id: "", label: "仪表盘", icon: LayoutDashboard },
   { id: "acquisition", label: "获客线索", icon: Target },
   { id: "customers", label: "客户管理", icon: Users },
+];
+
+const salesNavItems = [
   { id: "opportunities", label: "商机", icon: FileText },
   { id: "quotes", label: "报价", icon: FileText },
   { id: "samples", label: "样品", icon: Package },
   { id: "products", label: "产品", icon: Package },
+];
+
+const bottomNavItems = [
   { id: "marketing", label: "邮件营销", icon: Mail },
   { id: "settings", label: "设置", icon: Settings },
 ];
@@ -32,14 +38,33 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
 };
 
 export function Shell() {
-  const { username, logout } = useAuth();
+  const { username, displayName, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
-
   const activePage = location.pathname;
-  const pageInfo = pageTitles[activePage] || { title: "外贸 CRM", subtitle: "" };
+  const isSalesActive = salesNavItems.some((item) => activePage.startsWith("/" + item.id));
+  const [salesOpen, setSalesOpen] = useState(isSalesActive);
+  const basePath = "/" + activePage.split("/")[1];
+  const pageInfo = pageTitles[basePath] || pageTitles[activePage] || { title: "外贸 CRM", subtitle: "" };
+
+  const NavButton = ({ id, label, icon: Icon }: { id: string; label: string; icon: any }) => {
+    const isActive = id === "" ? activePage === "/" : activePage.startsWith("/" + id);
+    return (
+    <Button
+      variant={isActive ? "secondary" : "ghost"}
+      className={cn(
+        "w-full justify-start gap-3",
+        isCollapsed && "justify-center px-2"
+      )}
+      onClick={() => navigate("/" + id)}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {!isCollapsed && <span>{label}</span>}
+    </Button>
+    );
+  };
 
   return (
     <div className="flex h-screen bg-background">
@@ -62,19 +87,35 @@ export function Shell() {
         </div>
 
         <nav className="flex-1 space-y-1 p-2">
-          {navItems.map((item) => (
-            <Button
-              key={item.id + item.label}
-              variant={activePage === "/" + item.id ? "secondary" : "ghost"}
-              className={cn(
-                "w-full justify-start gap-3",
-                isCollapsed && "justify-center px-2"
+          {mainNavItems.map((item) => (
+            <NavButton key={item.id} {...item} />
+          ))}
+
+          {/* Sales submenu group */}
+          {isCollapsed ? (
+            salesNavItems.map((item) => <NavButton key={item.id} {...item} />)
+          ) : (
+            <div>
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 text-muted-foreground text-xs font-medium"
+                onClick={() => setSalesOpen(!salesOpen)}
+              >
+                <span className="flex-1 text-left">销售</span>
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", salesOpen && "rotate-180")} />
+              </Button>
+              {salesOpen && (
+                <div className="ml-2 space-y-0.5 border-l pl-2">
+                  {salesNavItems.map((item) => (
+                    <NavButton key={item.id} {...item} />
+                  ))}
+                </div>
               )}
-              onClick={() => navigate("/" + item.id)}
-            >
-              <item.icon className="h-4 w-4" />
-              {!isCollapsed && <span>{item.label}</span>}
-            </Button>
+            </div>
+          )}
+
+          {bottomNavItems.map((item) => (
+            <NavButton key={item.id} {...item} />
           ))}
         </nav>
 
@@ -82,13 +123,13 @@ export function Shell() {
           <div className="flex items-center gap-3">
             <Avatar className="h-9 w-9">
               <AvatarFallback className="bg-primary text-primary-foreground">
-                {username?.charAt(0).toUpperCase() || "A"}
+                {(displayName || username)?.charAt(0).toUpperCase() || "A"}
               </AvatarFallback>
             </Avatar>
             {!isCollapsed && (
-              <div className="flex flex-col">
-                <span className="text-sm font-medium">{username}</span>
-                <span className="text-xs text-muted-foreground">本机管理员</span>
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-medium truncate">{displayName || username}</span>
+                <span className="text-xs text-muted-foreground">{username !== displayName && displayName ? username : ""}</span>
               </div>
             )}
           </div>

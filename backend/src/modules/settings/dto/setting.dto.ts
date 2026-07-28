@@ -173,3 +173,34 @@ export class ImapProfileDto {
   @IsString()
   user?: string;
 }
+
+// Email Policy — matches frontend EmailPolicy type
+export class EmailPolicyDto {
+  @IsOptional()
+  @IsNumber()
+  maxPerHour?: number;
+
+  @IsOptional()
+  @IsNumber()
+  maxPerDay?: number;
+
+  @IsOptional()
+  @IsNumber()
+  minDelaySeconds?: number;
+
+  @IsOptional()
+  @IsNumber()
+  workdayStart?: number;
+
+  @IsOptional()
+  @IsNumber()
+  workdayEnd?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  enforceTimezone?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  allowWeekends?: boolean;
+}

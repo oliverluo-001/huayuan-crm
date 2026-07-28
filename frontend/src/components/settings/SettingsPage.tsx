@@ -4,8 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Save, KeyRound, Plus, Trash2, TestTube, RefreshCw, Loader2 } from "lucide-react";
+import { Save, KeyRound, Plus, Trash2, TestTube, RefreshCw, Loader2, Download, Database, Users, Ban, Shield, Clock, Edit } from "lucide-react";
 import { toast } from "sonner";
 import {
   getState,
@@ -17,8 +18,30 @@ import {
   createSearchProfile,
   testSearchProfile,
   deleteSearchProfile,
+  getUsers,
+  createUser,
+  updateUser,
+  resetUserPassword,
+  getBackupData,
+  createBackup,
+  saveBackupSettings,
+  getEmailPolicy,
+  saveEmailPolicy,
+  getSuppressions,
+  addSuppression,
+  deleteSuppression,
+  getAuditLogs,
+  getTrashItems,
+  restoreTrashItem,
+  deleteTrashItem,
   type SearchProfile,
   type AiProfile,
+  type User,
+  type EmailPolicy,
+  type SuppressionEntry,
+  type BackupSettings,
+  type Backup,
+  type AuditEntry,
 } from "@/api/client";
 
 export function SettingsPage() {
@@ -31,6 +54,8 @@ export function SettingsPage() {
     smtpSecure: boolean;
     smtpUser: string;
     smtpFrom: string;
+    smtpPass: string;
+    credentialStatus?: "saved" | "reentry_required" | "not_set";
   }>({
     smtpProvider: "custom",
     smtpHost: "",
@@ -38,6 +63,7 @@ export function SettingsPage() {
     smtpSecure: true,
     smtpUser: "",
     smtpFrom: "",
+    smtpPass: "",
   });
 
   const [imapForm, setImapForm] = useState({
@@ -76,6 +102,33 @@ export function SettingsPage() {
   const [aiTesting, setAiTesting] = useState(false);
   const [searchTestingId, setSearchTestingId] = useState<string | null>(null);
 
+  // Email policy
+  const [emailPolicy, setEmailPolicy] = useState<EmailPolicy>({
+    maxPerHour: 40, maxPerDay: 200, minDelaySeconds: 20,
+    workdayStart: 8, workdayEnd: 18, enforceTimezone: true, allowWeekends: false,
+  });
+
+  // Suppression list
+  const [suppressions, setSuppressions] = useState<SuppressionEntry[]>([]);
+  const [suppressionForm, setSuppressionForm] = useState({ email: "", reason: "" });
+
+  // Backup
+  const [backupSettings, setBackupSettings] = useState<BackupSettings>({ enabled: true, intervalHours: 24, retentionDays: 30 });
+  const [backups, setBackups] = useState<Backup[]>([]);
+  const [creatingBackup, setCreatingBackup] = useState(false);
+
+  // Team users
+  const [users, setUsers] = useState<User[]>([]);
+  const [userForm, setUserForm] = useState({ username: "", displayName: "", email: "", role: "sales", password: "" });
+  const [resetPasswordFor, setResetPasswordFor] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState("");
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [userEditForm, setUserEditForm] = useState({ displayName: "", email: "", role: "sales" });
+
+  // Audit & Trash
+  const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
+  const [trashItems, setTrashItems] = useState<any[]>([]);
+
   const [accountInfo, setAccountInfo] = useState<{
     username: string;
     createdAt: string;
@@ -93,6 +146,8 @@ export function SettingsPage() {
           smtpSecure: state.settings.smtpProfile.smtpSecure ?? true,
           smtpUser: state.settings.smtpProfile.smtpUser || "",
           smtpFrom: state.settings.smtpProfile.smtpFrom || "",
+          smtpPass: "",
+          credentialStatus: state.settings.smtpProfile.credentialStatus || "not_set",
         });
       }
       if (state.settings?.imapProfile) {
@@ -138,9 +193,6 @@ export function SettingsPage() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
 
   const handleSaveSmtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,6 +204,7 @@ export function SettingsPage() {
         smtpSecure: smtpForm.smtpSecure,
         smtpUser: smtpForm.smtpUser,
         smtpFrom: smtpForm.smtpFrom,
+        pass: smtpForm.smtpPass || undefined,
       });
       toast.success("SMTP 配置已保存");
       fetchData();
@@ -296,6 +349,92 @@ export function SettingsPage() {
     });
   };
 
+  // Email policy handlers
+  const fetchEmailPolicy = useCallback(async () => {
+    try { const data = await getEmailPolicy(); if (data) setEmailPolicy(data); } catch {}
+  }, []);
+  const handleSaveEmailPolicy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try { await saveEmailPolicy(emailPolicy); toast.success("发送策略已保存"); } catch {}
+  };
+
+  // Suppression handlers
+  const fetchSuppressions = useCallback(async () => {
+    try { setSuppressions(await getSuppressions()); } catch {}
+  }, []);
+  const handleAddSuppression = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await addSuppression(suppressionForm);
+      setSuppressionForm({ email: "", reason: "" });
+      toast.success("已加入禁止名单");
+      fetchSuppressions();
+    } catch {}
+  };
+  const handleDeleteSuppression = async (id: string) => {
+    if (!confirm("确认从名单中移除此邮箱？")) return;
+    try { await deleteSuppression(id); fetchSuppressions(); } catch {}
+  };
+
+  // Backup handlers
+  const fetchBackups = useCallback(async () => {
+    try {
+      const data = await getBackupData();
+      setBackupSettings(data.settings);
+      setBackups(data.backups);
+    } catch {}
+  }, []);
+  const handleSaveBackupSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try { await saveBackupSettings(backupSettings); toast.success("备份策略已保存"); } catch {}
+  };
+  const handleCreateBackup = async () => {
+    setCreatingBackup(true);
+    try { await createBackup(); toast.success("备份已创建"); fetchBackups(); } finally { setCreatingBackup(false); }
+  };
+
+  // Team user handlers
+  const fetchUsers = useCallback(async () => {
+    try { setUsers(await getUsers()); } catch {}
+  }, []);
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await createUser(userForm);
+      setUserForm({ username: "", displayName: "", email: "", role: "sales", password: "" });
+      toast.success("团队账号已创建");
+      fetchUsers();
+    } catch {}
+  };
+  const handleResetPassword = async (userId: string) => {
+    if (!resetPasswordValue || !confirm("确认重置此账号密码？")) return;
+    try { await resetUserPassword(userId, resetPasswordValue); toast.success("密码已重置"); setResetPasswordFor(null); setResetPasswordValue(""); } catch {}
+  };
+
+  const handleEditUser = async (userId: string) => {
+    try {
+      await updateUser(userId, userEditForm);
+      toast.success("账号信息已更新");
+      setEditingUserId(null);
+      fetchUsers();
+    } catch {}
+  };
+
+  // Audit & Trash handlers
+  const fetchAuditLogs = useCallback(async () => {
+    try { setAuditLogs(await getAuditLogs()); } catch {}
+  }, []);
+  const fetchTrash = useCallback(async () => {
+    try { setTrashItems(await getTrashItems()); } catch {}
+  }, []);
+  const handleRestoreTrash = async (id: string) => {
+    try { await restoreTrashItem(id); toast.success("已恢复"); fetchTrash(); } catch {}
+  };
+  const handleDeleteTrash = async (id: string) => {
+    if (!confirm("确认永久删除？")) return;
+    try { await deleteTrashItem(id); fetchTrash(); } catch {}
+  };
+
   const applySearchProviderPreset = (provider: SearchProfile["provider"]) => {
     const presets: Record<string, string> = {
       serper: "https://google.serper.dev/search",
@@ -307,490 +446,954 @@ export function SettingsPage() {
     setSearchForm((prev) => ({ ...prev, provider, apiUrl: url || prev.apiUrl }));
   };
 
+  useEffect(() => {
+    fetchData();
+    fetchEmailPolicy();
+    fetchSuppressions();
+    fetchBackups();
+    fetchUsers();
+    fetchAuditLogs();
+    fetchTrash();
+  }, [fetchData, fetchEmailPolicy, fetchSuppressions, fetchBackups, fetchUsers, fetchAuditLogs, fetchTrash]);
+
   return (
-    <div className="space-y-6">
-      {/* Account Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>账户信息</CardTitle>
-          <CardDescription>当前登录账户基本信息</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-4 w-48" />
-            </div>
-          ) : accountInfo ? (
-            <div className="space-y-2">
-              <p><span className="text-muted-foreground">用户名：</span>{accountInfo.username}</p>
-              <p><span className="text-muted-foreground">创建时间：</span>{accountInfo.createdAt ? new Date(accountInfo.createdAt).toLocaleString() : "-"}</p>
-            </div>
-          ) : (
-            <p className="text-muted-foreground">无法获取账户信息</p>
-          )}
-        </CardContent>
-      </Card>
+    <div className="space-y-8">
 
-      {/* SMTP Settings */}
-      <Card>
-        <CardHeader>
-          <CardTitle>SMTP 发信配置</CardTitle>
-          <CardDescription>
-            配置邮件发送服务。密钥加密保存在本机，页面只显示保存状态。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSaveSmtp} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>SMTP 服务器 *</Label>
-                <Input
-                  type="text"
-                  placeholder="smtp.example.com"
-                  value={smtpForm.smtpHost}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, smtpHost: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>端口 *</Label>
-                <Input
-                  type="number"
-                  value={smtpForm.smtpPort}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, smtpPort: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>安全连接</Label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={smtpForm.smtpSecure ? "true" : "false"}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, smtpSecure: e.target.value === "true" })}
-                >
-                  <option value="true">SSL/TLS</option>
-                  <option value="false">无加密</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label>用户名 *</Label>
-                <Input
-                  type="text"
-                  value={smtpForm.smtpUser}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, smtpUser: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>发件人地址 *</Label>
-                <Input
-                  type="email"
-                  placeholder="noreply@example.com"
-                  value={smtpForm.smtpFrom}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, smtpFrom: e.target.value })}
-                  required
-                />
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              密码在首次发送邮件时由系统弹窗要求输入。
-            </p>
-            <Button type="submit">
-              <Save className="mr-2 h-4 w-4" />
-              保存 SMTP 配置
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      {/* ===== 数据与接口 ===== */}
+      <div>
+        <div className="flex items-center gap-3 mb-6">
+          <h2 className="text-lg font-semibold">数据与接口</h2>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+        <div className="space-y-6">
+          {/* AI Profile */}
+          <Card>
+            <CardHeader>
+              <CardTitle>AI 配置</CardTitle>
+              <CardDescription>
+                配置 AI 接口用于产品联想与买家识别。密钥加密保存在本机。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSaveAiProfile} className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>AI 提供商</Label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={aiProfileForm.provider}
+                      onChange={(e) => setAiProfileForm({ ...aiProfileForm, provider: e.target.value })}
+                    >
+                      <option value="deepseek">DeepSeek</option>
+                      <option value="openai-compatible">OpenAI 兼容</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>API 地址 *</Label>
+                    <Input
+                      type="text"
+                      placeholder="https://api.deepseek.com/v1"
+                      value={aiProfileForm.baseUrl}
+                      onChange={(e) => setAiProfileForm({ ...aiProfileForm, baseUrl: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>模型 *</Label>
+                    <Input
+                      type="text"
+                      placeholder="deepseek-v4-flash"
+                      value={aiProfileForm.model}
+                      onChange={(e) => setAiProfileForm({ ...aiProfileForm, model: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>API 密钥</Label>
+                    <Input
+                      type="password"
+                      placeholder="留空则保留已有密钥"
+                      value={aiProfileForm.apiKey}
+                      onChange={(e) => setAiProfileForm({ ...aiProfileForm, apiKey: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 pt-6">
+                      <input
+                        type="checkbox"
+                        id="aiEnabled"
+                        checked={aiProfileForm.enabled}
+                        onChange={(e) => setAiProfileForm({ ...aiProfileForm, enabled: e.target.checked })}
+                        className="h-4 w-4"
+                      />
+                      <Label htmlFor="aiEnabled" className="cursor-pointer">启用 AI</Label>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">{aiProfileHint}</p>
+                <div className="flex gap-2">
+                  <Button type="submit">
+                    <Save className="mr-2 h-4 w-4" />
+                    保存 AI 配置
+                  </Button>
+                  <Button type="button" variant="outline" onClick={handleTestAiProfile} disabled={aiTesting}>
+                    {aiTesting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <TestTube className="mr-2 h-4 w-4" />
+                    )}
+                    测试连接
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
 
-      {/* IMAP Settings */}
-      <Card>
-        <CardHeader>
-          <CardTitle>IMAP 收信配置</CardTitle>
-          <CardDescription>
-            配置邮件接收服务，用于自动收取客户回复。密钥加密保存在本机。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSaveImap} className="space-y-4">
-            <div className="flex items-center gap-2 mb-4">
-              <input
-                type="checkbox"
-                id="imapEnabled"
-                checked={imapForm.imapEnabled}
-                onChange={(e) => setImapForm({ ...imapForm, imapEnabled: e.target.checked })}
-                className="h-4 w-4"
-              />
-              <Label htmlFor="imapEnabled" className="cursor-pointer">启用 IMAP 收信</Label>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>IMAP 服务器 *</Label>
-                <Input
-                  type="text"
-                  placeholder="imap.example.com"
-                  value={imapForm.imapHost}
-                  onChange={(e) => setImapForm({ ...imapForm, imapHost: e.target.value })}
-                  disabled={!imapForm.imapEnabled}
-                />
+          {/* Search Profiles */}
+          <Card>
+            <CardHeader>
+              <CardTitle>搜索数据源</CardTitle>
+              <CardDescription>
+                配置网络搜索 API，用于获客 Agent 发现企业信息。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Search status */}
+              <div className="rounded-lg border p-4 text-sm space-y-1">
+                {searchProfiles.filter((p) => p.apiKeySet !== false).length > 0 ? (
+                  <>
+                    <strong>Agent 搜索模式：稳定 API</strong>
+                    <p className="text-muted-foreground">
+                      已配置搜索 API。任务优先使用配置的数据源，失败时降级到其他来源。
+                    </p>
+                  </>
+                ) : searchProfiles.length > 0 ? (
+                  <>
+                    <strong>Agent 搜索模式：需重新保存密钥</strong>
+                    <p className="text-muted-foreground">
+                      历史加密密钥无法由当前 Windows 账户读取。请编辑对应数据源，重新输入密钥并保存。
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <strong>Agent 搜索模式：公开搜索降级</strong>
+                    <p className="text-muted-foreground">
+                      当前无需填写密钥也能运行，但数量、速度和稳定性不作保证。
+                    </p>
+                  </>
+                )}
               </div>
-              <div className="space-y-2">
-                <Label>端口 *</Label>
-                <Input
-                  type="number"
-                  value={imapForm.imapPort}
-                  onChange={(e) => setImapForm({ ...imapForm, imapPort: e.target.value })}
-                  disabled={!imapForm.imapEnabled}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>安全连接</Label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={imapForm.imapSecure ? "true" : "false"}
-                  onChange={(e) => setImapForm({ ...imapForm, imapSecure: e.target.value === "true" })}
-                  disabled={!imapForm.imapEnabled}
-                >
-                  <option value="true">TLS</option>
-                  <option value="false">无加密</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label>用户名 *</Label>
-                <Input
-                  type="text"
-                  value={imapForm.imapUser}
-                  onChange={(e) => setImapForm({ ...imapForm, imapUser: e.target.value })}
-                  disabled={!imapForm.imapEnabled}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>邮箱目录</Label>
-                <Input
-                  type="text"
-                  value={imapForm.imapMailbox}
-                  onChange={(e) => setImapForm({ ...imapForm, imapMailbox: e.target.value })}
-                  disabled={!imapForm.imapEnabled}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>扫描数量</Label>
-                <Input
-                  type="number"
-                  value={imapForm.imapScanLimit}
-                  onChange={(e) => setImapForm({ ...imapForm, imapScanLimit: e.target.value })}
-                  disabled={!imapForm.imapEnabled}
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="imapUseSmtpCredentials"
-                checked={imapForm.imapUseSmtpCredentials}
-                onChange={(e) => setImapForm({ ...imapForm, imapUseSmtpCredentials: e.target.checked })}
-                className="h-4 w-4"
-                disabled={!imapForm.imapEnabled}
-              />
-              <Label htmlFor="imapUseSmtpCredentials" className="cursor-pointer">使用 SMTP 凭证</Label>
-            </div>
-            <Button type="submit" disabled={!imapForm.imapEnabled}>
-              <Save className="mr-2 h-4 w-4" />
-              保存 IMAP 配置
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
 
-      {/* AI Profile */}
-      <Card>
-        <CardHeader>
-          <CardTitle>AI 配置</CardTitle>
-          <CardDescription>
-            配置 AI 接口用于产品联想与买家识别。密钥加密保存在本机。
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSaveAiProfile} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label>AI 提供商</Label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={aiProfileForm.provider}
-                  onChange={(e) => setAiProfileForm({ ...aiProfileForm, provider: e.target.value })}
-                >
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="openai-compatible">OpenAI 兼容</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label>API 地址 *</Label>
-                <Input
-                  type="text"
-                  placeholder="https://api.deepseek.com/v1"
-                  value={aiProfileForm.baseUrl}
-                  onChange={(e) => setAiProfileForm({ ...aiProfileForm, baseUrl: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>模型 *</Label>
-                <Input
-                  type="text"
-                  placeholder="deepseek-v4-flash"
-                  value={aiProfileForm.model}
-                  onChange={(e) => setAiProfileForm({ ...aiProfileForm, model: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>API 密钥</Label>
-                <Input
-                  type="password"
-                  placeholder="留空则保留已有密钥"
-                  value={aiProfileForm.apiKey}
-                  onChange={(e) => setAiProfileForm({ ...aiProfileForm, apiKey: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 pt-6">
+              {/* Search profile form */}
+              <form onSubmit={handleSaveSearchProfile} className="space-y-4 border rounded-lg p-4">
+                <h4 className="font-medium text-sm">{searchForm.id ? "编辑数据源" : "新增数据源"}</h4>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>名称 *</Label>
+                    <Input
+                      placeholder="我的搜索源"
+                      value={searchForm.name}
+                      onChange={(e) => setSearchForm({ ...searchForm, name: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>提供商</Label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={searchForm.provider}
+                      onChange={(e) => applySearchProviderPreset(e.target.value as SearchProfile["provider"])}
+                    >
+                      <option value="brave-search">Brave Search</option>
+                      <option value="serper">Serper</option>
+                      <option value="serpapi">SerpApi</option>
+                      <option value="generic-json">通用 JSON</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <Label>API 地址 *</Label>
+                    <Input
+                      placeholder="https://api.search.brave.com/res/v1/web/search"
+                      value={searchForm.apiUrl}
+                      onChange={(e) => setSearchForm({ ...searchForm, apiUrl: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>API 密钥</Label>
+                    <Input
+                      type="password"
+                      placeholder="留空则保留已有密钥"
+                      value={searchForm.apiKey}
+                      onChange={(e) => setSearchForm({ ...searchForm, apiKey: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <Button type="submit">
+                  <Plus className="mr-2 h-4 w-4" />
+                  {searchForm.id ? "保存修改" : "新增数据源"}
+                </Button>
+                {searchForm.id && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      setSearchForm({
+                        id: "",
+                        name: "",
+                        provider: "brave-search",
+                        apiUrl: "https://api.search.brave.com/res/v1/web/search",
+                        apiKey: "",
+                      })
+                    }
+                  >
+                    取消编辑
+                  </Button>
+                )}
+              </form>
+
+              {/* Search profile list */}
+              {searchProfiles.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  尚未配置稳定搜索 API。Agent 将使用公开搜索降级模式。
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {searchProfiles.map((profile) => (
+                    <div
+                      key={profile.id}
+                      className="flex items-center justify-between p-3 rounded-lg border"
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{profile.name || "搜索数据源"}</span>
+                          <Badge variant="outline" className="text-xs">
+                            {({ serper: "Serper", "brave-search": "Brave Search", serpapi: "SerpApi", "generic-json": "通用 JSON" } as Record<string, string>)[profile.provider] || profile.provider}
+                          </Badge>
+                          <span className={`h-2 w-2 rounded-full ${profile.apiKeySet !== false ? "bg-green-500" : "bg-yellow-500"}`} />
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate max-w-md">{profile.apiUrl}</p>
+                      </div>
+                      <div className="flex items-center gap-1 ml-4">
+                        <span className="text-xs text-muted-foreground mr-2">
+                          {profile.apiKeySet !== false ? "密钥已保存" : "密钥失效"}
+                        </span>
+                        <Button variant="ghost" size="sm" onClick={() => handleEditSearchProfile(profile)}>
+                          编辑
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleTestSearchProfile(profile.id)}
+                          disabled={searchTestingId === profile.id}
+                        >
+                          {searchTestingId === profile.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            "测试"
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive"
+                          onClick={() => handleDeleteSearchProfile(profile.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* ===== 系统与安全 ===== */}
+      <div>
+        <div className="flex items-center gap-3 mb-6">
+          <h2 className="text-lg font-semibold">系统与安全</h2>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+        <div className="space-y-6">
+          {/* 账户信息 */}
+          <Card>
+            <CardHeader>
+              <CardTitle>账户信息</CardTitle>
+              <CardDescription>当前登录账户基本信息</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-4 w-48" />
+                </div>
+              ) : accountInfo ? (
+                <div className="space-y-2">
+                  <p><span className="text-muted-foreground">用户名：</span>{accountInfo.username}</p>
+                  <p><span className="text-muted-foreground">创建时间：</span>{accountInfo.createdAt ? new Date(accountInfo.createdAt).toLocaleString() : "-"}</p>
+                </div>
+              ) : (
+                <p className="text-muted-foreground">无法获取账户信息</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* SMTP Settings */}
+          <Card>
+            <CardHeader>
+              <CardTitle>SMTP 发信配置</CardTitle>
+              <CardDescription>
+                配置邮件发送服务。密钥加密保存在本机，页面只显示保存状态。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSaveSmtp} className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>SMTP 服务器 *</Label>
+                    <Input
+                      type="text"
+                      placeholder="smtp.example.com"
+                      value={smtpForm.smtpHost}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, smtpHost: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>端口 *</Label>
+                    <Input
+                      type="number"
+                      value={smtpForm.smtpPort}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, smtpPort: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>安全连接</Label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={smtpForm.smtpSecure ? "true" : "false"}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, smtpSecure: e.target.value === "true" })}
+                    >
+                      <option value="true">SSL/TLS</option>
+                      <option value="false">无加密</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>用户名 *</Label>
+                    <Input
+                      type="text"
+                      value={smtpForm.smtpUser}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, smtpUser: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>密码</Label>
+                    <Input
+                      type="password"
+                      placeholder={smtpForm.credentialStatus === "saved" ? "已保存，留空则不修改" : "输入邮箱密码"}
+                      value={smtpForm.smtpPass}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, smtpPass: e.target.value })}
+                    />
+                    {smtpForm.credentialStatus === "saved" && (
+                      <p className="text-xs text-muted-foreground">密码已加密保存。留空保存时继续使用已有密码。</p>
+                    )}
+                    {smtpForm.credentialStatus === "reentry_required" && (
+                      <p className="text-xs text-amber-500">历史加密密钥无法由当前 Windows 账户读取，请重新输入密钥并保存。</p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>发件人地址 *</Label>
+                    <Input
+                      type="email"
+                      placeholder="noreply@example.com"
+                      value={smtpForm.smtpFrom}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, smtpFrom: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <Button type="submit">
+                  <Save className="mr-2 h-4 w-4" />
+                  保存 SMTP 配置
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          {/* IMAP Settings */}
+          <Card>
+            <CardHeader>
+              <CardTitle>IMAP 收信配置</CardTitle>
+              <CardDescription>
+                配置邮件接收服务，用于自动收取客户回复。密钥加密保存在本机。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSaveImap} className="space-y-4">
+                <div className="flex items-center gap-2 mb-4">
                   <input
                     type="checkbox"
-                    id="aiEnabled"
-                    checked={aiProfileForm.enabled}
-                    onChange={(e) => setAiProfileForm({ ...aiProfileForm, enabled: e.target.checked })}
+                    id="imapEnabled"
+                    checked={imapForm.imapEnabled}
+                    onChange={(e) => setImapForm({ ...imapForm, imapEnabled: e.target.checked })}
                     className="h-4 w-4"
                   />
-                  <Label htmlFor="aiEnabled" className="cursor-pointer">启用 AI</Label>
+                  <Label htmlFor="imapEnabled" className="cursor-pointer">启用 IMAP 收信</Label>
                 </div>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground">{aiProfileHint}</p>
-            <div className="flex gap-2">
-              <Button type="submit">
-                <Save className="mr-2 h-4 w-4" />
-                保存 AI 配置
-              </Button>
-              <Button type="button" variant="outline" onClick={handleTestAiProfile} disabled={aiTesting}>
-                {aiTesting ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <TestTube className="mr-2 h-4 w-4" />
-                )}
-                测试连接
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>IMAP 服务器 *</Label>
+                    <Input
+                      type="text"
+                      placeholder="imap.example.com"
+                      value={imapForm.imapHost}
+                      onChange={(e) => setImapForm({ ...imapForm, imapHost: e.target.value })}
+                      disabled={!imapForm.imapEnabled}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>端口 *</Label>
+                    <Input
+                      type="number"
+                      value={imapForm.imapPort}
+                      onChange={(e) => setImapForm({ ...imapForm, imapPort: e.target.value })}
+                      disabled={!imapForm.imapEnabled}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>安全连接</Label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={imapForm.imapSecure ? "true" : "false"}
+                      onChange={(e) => setImapForm({ ...imapForm, imapSecure: e.target.value === "true" })}
+                      disabled={!imapForm.imapEnabled}
+                    >
+                      <option value="true">TLS</option>
+                      <option value="false">无加密</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>用户名 *</Label>
+                    <Input
+                      type="text"
+                      value={imapForm.imapUser}
+                      onChange={(e) => setImapForm({ ...imapForm, imapUser: e.target.value })}
+                      disabled={!imapForm.imapEnabled}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>邮箱目录</Label>
+                    <Input
+                      type="text"
+                      value={imapForm.imapMailbox}
+                      onChange={(e) => setImapForm({ ...imapForm, imapMailbox: e.target.value })}
+                      disabled={!imapForm.imapEnabled}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>扫描数量</Label>
+                    <Input
+                      type="number"
+                      value={imapForm.imapScanLimit}
+                      onChange={(e) => setImapForm({ ...imapForm, imapScanLimit: e.target.value })}
+                      disabled={!imapForm.imapEnabled}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="imapUseSmtpCredentials"
+                    checked={imapForm.imapUseSmtpCredentials}
+                    onChange={(e) => setImapForm({ ...imapForm, imapUseSmtpCredentials: e.target.checked })}
+                    className="h-4 w-4"
+                    disabled={!imapForm.imapEnabled}
+                  />
+                  <Label htmlFor="imapUseSmtpCredentials" className="cursor-pointer">使用 SMTP 凭证</Label>
+                </div>
+                <Button type="submit" disabled={!imapForm.imapEnabled}>
+                  <Save className="mr-2 h-4 w-4" />
+                  保存 IMAP 配置
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
 
-      {/* Search Profiles */}
-      <Card>
-        <CardHeader>
-          <CardTitle>搜索数据源</CardTitle>
-          <CardDescription>
-            配置网络搜索 API，用于获客 Agent 发现企业信息。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Search status */}
-          <div className="rounded-lg border p-4 text-sm space-y-1">
-            {searchProfiles.filter((p) => p.apiKeySet !== false).length > 0 ? (
-              <>
-                <strong>Agent 搜索模式：稳定 API</strong>
-                <p className="text-muted-foreground">
-                  已配置搜索 API。任务优先使用配置的数据源，失败时降级到其他来源。
-                </p>
-              </>
-            ) : searchProfiles.length > 0 ? (
-              <>
-                <strong>Agent 搜索模式：需重新保存密钥</strong>
-                <p className="text-muted-foreground">
-                  历史加密密钥无法由当前 Windows 账户读取。请编辑对应数据源，重新输入密钥并保存。
-                </p>
-              </>
-            ) : (
-              <>
-                <strong>Agent 搜索模式：公开搜索降级</strong>
-                <p className="text-muted-foreground">
-                  当前无需填写密钥也能运行，但数量、速度和稳定性不作保证。
-                </p>
-              </>
-            )}
-          </div>
+          {/* Change Password */}
+          <Card>
+            <CardHeader>
+              <CardTitle>修改密码</CardTitle>
+              <CardDescription>修改当前账户登录密码</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleChangePassword} className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>当前密码 *</Label>
+                    <Input
+                      type="password"
+                      value={passwordForm.currentPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>新密码 *</Label>
+                    <Input
+                      type="password"
+                      value={passwordForm.newPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                      required
+                      minLength={6}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>确认新密码 *</Label>
+                    <Input
+                      type="password"
+                      value={passwordForm.confirmPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <Button type="submit">
+                  <KeyRound className="mr-2 h-4 w-4" />
+                  修改密码
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
 
-          {/* Search profile form */}
-          <form onSubmit={handleSaveSearchProfile} className="space-y-4 border rounded-lg p-4">
-            <h4 className="font-medium text-sm">{searchForm.id ? "编辑数据源" : "新增数据源"}</h4>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>名称 *</Label>
-                <Input
-                  placeholder="我的搜索源"
-                  value={searchForm.name}
-                  onChange={(e) => setSearchForm({ ...searchForm, name: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>提供商</Label>
-                <select
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={searchForm.provider}
-                  onChange={(e) => applySearchProviderPreset(e.target.value as SearchProfile["provider"])}
-                >
-                  <option value="brave-search">Brave Search</option>
-                  <option value="serper">Serper</option>
-                  <option value="serpapi">SerpApi</option>
-                  <option value="generic-json">通用 JSON</option>
-                </select>
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>API 地址 *</Label>
-                <Input
-                  placeholder="https://api.search.brave.com/res/v1/web/search"
-                  value={searchForm.apiUrl}
-                  onChange={(e) => setSearchForm({ ...searchForm, apiUrl: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>API 密钥</Label>
-                <Input
-                  type="password"
-                  placeholder="留空则保留已有密钥"
-                  value={searchForm.apiKey}
-                  onChange={(e) => setSearchForm({ ...searchForm, apiKey: e.target.value })}
-                />
-              </div>
-            </div>
-            <Button type="submit">
-              <Plus className="mr-2 h-4 w-4" />
-              {searchForm.id ? "保存修改" : "新增数据源"}
-            </Button>
-            {searchForm.id && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  setSearchForm({
-                    id: "",
-                    name: "",
-                    provider: "brave-search",
-                    apiUrl: "https://api.search.brave.com/res/v1/web/search",
-                    apiKey: "",
-                  })
-                }
-              >
-                取消编辑
-              </Button>
-            )}
-          </form>
+          {/* Email Policy */}
+          <Card>
+            <CardHeader>
+              <CardTitle>邮件发送策略</CardTitle>
+              <CardDescription>配置邮件发送频率限制和工作时间，避免触发反垃圾策略</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSaveEmailPolicy} className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>每小时上限</Label>
+                    <Input
+                      type="number"
+                      value={emailPolicy.maxPerHour}
+                      onChange={(e) => setEmailPolicy({ ...emailPolicy, maxPerHour: parseInt(e.target.value) || 0 })}
+                      min={1}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>每日上限</Label>
+                    <Input
+                      type="number"
+                      value={emailPolicy.maxPerDay}
+                      onChange={(e) => setEmailPolicy({ ...emailPolicy, maxPerDay: parseInt(e.target.value) || 0 })}
+                      min={1}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>最小间隔（秒）</Label>
+                    <Input
+                      type="number"
+                      value={emailPolicy.minDelaySeconds}
+                      onChange={(e) => setEmailPolicy({ ...emailPolicy, minDelaySeconds: parseInt(e.target.value) || 0 })}
+                      min={1}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>工作日开始（时）</Label>
+                    <Input
+                      type="number"
+                      value={emailPolicy.workdayStart}
+                      onChange={(e) => setEmailPolicy({ ...emailPolicy, workdayStart: parseInt(e.target.value) || 0 })}
+                      min={0}
+                      max={23}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>工作日结束（时）</Label>
+                    <Input
+                      type="number"
+                      value={emailPolicy.workdayEnd}
+                      onChange={(e) => setEmailPolicy({ ...emailPolicy, workdayEnd: parseInt(e.target.value) || 0 })}
+                      min={0}
+                      max={23}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="enforceTimezone"
+                      checked={emailPolicy.enforceTimezone}
+                      onChange={(e) => setEmailPolicy({ ...emailPolicy, enforceTimezone: e.target.checked })}
+                      className="h-4 w-4"
+                    />
+                    <Label htmlFor="enforceTimezone" className="cursor-pointer">强制时区限制</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="allowWeekends"
+                      checked={emailPolicy.allowWeekends}
+                      onChange={(e) => setEmailPolicy({ ...emailPolicy, allowWeekends: e.target.checked })}
+                      className="h-4 w-4"
+                    />
+                    <Label htmlFor="allowWeekends" className="cursor-pointer">允许周末发送</Label>
+                  </div>
+                </div>
+                <Button type="submit">
+                  <Save className="mr-2 h-4 w-4" />
+                  保存发送策略
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
 
-          {/* Search profile list */}
-          {searchProfiles.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              尚未配置稳定搜索 API。Agent 将使用公开搜索降级模式。
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {searchProfiles.map((profile) => (
-                <div
-                  key={profile.id}
-                  className="flex items-center justify-between p-3 rounded-lg border"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-sm">{profile.name || "搜索数据源"}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {({ serper: "Serper", "brave-search": "Brave Search", serpapi: "SerpApi", "generic-json": "通用 JSON" } as Record<string, string>)[profile.provider] || profile.provider}
-                      </Badge>
-                      <span className={`h-2 w-2 rounded-full ${profile.apiKeySet !== false ? "bg-green-500" : "bg-yellow-500"}`} />
+          {/* Suppression List */}
+          <Card>
+            <CardHeader>
+              <CardTitle>禁止名单</CardTitle>
+              <CardDescription>管理不接收邮件的邮箱地址</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <form onSubmit={handleAddSuppression} className="flex items-end gap-3">
+                <div className="space-y-2 flex-1">
+                  <Label>邮箱地址 *</Label>
+                  <Input
+                    type="email"
+                    placeholder="user@example.com"
+                    value={suppressionForm.email}
+                    onChange={(e) => setSuppressionForm({ ...suppressionForm, email: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2 flex-1">
+                  <Label>原因</Label>
+                  <Input
+                    type="text"
+                    placeholder="退信/投诉"
+                    value={suppressionForm.reason}
+                    onChange={(e) => setSuppressionForm({ ...suppressionForm, reason: e.target.value })}
+                  />
+                </div>
+                <Button type="submit">
+                  <Ban className="mr-2 h-4 w-4" />
+                  加入名单
+                </Button>
+              </form>
+              {suppressions.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">暂无禁止记录</p>
+              ) : (
+                <div className="space-y-2">
+                  {suppressions.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between p-3 rounded-lg border">
+                      <div className="flex-1">
+                        <span className="font-medium text-sm">{s.email}</span>
+                        {s.reason && <span className="text-xs text-muted-foreground ml-2">({s.reason})</span>}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => handleDeleteSuppression(s.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate max-w-md">{profile.apiUrl}</p>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Backup & Restore */}
+          <Card>
+            <CardHeader>
+              <CardTitle>数据备份</CardTitle>
+              <CardDescription>配置自动备份策略或手动创建备份</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <form onSubmit={handleSaveBackupSettings} className="space-y-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="checkbox"
+                    id="backupEnabled"
+                    checked={backupSettings.enabled}
+                    onChange={(e) => setBackupSettings({ ...backupSettings, enabled: e.target.checked })}
+                    className="h-4 w-4"
+                  />
+                  <Label htmlFor="backupEnabled" className="cursor-pointer">启用自动备份</Label>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>备份间隔（小时）</Label>
+                    <Input
+                      type="number"
+                      value={backupSettings.intervalHours}
+                      onChange={(e) => setBackupSettings({ ...backupSettings, intervalHours: parseInt(e.target.value) || 0 })}
+                      min={1}
+                    />
                   </div>
-                  <div className="flex items-center gap-1 ml-4">
-                    <span className="text-xs text-muted-foreground mr-2">
-                      {profile.apiKeySet !== false ? "密钥已保存" : "密钥失效"}
-                    </span>
-                    <Button variant="ghost" size="sm" onClick={() => handleEditSearchProfile(profile)}>
-                      编辑
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleTestSearchProfile(profile.id)}
-                      disabled={searchTestingId === profile.id}
-                    >
-                      {searchTestingId === profile.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        "测试"
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-destructive"
-                      onClick={() => handleDeleteSearchProfile(profile.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                  <div className="space-y-2">
+                    <Label>保留天数</Label>
+                    <Input
+                      type="number"
+                      value={backupSettings.retentionDays}
+                      onChange={(e) => setBackupSettings({ ...backupSettings, retentionDays: parseInt(e.target.value) || 0 })}
+                      min={1}
+                    />
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                <Button type="submit" variant="outline">
+                  <Save className="mr-2 h-4 w-4" />
+                  保存备份策略
+                </Button>
+              </form>
+              <Separator />
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-medium text-sm">手动备份</h4>
+                  <p className="text-xs text-muted-foreground">立即创建一次完整数据备份</p>
+                </div>
+                <Button onClick={handleCreateBackup} disabled={creatingBackup}>
+                  {creatingBackup ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Database className="mr-2 h-4 w-4" />
+                  )}
+                  创建备份
+                </Button>
+              </div>
+              {backups.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="font-medium text-sm">备份历史</h4>
+                  {backups.map((b) => (
+                    <div key={b.id} className="flex items-center justify-between p-3 rounded-lg border">
+                      <div>
+                        <span className="text-sm">{b.filename || `备份 #${b.id}`}</span>
+                        <span className="text-xs text-muted-foreground ml-2">
+                          {b.createdAt ? new Date(b.createdAt).toLocaleString() : ""}
+                        </span>
+                        <Badge variant="outline" className="ml-2 text-xs">
+                          {b.size ? `${(b.size / 1024).toFixed(1)} KB` : ""}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
 
-      {/* Change Password */}
-      <Card>
-        <CardHeader>
-          <CardTitle>修改密码</CardTitle>
-          <CardDescription>修改当前账户登录密码</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleChangePassword} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label>当前密码 *</Label>
-                <Input
-                  type="password"
-                  value={passwordForm.currentPassword}
-                  onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>新密码 *</Label>
-                <Input
-                  type="password"
-                  value={passwordForm.newPassword}
-                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-                  required
-                  minLength={6}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>确认新密码 *</Label>
-                <Input
-                  type="password"
-                  value={passwordForm.confirmPassword}
-                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
-                  required
-                />
-              </div>
-            </div>
-            <Button type="submit">
-              <KeyRound className="mr-2 h-4 w-4" />
-              修改密码
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+          {/* Team Accounts */}
+          <Card>
+            <CardHeader>
+              <CardTitle>团队账号</CardTitle>
+              <CardDescription>管理多用户账号和权限</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <form onSubmit={handleCreateUser} className="space-y-4 border rounded-lg p-4">
+                <h4 className="font-medium text-sm">新建账号</h4>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>用户名 *</Label>
+                    <Input
+                      placeholder="登录用户名"
+                      value={userForm.username}
+                      onChange={(e) => setUserForm({ ...userForm, username: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>显示名称</Label>
+                    <Input
+                      placeholder="显示名称"
+                      value={userForm.displayName}
+                      onChange={(e) => setUserForm({ ...userForm, displayName: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>邮箱</Label>
+                    <Input
+                      type="email"
+                      placeholder="user@example.com"
+                      value={userForm.email}
+                      onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>角色</Label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={userForm.role}
+                      onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
+                    >
+                      <option value="admin">管理员</option>
+                      <option value="sales">销售</option>
+                      <option value="viewer">只读</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>密码 *</Label>
+                    <Input
+                      type="password"
+                      placeholder="初始密码"
+                      value={userForm.password}
+                      onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                      required
+                      minLength={6}
+                    />
+                  </div>
+                </div>
+                <Button type="submit">
+                  <Plus className="mr-2 h-4 w-4" />
+                  创建账号
+                </Button>
+              </form>
+              {users.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">暂无其他账号</p>
+              ) : (
+                <div className="space-y-2">
+                  {users.map((u) => (
+                    <div key={u.id} className="flex items-center justify-between p-3 rounded-lg border">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{u.displayName || u.username}</span>
+                          <Badge variant="outline" className="text-xs">
+                            {({ admin: "管理员", sales: "销售", viewer: "只读" } as Record<string, string>)[u.role] || u.role}
+                          </Badge>
+                        </div>
+                        {u.email && <p className="text-xs text-muted-foreground">{u.email}</p>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {editingUserId === u.id ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              placeholder="显示名称"
+                              className="w-28 h-8 text-sm"
+                              value={userEditForm.displayName}
+                              onChange={(e) => setUserEditForm({ ...userEditForm, displayName: e.target.value })}
+                            />
+                            <select
+                              className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                              value={userEditForm.role}
+                              onChange={(e) => setUserEditForm({ ...userEditForm, role: e.target.value })}
+                            >
+                              <option value="admin">管理员</option>
+                              <option value="sales">销售</option>
+                              <option value="viewer">只读</option>
+                            </select>
+                            <Button size="sm" onClick={() => handleEditUser(u.id)}>保存</Button>
+                            <Button size="sm" variant="ghost" onClick={() => setEditingUserId(null)}>取消</Button>
+                          </div>
+                        ) : resetPasswordFor === u.id ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="password"
+                              placeholder="新密码"
+                              className="w-36 h-8 text-sm"
+                              value={resetPasswordValue}
+                              onChange={(e) => setResetPasswordValue(e.target.value)}
+                            />
+                            <Button size="sm" onClick={() => handleResetPassword(u.id)}>确认</Button>
+                            <Button size="sm" variant="ghost" onClick={() => { setResetPasswordFor(null); setResetPasswordValue(""); }}>取消</Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <Button size="sm" variant="outline" onClick={() => { setEditingUserId(u.id); setUserEditForm({ displayName: u.displayName || "", email: u.email || "", role: u.role }); }}>
+                              <Edit className="h-3.5 w-3.5 mr-1" />
+                              编辑
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setResetPasswordFor(u.id)}>
+                              <KeyRound className="h-3.5 w-3.5 mr-1" />
+                              重置密码
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Recycle Bin & Audit Logs */}
+          <Card>
+            <CardHeader>
+              <CardTitle>回收站</CardTitle>
+              <CardDescription>查看和恢复已删除的数据</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {trashItems.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">回收站为空</p>
+              ) : (
+                <div className="space-y-2">
+                  {trashItems.map((item) => (
+                    <div key={item.id} className="flex items-center justify-between p-3 rounded-lg border">
+                      <div className="flex-1">
+                        <span className="text-sm font-medium">{item.name || item.id}</span>
+                        <span className="text-xs text-muted-foreground ml-2">
+                          {item.type && <Badge variant="outline" className="mr-1 text-xs">{item.type}</Badge>}
+                          {item.deletedAt ? new Date(item.deletedAt).toLocaleString() : ""}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" variant="outline" onClick={() => handleRestoreTrash(item.id)}>
+                          <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                          恢复
+                        </Button>
+                        <Button size="sm" variant="outline" className="text-destructive" onClick={() => handleDeleteTrash(item.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Audit Logs */}
+          <Card>
+            <CardHeader>
+              <CardTitle>审计日志</CardTitle>
+              <CardDescription>系统操作记录</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {auditLogs.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">暂无操作记录</p>
+              ) : (
+                <div className="space-y-1 max-h-80 overflow-y-auto">
+                  {auditLogs.map((log) => (
+                    <div key={log.id} className="flex items-start gap-3 p-2 rounded text-sm">
+                      <Clock className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                      <div className="flex-1 min-w-0">
+                        <p>
+                          <span className="font-medium">{log.username || "系统"}</span>
+                          <span className="text-muted-foreground ml-1">{log.action}</span>
+                        </p>
+                        {log.details && <p className="text-xs text-muted-foreground truncate">{log.details}</p>}
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {log.createdAt ? new Date(log.createdAt).toLocaleString() : ""}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

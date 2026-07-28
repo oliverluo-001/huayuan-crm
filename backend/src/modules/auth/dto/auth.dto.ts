@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, MinLength, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, MinLength, IsOptional, IsEmail, IsEnum } from 'class-validator';
 
 export class LoginDto {
   @IsString()
@@ -15,6 +15,18 @@ export class RegisterDto {
   @IsNotEmpty({ message: '用户名不能为空' })
   @MinLength(2, { message: '用户名至少2个字符' })
   username: string;
+
+  @IsString()
+  @IsOptional()
+  displayName?: string;
+
+  @IsEmail()
+  @IsOptional()
+  email?: string;
+
+  @IsEnum(['admin', 'sales', 'viewer'])
+  @IsOptional()
+  role?: 'admin' | 'sales' | 'viewer';
 
   @IsString()
   @IsNotEmpty({ message: '密码不能为空' })

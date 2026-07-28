@@ -945,9 +945,6 @@ export function LeadsPage() {
           <h2>B2B 智能获客</h2>
           <p className="section-description">从产品需求出发，自动定位潜在买家并沉淀到客户库。</p>
         </div>
-        <span id="leadPoolCount" className="badge">
-          {leads.filter((l) => !["converted", "discarded"].includes(l.status)).length}
-        </span>
       </div>
 
       {renderStageBar()}

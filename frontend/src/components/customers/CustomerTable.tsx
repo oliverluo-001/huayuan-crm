@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -112,9 +112,30 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
   // New tag input
   const [newTagName, setNewTagName] = useState("");
 
+  // View preset
+  const [customerPreset, setCustomerPreset] = useState("all");
+
   // Bulk tag/tier
   const [bulkTag, setBulkTag] = useState("");
   const [bulkTier, setBulkTier] = useState("");
+
+  // Import
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isImporting, setIsImporting] = useState(false);
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      const result = await importCustomers(file);
+      toast.success(`导入成功：新增 ${result.created} 条，更新 ${result.updated} 条`);
+      fetchCustomers();
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   const fetchCustomers = useCallback(async () => {
     setIsLoading(true);
@@ -277,8 +298,52 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
 
   const totalPages = Math.ceil(total / CUSTOMER_PAGE_SIZE);
 
+  const handlePresetChange = (preset: string) => {
+    setCustomerPreset(preset);
+    const baseFilters = { q: "", tag: "", tier: "", journeyStage: "", region: "", emailStatus: "", health: "", ownerId: "" };
+    switch (preset) {
+      case "mine":
+        setFilters({ ...baseFilters, ownerId: "me" });
+        break;
+      case "followup":
+        setFilters({ ...baseFilters, health: "attention" });
+        break;
+      case "email_invalid":
+        setFilters({ ...baseFilters, emailStatus: "invalid" });
+        break;
+      default:
+        setFilters({ ...baseFilters });
+    }
+    setPage(1);
+  };
+
   return (
     <div className="space-y-4">
+      {/* View presets */}
+      <div className="flex items-center gap-1 bg-muted/40 rounded-lg p-0.5 w-fit" role="tablist" aria-label="客户视图">
+        {[
+          { id: "all", label: "全部客户" },
+          { id: "mine", label: "我的客户" },
+          { id: "followup", label: "待跟进" },
+          { id: "email_invalid", label: "邮箱异常" },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={customerPreset === tab.id}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              customerPreset === tab.id
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => handlePresetChange(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <Card>
         <CardContent className="pt-6">
@@ -288,8 +353,8 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
               setPage(1);
             }}
           >
-            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4 mb-4">
-              <div className="space-y-2">
+            <div className="flex flex-wrap gap-4 mb-4">
+              <div className="space-y-2 min-w-[250px]">
                 <Label>搜索客户</Label>
                 <div className="relative">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -350,7 +415,43 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
+              <div className="space-y-2">
+                <Label>地区</Label>
+                <Input
+                  placeholder="如：United States"
+                  value={filters.region}
+                  onChange={(e) => setFilters({ ...filters, region: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>邮箱状态</Label>
+                <Select value={filters.emailStatus} onValueChange={(v) => setFilters({ ...filters, emailStatus: v ?? "" })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="全部邮箱" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">全部邮箱</SelectItem>
+                    <SelectItem value="deliverable">未标记异常</SelectItem>
+                    <SelectItem value="invalid">邮箱异常（退信）</SelectItem>
+                    <SelectItem value="unknown">待验证</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>健康状态</Label>
+                <Select value={filters.health} onValueChange={(v) => setFilters({ ...filters, health: v ?? "" })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="全部状态" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">全部状态</SelectItem>
+                    <SelectItem value="overdue">待办逾期</SelectItem>
+                    <SelectItem value="attention">需跟进</SelectItem>
+                    <SelectItem value="email_invalid">邮箱异常</SelectItem>
+                    <SelectItem value="healthy">正常</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             <div className="flex items-center gap-2">
               <Button type="submit">应用筛选</Button>
               <Button
@@ -386,71 +487,56 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
                 保存筛选器
               </Button>
             </div>
+            </div>
           </form>
         </CardContent>
       </Card>
 
+      <p className="text-xs text-muted-foreground px-1">客户状态根据待办、近期互动和邮件结果自动提示；当地时间用于安排邮件发送。</p>
+
       {/* Toolbar */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">批量标签</span>
+            <Select value={bulkTag} onValueChange={(v) => v !== null && setBulkTag(v)}>
+              <SelectTrigger className="h-7 text-xs w-[130px]">
+                <SelectValue placeholder="选择已有标签" />
+              </SelectTrigger>
+              <SelectContent>
+                {tags.map((tag) => (
+                  <SelectItem key={tag} value={tag}>{tag}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={selectedIds.size === 0} onClick={() => handleBulkTag("add")}>添加标签</Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={selectedIds.size === 0} onClick={() => handleBulkTag("remove")}>移除标签</Button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">客户分层</span>
+            <Select value={bulkTier} onValueChange={(v) => v !== null && setBulkTier(v)}>
+              <SelectTrigger className="h-7 text-xs w-[130px]">
+                <SelectValue placeholder="选择分层" />
+              </SelectTrigger>
+              <SelectContent>
+                {TIERS.map((tier) => (
+                  <SelectItem key={tier.value} value={tier.value}>{tier.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={selectedIds.size === 0} onClick={handleBulkTier}>更新分层</Button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" variant="outline" className="h-7 text-xs text-destructive" disabled={selectedIds.size === 0} onClick={handleBulkDelete}>
+              <Trash2 className="mr-1 h-3 w-3" />
+              批量删除
+            </Button>
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={selectedIds.size === 0} onClick={() => setSelectedIds(new Set())}>
+              清空选择
+            </Button>
+          </div>
           {selectedIds.size > 0 && (
-            <>
-              <Badge variant="secondary">已选 {selectedIds.size} 项</Badge>
-              <Button variant="outline" size="sm" onClick={() => setSelectedIds(new Set())}>
-                <X className="mr-1 h-3 w-3" />
-                清空选择
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-lg border border-border bg-background hover:bg-muted hover:text-foreground h-7 gap-1 px-2.5 text-[0.8rem] font-medium whitespace-nowrap select-none [&_svg]:size-3.5">
-                  <Tag className="mr-1 h-3 w-3" />
-                  批量标签
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="p-2 min-w-[200px]">
-                  <div className="space-y-2">
-                    <Select value={bulkTag} onValueChange={(v) => v !== null && setBulkTag(v)}>
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="选择标签" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {tags.map((tag) => (
-                          <SelectItem key={tag} value={tag}>{tag}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="outline" className="flex-1 h-7 text-xs" onClick={() => handleBulkTag("add")}>添加</Button>
-                      <Button size="sm" variant="outline" className="flex-1 h-7 text-xs" onClick={() => handleBulkTag("remove")}>移除</Button>
-                    </div>
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-lg border border-border bg-background hover:bg-muted hover:text-foreground h-7 gap-1 px-2.5 text-[0.8rem] font-medium whitespace-nowrap select-none">
-                  批量分层
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="p-2 min-w-[200px]">
-                  <div className="space-y-2">
-                    <Select value={bulkTier} onValueChange={(v) => v !== null && setBulkTier(v)}>
-                      <SelectTrigger className="h-8 text-xs">
-                        <SelectValue placeholder="选择分层" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TIERS.map((tier) => (
-                          <SelectItem key={tier.value} value={tier.value}>{tier.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button size="sm" variant="outline" className="w-full h-7 text-xs" onClick={handleBulkTier}>
-                      应用
-                    </Button>
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button variant="outline" size="sm" className="text-destructive" onClick={handleBulkDelete}>
-                <Trash2 className="mr-1 h-3 w-3" />
-                批量删除
-              </Button>
-            </>
+            <Badge variant="secondary">已选 {selectedIds.size} 项</Badge>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -497,6 +583,17 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.csv"
+            className="hidden"
+            onChange={handleImport}
+          />
+          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isImporting}>
+            <Upload className="mr-1 h-4 w-4" />
+            {isImporting ? "导入中..." : "导入 Excel/CSV"}
+          </Button>
           <Button onClick={() => setCreateOpen(true)} size="sm">
             <Plus className="mr-1 h-4 w-4" />
             新增客户

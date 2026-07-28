@@ -3,11 +3,26 @@ export interface AuthStatus {
   initialized: boolean;
   authenticated: boolean;
   username: string;
+  displayName?: string;
+  userId?: string;
+  role?: string;
 }
 
 export interface LoginResult {
   ok: boolean;
   username: string;
+  displayName?: string;
+  userId?: string;
+  role?: string;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  displayName?: string;
+  email?: string;
+  role: "sales" | "manager" | "admin";
+  createdAt: string;
 }
 
 // Customer types
@@ -27,8 +42,12 @@ export interface Customer {
   customerType?: string;
   product?: string;
   source?: string;
+  ownerId?: string;
+  ownerName?: string;
   notes?: string;
   emailStatus?: "verified" | "invalid" | "unknown";
+  emailFailureReason?: string;
+  emailFailedAt?: string;
   createdAt: string;
   updatedAt: string;
   // Extended fields from backend
@@ -381,12 +400,15 @@ export interface AppState {
   };
   leadTasks: B2BLeadTask[];
   dashboard?: DashboardData;
+  users?: User[];
   settings: {
     searchProfiles?: SearchProfile[];
     aiProfile?: AiProfile;
     smtpProfile?: SmtpProfile;
     imapProfile?: ImapProfile;
     customerViews?: CustomerView[];
+    emailPolicy?: EmailPolicy;
+    backupSettings?: BackupSettings;
   };
 }
 
@@ -395,6 +417,62 @@ export interface CustomerView {
   id: string;
   name: string;
   filters: Record<string, string>;
+  createdAt: string;
+}
+
+export interface EmailPolicy {
+  maxPerHour: number;
+  maxPerDay: number;
+  minDelaySeconds: number;
+  workdayStart: number;
+  workdayEnd: number;
+  enforceTimezone: boolean;
+  allowWeekends: boolean;
+}
+
+export interface EmailRecipient {
+  recipientKey: string;
+  type: "customer" | "contact";
+  email: string;
+  name: string;
+  contact: string;
+  customerId: string;
+  customerName: string;
+  region: string;
+  emailStatus: string;
+  suppressed: boolean;
+}
+
+export interface SuppressionEntry {
+  id: string;
+  email: string;
+  reason: string;
+  source: string;
+  createdAt: string;
+}
+
+export interface BackupSettings {
+  enabled: boolean;
+  intervalHours: number;
+  retentionDays: number;
+}
+
+export interface Backup {
+  id: string;
+  filename: string;
+  size: number;
+  createdAt: string;
+  createdBy: string;
+  type: "manual" | "auto";
+}
+
+export interface AuditEntry {
+  id: string;
+  action: string;
+  userId: string;
+  username: string;
+  details: string;
+  ip: string;
   createdAt: string;
 }
 

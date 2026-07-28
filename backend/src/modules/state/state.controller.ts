@@ -4,6 +4,10 @@ import { EmailService } from '../email/email.service';
 import { ProductsService } from '../products/products.service';
 import { LeadsService } from '../leads/leads.service';
 import { SettingsService } from '../settings/settings.service';
+import { UsersService } from '../auth/users.service';
+import { BackupService } from '../backup/backup.service';
+import { SuppressionService } from '../suppression/suppression.service';
+import { AuditService } from '../audit/audit.service';
 
 @Controller('state')
 export class StateController {
@@ -13,6 +17,10 @@ export class StateController {
     private readonly productsService: ProductsService,
     private readonly leadsService: LeadsService,
     private readonly settingsService: SettingsService,
+    private readonly usersService: UsersService,
+    private readonly backupService: BackupService,
+    private readonly suppressionService: SuppressionService,
+    private readonly auditService: AuditService,
   ) {}
 
   @Get()
@@ -33,6 +41,12 @@ export class StateController {
       aiProfile,
       smtpProfile,
       imapProfile,
+      users,
+      backups,
+      suppressions,
+      auditLogs,
+      emailPolicy,
+      trashItems,
     ] = await Promise.all([
       this.customersService.findAll({}),
       this.customersService.getAllTags(),
@@ -49,6 +63,12 @@ export class StateController {
       this.settingsService.getAiProfile(),
       this.settingsService.getSmtpProfile(),
       this.settingsService.getImapProfile(),
+      this.usersService.findAll(),
+      this.backupService.findAll(),
+      this.suppressionService.findAll(),
+      this.auditService.findAll(),
+      this.settingsService.getEmailPolicy(),
+      this.customersService.findTrash(),
     ]);
 
     const customers = (customerResult as any).customers || customerResult;
@@ -137,12 +157,35 @@ export class StateController {
     const sentLogs = sendLogs.filter((l: any) => l.status === 'sent');
     const failedLogs = sendLogs.filter((l: any) => l.status === 'failed');
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const newCustomers7d = (Array.isArray(customers) ? customers : []).filter(
       (c: any) => new Date(c.createdAt) >= sevenDaysAgo,
     ).length;
 
     const allLeads = leadTasks.reduce((sum: number, t: any) => sum + (t.rawLeadCount || t.leadCount || 0), 0);
     const highConfidenceLeads = leadTasks.reduce((sum: number, t: any) => sum + (t.cleanedLeadCount || 0), 0);
+
+    // Email activity stats
+    const logs7d = sendLogs.filter((l: any) => new Date(l.createdAt) >= sevenDaysAgo);
+    const logs30d = sendLogs.filter((l: any) => new Date(l.createdAt) >= thirtyDaysAgo);
+    const sent7d = logs7d.filter((l: any) => l.status === 'sent').length;
+    const failed7d = logs7d.filter((l: any) => l.status === 'failed' || l.status === 'bounced').length;
+    const sent30d = logs30d.filter((l: any) => l.status === 'sent').length;
+    const failed30d = logs30d.filter((l: any) => l.status === 'failed' || l.status === 'bounced').length;
+
+    // Template performance
+    const templateMap = new Map<string, { name: string; total: number; sent: number }>();
+    for (const log of sendLogs) {
+      const tplName = (log as any).templateName || '未知模板';
+      if (!templateMap.has(tplName)) templateMap.set(tplName, { name: tplName, total: 0, sent: 0 });
+      const entry = templateMap.get(tplName)!;
+      entry.total++;
+      if (log.status === 'sent') entry.sent++;
+    }
+    const byTemplate = [...templateMap.values()]
+      .map((t) => ({ ...t, rate: t.total > 0 ? Math.round((t.sent / t.total) * 100) : 0 }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
 
     return {
       customers: formattedCustomers,
@@ -171,13 +214,26 @@ export class StateController {
         overdueTodoCount: formattedTodos.filter(
           (t: any) => t.dueAt && new Date(t.dueAt) < new Date(),
         ).length,
+        emailActivity: {
+          days7: { total: logs7d.length, sent: sent7d, failed: failed7d, rate: logs7d.length > 0 ? Math.round((sent7d / logs7d.length) * 100) : 0 },
+          days30: { total: logs30d.length, sent: sent30d, failed: failed30d, rate: logs30d.length > 0 ? Math.round((sent30d / logs30d.length) * 100) : 0 },
+          byTemplate,
+        },
       },
+      users,
+      backups,
+      suppressions,
+      auditLogs,
+      trashItems,
       settings: {
         searchProfiles,
         aiProfile,
         smtpProfile,
         imapProfile,
+        emailPolicy,
       },
+      username: (users as any[])?.[0]?.username || '',
+      displayName: (users as any[])?.[0]?.displayName || '',
     };
   }
 }

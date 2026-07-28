@@ -13,6 +13,7 @@ import {
   AiProfileDto,
   SmtpProfileDto,
   ImapProfileDto,
+  EmailPolicyDto,
 } from './dto';
 
 @Controller('settings')
@@ -93,5 +94,17 @@ export class SettingsController {
   @Post('imap-profile')
   saveImapProfile(@Body() profile: ImapProfileDto) {
     return this.settingsService.saveImapProfile(profile);
+  }
+
+  // ==================== Email Policy ====================
+
+  @Get('email-policy')
+  getEmailPolicy() {
+    return this.settingsService.getEmailPolicy();
+  }
+
+  @Post('email-policy')
+  saveEmailPolicy(@Body() policy: EmailPolicyDto) {
+    return this.settingsService.saveEmailPolicy(policy);
   }
 }

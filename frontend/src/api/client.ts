@@ -25,6 +25,12 @@ import type {
   AppState,
   CustomerView,
   DashboardData,
+  User,
+  EmailPolicy,
+  SuppressionEntry,
+  BackupSettings,
+  Backup,
+  AuditEntry,
 } from "@/types";
 
 export type {
@@ -42,6 +48,7 @@ export type {
   Sample,
   EmailTemplate,
   EmailTask,
+  EmailRecipient,
   SendLog,
   B2BLeadTask,
   B2BLead,
@@ -54,6 +61,12 @@ export type {
   AppState,
   CustomerView,
   DashboardData,
+  User,
+  EmailPolicy,
+  SuppressionEntry,
+  BackupSettings,
+  Backup,
+  AuditEntry,
 };
 
 interface ApiOptions {
@@ -394,6 +407,23 @@ export async function deleteEmailTask(id: string): Promise<void> {
   await api(`/api/email-tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+export async function getEmailRecipients(params?: Record<string, string>): Promise<{
+  recipients: EmailRecipient[];
+  total: number;
+  offset: number;
+  limit: number;
+}> {
+  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+  return api(`/api/email-recipients${qs}`);
+}
+
+export async function getEmailRecipientIds(params?: Record<string, string>): Promise<{
+  ids: string[];
+}> {
+  const qs = params ? '?' + new URLSearchParams({ ...params, ids: 'true' }).toString() : '?ids=true';
+  return api(`/api/email-recipients${qs}`);
+}
+
 // Send Logs API
 export async function deleteSendLog(id: string): Promise<void> {
   await api(`/api/send-logs/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -502,4 +532,77 @@ export async function previewImport(file: File): Promise<{ duplicateCount: numbe
   const formData = new FormData();
   formData.append("file", file);
   return api("/api/import/preview", { method: "POST", rawBody: formData });
+}
+
+// Users API
+export async function getUsers(): Promise<User[]> {
+  const result = await api<{ users: User[] }>("/api/users");
+  return result.users || [];
+}
+
+export async function createUser(data: { username: string; displayName: string; email?: string; role: string; password: string }): Promise<User> {
+  return api<User>("/api/users", { method: "POST", body: data });
+}
+
+export async function updateUser(id: string, data: Partial<User>): Promise<User> {
+  return api<User>(`/api/users/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function resetUserPassword(id: string, password: string): Promise<void> {
+  await api(`/api/users/${encodeURIComponent(id)}/reset-password`, { method: "POST", body: { password } });
+}
+
+// Backup API
+export async function getBackupData(): Promise<{ settings: BackupSettings; backups: Backup[] }> {
+  const settings = await api<BackupSettings>("/api/backup/settings");
+  const backups = await api<Backup[]>("/api/backup/list");
+  return { settings, backups };
+}
+
+export async function createBackup(): Promise<Backup> {
+  return api<Backup>("/api/backup/create", { method: "POST" });
+}
+
+export async function saveBackupSettings(settings: Partial<BackupSettings>): Promise<BackupSettings> {
+  return api<BackupSettings>("/api/backup/settings", { method: "POST", body: settings });
+}
+
+// Email Policy API
+export async function getEmailPolicy(): Promise<EmailPolicy> {
+  return api("/api/settings/email-policy");
+}
+
+export async function saveEmailPolicy(policy: Partial<EmailPolicy>): Promise<EmailPolicy> {
+  return api<EmailPolicy>("/api/settings/email-policy", { method: "POST", body: policy });
+}
+
+// Suppression API
+export async function getSuppressions(): Promise<SuppressionEntry[]> {
+  return api<SuppressionEntry[]>("/api/suppressions");
+}
+
+export async function addSuppression(data: { email: string; reason: string }): Promise<void> {
+  await api("/api/suppressions", { method: "POST", body: data });
+}
+
+export async function deleteSuppression(id: string): Promise<void> {
+  await api(`/api/suppressions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// Audit API
+export async function getAuditLogs(): Promise<AuditEntry[]> {
+  return api<AuditEntry[]>("/api/audit-logs");
+}
+
+// Trash API
+export async function getTrashItems(): Promise<{ id: string; type: string; name: string; deletedAt: string }[]> {
+  return api<any[]>("/api/trash");
+}
+
+export async function restoreTrashItem(id: string): Promise<void> {
+  await api(`/api/trash/${encodeURIComponent(id)}/restore`, { method: "POST" });
+}
+
+export async function deleteTrashItem(id: string): Promise<void> {
+  await api(`/api/trash/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

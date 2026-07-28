@@ -6,6 +6,9 @@ interface AuthContextType {
   isInitialized: boolean;
   needsSetup: boolean;
   username: string;
+  displayName: string;
+  userId: string;
+  role: string;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -18,6 +21,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [userId, setUserId] = useState("");
+  const [role, setRole] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -27,9 +33,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsInitialized(status.initialized);
         setIsAuthenticated(status.authenticated);
         setUsername(status.username);
+        setDisplayName(status.displayName || "");
+        setUserId(status.userId || "");
+        setRole(status.role || "");
       } catch {
         setIsAuthenticated(false);
         setUsername("");
+        setDisplayName("");
+        setUserId("");
+        setRole("");
       } finally {
         setIsLoading(false);
       }
@@ -41,12 +53,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const result = await apiLogin(user, password);
     setIsAuthenticated(true);
     setUsername(result.username);
+    setDisplayName(result.displayName || "");
+    setUserId(result.userId || "");
+    setRole(result.role || "");
   }, []);
 
   const logout = useCallback(async () => {
     await apiLogout();
     setIsAuthenticated(false);
     setUsername("");
+    setDisplayName("");
+    setUserId("");
+    setRole("");
   }, []);
 
   const setup = useCallback(async (user: string, password: string) => {
@@ -54,6 +72,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsInitialized(true);
     setIsAuthenticated(true);
     setUsername(result.username);
+    setDisplayName(result.displayName || "");
+    setUserId(result.userId || "");
+    setRole(result.role || "");
   }, []);
 
   return (
@@ -63,6 +84,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isInitialized,
         needsSetup: !isInitialized,
         username,
+        displayName,
+        userId,
+        role,
         isLoading,
         login,
         logout,

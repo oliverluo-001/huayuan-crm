@@ -16,13 +16,20 @@ export class AuthService {
 
   async getStatus() {
     const count = await this.userRepository.count();
-    return {
-      initialized: count > 0,
-      authenticated: false,
-      username: null,
-      hasUser: count > 0,
-      userCount: count,
-    };
+    let userInfo: any = { initialized: count > 0, authenticated: false, username: null, displayName: null, userId: null, role: null };
+    if (count > 0) {
+      const firstUser = (await this.userRepository.find({ order: { id: 'ASC' }, take: 1 }))[0];
+      if (firstUser) {
+        userInfo = {
+          ...userInfo,
+          username: firstUser.username,
+          displayName: firstUser.displayName || null,
+          userId: String(firstUser.id),
+          role: firstUser.role,
+        };
+      }
+    }
+    return { ...userInfo, hasUser: count > 0, userCount: count };
   }
 
   async register(registerDto: RegisterDto) {
@@ -42,6 +49,9 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(registerDto.password, 10);
     const user = this.userRepository.create({
       username: registerDto.username,
+      displayName: registerDto.displayName || '',
+      email: registerDto.email || '',
+      role: (registerDto.role as any) || 'admin',
       passwordHash,
     });
 
@@ -49,8 +59,11 @@ export class AuthService {
 
     const token = this.generateToken(user);
     return {
-      user: { id: user.id, username: user.username },
+      user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
       username: user.username,
+      displayName: user.displayName,
+      userId: String(user.id),
+      role: user.role,
       token,
     };
   }
@@ -75,8 +88,11 @@ export class AuthService {
 
     const token = this.generateToken(user);
     return {
-      user: { id: user.id, username: user.username },
+      user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
       username: user.username,
+      displayName: user.displayName,
+      userId: String(user.id),
+      role: user.role,
       token,
     };
   }
@@ -113,7 +129,7 @@ export class AuthService {
   }
 
   private generateToken(user: User) {
-    const payload = { sub: user.id, username: user.username };
+    const payload = { sub: user.id, username: user.username, displayName: user.displayName, role: user.role };
     return this.jwtService.sign(payload);
   }
 }

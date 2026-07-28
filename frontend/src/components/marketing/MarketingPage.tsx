@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,7 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Edit, Trash2, Play, StopCircle, Mail } from "lucide-react";
+import { Plus, Edit, Trash2, Play, StopCircle, Mail, ImageIcon } from "lucide-react";
+import { toast } from "sonner";
 import {
   getTemplates,
   createTemplate,
@@ -20,7 +21,9 @@ import {
   runEmailTask,
   cancelEmailTask,
   deleteEmailTask,
+  deleteSendLog,
   getCustomers,
+  getState,
   type EmailTemplate,
   type EmailTask,
   type Customer,
@@ -31,11 +34,11 @@ export function MarketingPage() {
   const [activeTab, setActiveTab] = useState("templates");
 
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-      <TabsList>
-        <TabsTrigger value="templates">邮件模板</TabsTrigger>
-        <TabsTrigger value="tasks">定时邮件任务</TabsTrigger>
-        <TabsTrigger value="logs">发送记录</TabsTrigger>
+    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col gap-4">
+      <TabsList className="w-full">
+        <TabsTrigger value="templates" className="flex-1">邮件模板</TabsTrigger>
+        <TabsTrigger value="tasks" className="flex-1">定时邮件任务</TabsTrigger>
+        <TabsTrigger value="logs" className="flex-1">发送记录</TabsTrigger>
       </TabsList>
 
       <TabsContent value="templates">
@@ -57,6 +60,9 @@ function TemplatesTab() {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [templateImages, setTemplateImages] = useState<Map<string, { id: string; name: string; dataUrl: string }>>(new Map());
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [form, setForm] = useState({
     name: "",
     subject: "",
@@ -79,10 +85,13 @@ function TemplatesTab() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const images = [...templateImages.values()].filter((img) =>
+      form.body.includes(`template-image:${img.id}`)
+    );
     if (editingId) {
-      await updateTemplate(editingId, form);
+      await updateTemplate(editingId, { ...form, images });
     } else {
-      await createTemplate(form);
+      await createTemplate({ ...form, images });
     }
     setForm({
       name: "",
@@ -90,6 +99,7 @@ function TemplatesTab() {
       body: `Hi {{contact}},\n\nWe are contacting you about {{product}}. Please let us know if your company {{company}} has related purchasing plans.\n\nBest regards`,
     });
     setEditingId(null);
+    setTemplateImages(new Map());
     fetchTemplates();
   };
 
@@ -99,6 +109,13 @@ function TemplatesTab() {
       subject: template.subject,
       body: template.body,
     });
+    const images = new Map<string, { id: string; name: string; dataUrl: string }>();
+    if (template.images) {
+      for (const img of template.images) {
+        images.set(img.id, { id: img.id, name: img.name || "", dataUrl: img.dataUrl });
+      }
+    }
+    setTemplateImages(images);
     setEditingId(template.id);
   };
 
@@ -106,6 +123,73 @@ function TemplatesTab() {
     if (!confirm("确定删除该模板吗？")) return;
     await deleteTemplate(id);
     fetchTemplates();
+  };
+
+  const compressTemplateImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      if (file.type === "image/gif" && file.size <= 2 * 1024 * 1024) {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 1200 / img.naturalWidth, 900 / img.naturalHeight);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const mime = file.type === "image/png" ? "image/png" : "image/jpeg";
+        let output = canvas.toDataURL(mime, 0.84);
+        if (output.length > 2_800_000) {
+          output = canvas.toDataURL("image/jpeg", 0.72);
+        }
+        resolve(output);
+      };
+      img.onerror = () => reject(new Error("无法解析图片"));
+      const reader = new FileReader();
+      reader.onload = () => { img.src = reader.result as string; };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleInsertImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!/^image\/(png|jpeg|gif|webp)$/i.test(file.type)) {
+      toast.error("仅支持 PNG、JPEG、GIF、WebP 格式");
+      return;
+    }
+    try {
+      const dataUrl = await compressTemplateImage(file);
+      const imageId = `img_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      setTemplateImages((prev) => {
+        const next = new Map(prev);
+        next.set(imageId, { id: imageId, name: file.name, dataUrl });
+        return next;
+      });
+      const imageHtml = `\n<img src="template-image:${imageId}" alt="${file.name}" style="display:block;max-width:100%;height:auto;">\n`;
+      const ta = bodyTextareaRef.current;
+      if (ta) {
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        const newBody = form.body.slice(0, start) + imageHtml + form.body.slice(end);
+        setForm({ ...form, body: newBody });
+        requestAnimationFrame(() => {
+          ta.selectionStart = ta.selectionEnd = start + imageHtml.length;
+          ta.focus();
+        });
+      } else {
+        setForm({ ...form, body: form.body + imageHtml });
+      }
+    } catch (err) {
+      toast.error("图片处理失败");
+    }
+    if (imageInputRef.current) imageInputRef.current.value = "";
   };
 
   return (
@@ -139,14 +223,35 @@ function TemplatesTab() {
             <div className="space-y-2">
               <Label>邮件正文 *</Label>
               <Textarea
+                ref={bodyTextareaRef}
                 rows={7}
                 value={form.body}
                 onChange={(e) => setForm({ ...form, body: e.target.value })}
                 required
               />
-              <p className="text-xs text-muted-foreground">
-                可使用变量：{"{{company}}"}, {"{{contact}}"}, {"{{product}}"}
-              </p>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={() => imageInputRef.current?.click()}>
+                    <ImageIcon className="h-4 w-4 mr-1" />
+                    插入图片
+                  </Button>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    hidden
+                    onChange={handleInsertImage}
+                  />
+                  {templateImages.size > 0 && (
+                    <span className="text-xs text-muted-foreground">
+                      已上传 {templateImages.size} 张图片
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  可使用变量：{"{{company}}"}, {"{{contact}}"}, {"{{product}}"}
+                </p>
+              </div>
             </div>
             <div className="flex gap-2">
               <Button type="submit">
@@ -559,7 +664,7 @@ function SendLogsTab() {
   const fetchLogs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const state = await import("@/api/client").then((m) => m.getState());
+      const state = await getState();
       setLogs(state.sendLogs as any);
     } finally {
       setIsLoading(false);
@@ -571,7 +676,6 @@ function SendLogsTab() {
   }, [fetchLogs]);
 
   const handleDelete = async (id: string) => {
-    const { deleteSendLog } = await import("@/api/client");
     await deleteSendLog(id);
     fetchLogs();
   };

@@ -6,12 +6,14 @@ import {
   UpdateDateColumn,
   ManyToMany,
   JoinTable,
+  DeleteDateColumn,
 } from 'typeorm';
 import { Tag } from './tag.entity';
 
 export type CustomerTier = 'A' | 'B' | 'C' | 'D' | '';
 export type JourneyStage = 'prospect' | 'lead' | 'qualified' | 'proposal' | 'negotiation' | 'closed' | '';
 export type EmailStatus = 'valid' | 'invalid' | 'unknown';
+export type CustomerHealth = 'good' | 'warning' | 'critical' | '';
 
 @Entity('customers')
 export class Customer {
@@ -75,6 +77,30 @@ export class Customer {
   @Column({ type: 'varchar', length: 100, default: '' })
   source: string;
 
+  @Column({ name: 'owner_id', type: 'varchar', length: 32, default: '' })
+  ownerId: string;
+
+  @Column({ type: 'varchar', length: 10, default: '' })
+  health: CustomerHealth;
+
+  @Column({ name: 'last_activity_at', type: 'timestamp', nullable: true })
+  lastActivityAt: Date;
+
+  @Column({ name: 'last_activity_type', type: 'varchar', length: 50, default: '' })
+  lastActivityType: string;
+
+  @Column({ name: 'next_todo_at', type: 'timestamp', nullable: true })
+  nextTodoAt: Date;
+
+  @Column({ name: 'next_todo_title', type: 'varchar', length: 255, default: '' })
+  nextTodoTitle: string;
+
+  @Column({ name: 'open_opportunity_count', type: 'int', default: 0 })
+  openOpportunityCount: number;
+
+  @Column({ name: 'open_opportunity_value', type: 'decimal', precision: 15, scale: 2, default: 0 })
+  openOpportunityValue: number;
+
   @ManyToMany(() => Tag, { cascade: true, eager: true })
   @JoinTable({
     name: 'customer_tags',
@@ -82,6 +108,9 @@ export class Customer {
     inverseJoinColumn: { name: 'tag_id', referencedColumnName: 'id' },
   })
   tags: Tag[];
+
+  @DeleteDateColumn({ name: 'deleted_at' })
+  deletedAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
