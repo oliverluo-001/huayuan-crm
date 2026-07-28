@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import { getAuthStatus, login as apiLogin, logout as apiLogout, setup as apiSetup } from "@/api/client";
+import { getAuthStatus, login as apiLogin, logout as apiLogout, setup as apiSetup, register as apiRegister } from "@/api/client";
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -13,6 +13,7 @@ interface AuthContextType {
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   setup: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string, displayName?: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -77,6 +78,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRole(result.role || "");
   }, []);
 
+  const register = useCallback(async (user: string, password: string, displayName?: string) => {
+    const result = await apiRegister(user, password, displayName);
+    setIsAuthenticated(true);
+    setUsername(result.username);
+    setDisplayName(displayName || "");
+    setUserId(result.userId || "");
+    setRole(result.role || "");
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -91,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         setup,
+        register,
       }}
     >
       {children}

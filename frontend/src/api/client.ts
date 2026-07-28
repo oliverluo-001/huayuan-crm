@@ -168,6 +168,17 @@ export async function login(username: string, password: string): Promise<LoginRe
   };
 }
 
+export async function register(username: string, password: string, displayName?: string): Promise<LoginResult> {
+  const result = await api<{ user?: { username?: string }; username?: string; ok?: boolean }>("/api/auth/register", {
+    method: "POST",
+    body: { username, password, displayName: displayName || username, role: "sales" },
+  });
+  return {
+    ok: result.ok ?? true,
+    username: result.username ?? result.user?.username ?? "",
+  };
+}
+
 export async function logout(): Promise<void> {
   await api("/api/auth/logout", { method: "POST" });
 }

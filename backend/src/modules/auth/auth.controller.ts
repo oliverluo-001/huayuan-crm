@@ -25,6 +25,12 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Public()
+  @Post('register')
+  async registerUser(@Body() registerDto: RegisterDto) {
+    return this.authService.registerUser(registerDto);
+  }
+
   @Post('logout')
   async logout() {
     return { success: true, message: '已退出登录' };

@@ -4,24 +4,59 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export function LoginScreen() {
-  const { login } = useAuth();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState("");
+  const { login, register } = useAuth();
+  const [tab, setTab] = useState("login");
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Login form
+  const [loginUser, setLoginUser] = useState("");
+  const [loginPass, setLoginPass] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+
+  // Register form
+  const [regUser, setRegUser] = useState("");
+  const [regDisplay, setRegDisplay] = useState("");
+  const [regPass, setRegPass] = useState("");
+  const [regConfirm, setRegConfirm] = useState("");
+  const [regLoading, setRegLoading] = useState(false);
+  const [regError, setRegError] = useState("");
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-    setIsLoading(true);
+    setLoginError("");
+    setLoginLoading(true);
     try {
-      await login(username, password);
+      await login(loginUser, loginPass);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登录失败");
+      setLoginError(err instanceof Error ? err.message : "登录失败");
     } finally {
-      setIsLoading(false);
+      setLoginLoading(false);
+    }
+  };
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError("");
+
+    if (regPass !== regConfirm) {
+      setRegError("两次输入的密码不一致");
+      return;
+    }
+    if (regPass.length < 6) {
+      setRegError("密码长度至少为6位");
+      return;
+    }
+
+    setRegLoading(true);
+    try {
+      await register(regUser, regPass, regDisplay || regUser);
+    } catch (err) {
+      setRegError(err instanceof Error ? err.message : "注册失败");
+    } finally {
+      setRegLoading(false);
     }
   };
 
@@ -39,45 +74,110 @@ export function LoginScreen() {
 
         <Card>
           <CardHeader>
-            <CardDescription>本机安全登录</CardDescription>
-            <CardTitle className="text-2xl">欢迎回来</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              登录后继续管理客户与获客任务。
-            </p>
+            <CardDescription>本机安全管理</CardDescription>
+            <CardTitle className="text-2xl">外贸 CRM</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="username">账号</Label>
-                <Input
-                  id="username"
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="请输入账号"
-                  required
-                  autoComplete="username"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">密码</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="请输入密码"
-                  required
-                  autoComplete="current-password"
-                />
-              </div>
-              {error && (
-                <p className="text-sm text-destructive">{error}</p>
-              )}
-              <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "登录中..." : "登录"}
-              </Button>
-            </form>
+            <Tabs value={tab} onValueChange={setTab} className="w-full flex flex-col gap-4">
+              <TabsList className="w-full">
+                <TabsTrigger value="login" className="flex-1">登录</TabsTrigger>
+                <TabsTrigger value="register" className="flex-1">注册</TabsTrigger>
+              </TabsList>
+              <TabsContent value="login">
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="login-username">账号</Label>
+                    <Input
+                      id="login-username"
+                      type="text"
+                      value={loginUser}
+                      onChange={(e) => setLoginUser(e.target.value)}
+                      placeholder="请输入账号"
+                      required
+                      autoComplete="username"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="login-password">密码</Label>
+                    <Input
+                      id="login-password"
+                      type="password"
+                      value={loginPass}
+                      onChange={(e) => setLoginPass(e.target.value)}
+                      placeholder="请输入密码"
+                      required
+                      autoComplete="current-password"
+                    />
+                  </div>
+                  {loginError && (
+                    <p className="text-sm text-destructive">{loginError}</p>
+                  )}
+                  <Button type="submit" className="w-full" disabled={loginLoading}>
+                    {loginLoading ? "登录中..." : "登录"}
+                  </Button>
+                </form>
+              </TabsContent>
+              <TabsContent value="register">
+                <form onSubmit={handleRegister} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="reg-username">账号 *</Label>
+                    <Input
+                      id="reg-username"
+                      type="text"
+                      value={regUser}
+                      onChange={(e) => setRegUser(e.target.value)}
+                      placeholder="登录用户名"
+                      required
+                      minLength={2}
+                      autoComplete="username"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reg-display">显示名称</Label>
+                    <Input
+                      id="reg-display"
+                      type="text"
+                      value={regDisplay}
+                      onChange={(e) => setRegDisplay(e.target.value)}
+                      placeholder="选填，默认使用账号名"
+                      autoComplete="name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reg-password">密码 *</Label>
+                    <Input
+                      id="reg-password"
+                      type="password"
+                      value={regPass}
+                      onChange={(e) => setRegPass(e.target.value)}
+                      placeholder="至少6位"
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="reg-confirm">确认密码 *</Label>
+                    <Input
+                      id="reg-confirm"
+                      type="password"
+                      value={regConfirm}
+                      onChange={(e) => setRegConfirm(e.target.value)}
+                      placeholder="再次输入密码"
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
+                    />
+                  </div>
+                  {regError && (
+                    <p className="text-sm text-destructive">{regError}</p>
+                  )}
+                  <Button type="submit" className="w-full" disabled={regLoading}>
+                    {regLoading ? "注册中..." : "创建账号"}
+                  </Button>
+                </form>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </div>

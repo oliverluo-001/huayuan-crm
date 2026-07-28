@@ -97,6 +97,37 @@ export class AuthService {
     };
   }
 
+  async registerUser(registerDto: RegisterDto) {
+    const existingUser = await this.userRepository.findOne({
+      where: { username: registerDto.username },
+    });
+
+    if (existingUser) {
+      throw new BadRequestException('用户名已存在');
+    }
+
+    const passwordHash = await bcrypt.hash(registerDto.password, 10);
+    const user = this.userRepository.create({
+      username: registerDto.username,
+      displayName: registerDto.displayName || '',
+      email: registerDto.email || '',
+      role: (registerDto.role as any) || 'sales',
+      passwordHash,
+    });
+
+    await this.userRepository.save(user);
+
+    const token = this.generateToken(user);
+    return {
+      user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
+      username: user.username,
+      displayName: user.displayName,
+      userId: String(user.id),
+      role: user.role,
+      token,
+    };
+  }
+
   async resetAll() {
     await this.userRepository.query('DELETE FROM `users`');
     return { success: true, message: '所有用户已重置' };
