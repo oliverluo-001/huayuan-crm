@@ -458,7 +458,7 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
               <Button
                 variant="outline"
                 onClick={() => {
-                  setFilters({ q: "", tag: "", tier: "", journeyStage: "", region: "", emailStatus: "", health: "" });
+                  setFilters({ q: "", tag: "", tier: "", journeyStage: "", region: "", emailStatus: "", health: "", ownerId: "" });
                   setPage(1);
                 }}
               >
