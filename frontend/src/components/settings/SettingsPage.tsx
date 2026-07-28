@@ -205,7 +205,7 @@ export function SettingsPage() {
         smtpUser: smtpForm.smtpUser,
         smtpFrom: smtpForm.smtpFrom,
         pass: smtpForm.smtpPass || undefined,
-      });
+      } as any);
       toast.success("SMTP 配置已保存");
       fetchData();
     } catch (error) {
@@ -413,7 +413,7 @@ export function SettingsPage() {
 
   const handleEditUser = async (userId: string) => {
     try {
-      await updateUser(userId, userEditForm);
+      await updateUser(userId, userEditForm as Partial<User>);
       toast.success("账号信息已更新");
       setEditingUserId(null);
       fetchUsers();

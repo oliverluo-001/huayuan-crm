@@ -356,11 +356,11 @@ export function QuotesPage() {
                       <Button variant="ghost" size="sm" onClick={() => handleEdit(quote)}>
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="sm" asChild>
-                        <a href={`/api/quotes/${quote.id}/export`} target="_blank" rel="noopener noreferrer">
+                      <a href={`/api/quotes/${quote.id}/export`} target="_blank" rel="noopener noreferrer">
+                        <Button variant="ghost" size="sm">
                           <Download className="h-4 w-4" />
-                        </a>
-                      </Button>
+                        </Button>
+                      </a>
                       <Button
                         variant="ghost"
                         size="sm"

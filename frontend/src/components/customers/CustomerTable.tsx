@@ -96,6 +96,7 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
     region: "",
     emailStatus: "",
     health: "",
+    ownerId: "",
   });
 
   // Dialogs

@@ -27,6 +27,7 @@ import type {
   DashboardData,
   User,
   EmailPolicy,
+  EmailRecipient,
   SuppressionEntry,
   BackupSettings,
   Backup,

@@ -112,7 +112,8 @@ function TemplatesTab() {
     const images = new Map<string, { id: string; name: string; dataUrl: string }>();
     if (template.images) {
       for (const img of template.images) {
-        images.set(img.id, { id: img.id, name: img.name || "", dataUrl: img.dataUrl });
+        const imgAny = img as { id: string; name?: string; dataUrl: string };
+        images.set(img.id, { id: img.id, name: imgAny.name || "", dataUrl: img.dataUrl });
       }
     }
     setTemplateImages(images);
