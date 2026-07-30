@@ -1,39 +1,66 @@
-import { Controller, Get, Post, Put, Body, Param, ParseIntPipe } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Put,
+  Req,
+} from '@nestjs/common';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto, ResetPasswordDto } from './dto';
+import { CreateUserDto, ResetPasswordDto, UpdateUserDto } from './dto';
 
+@Roles('admin')
 @Controller('users')
 export class UsersController {
-  constructor(private usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  async findAll() {
+  findAll() {
     return this.usersService.findAll();
   }
 
   @Get(':id')
-  async findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.findOne(id);
   }
 
   @Post()
-  async create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  create(@Body() dto: CreateUserDto) {
+    return this.usersService.create(dto);
   }
 
   @Put(':id')
-  async update(
+  update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateUserDto: UpdateUserDto,
+    @Body() dto: UpdateUserDto,
   ) {
-    return this.usersService.update(id, updateUserDto);
+    return this.usersService.update(id, dto);
+  }
+
+  @Post(':id/approve')
+  approve(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: any,
+  ) {
+    return this.usersService.approve(id, Number(req.user.sub));
+  }
+
+  @Post(':id/reject')
+  reject(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: any,
+  ) {
+    return this.usersService.reject(id, Number(req.user.sub));
   }
 
   @Post(':id/reset-password')
-  async resetPassword(
+  resetPassword(
     @Param('id', ParseIntPipe) id: number,
-    @Body() resetPasswordDto: ResetPasswordDto,
+    @Body() dto: ResetPasswordDto,
   ) {
-    return this.usersService.resetPassword(id, resetPasswordDto);
+    return this.usersService.resetPassword(id, dto);
   }
 }

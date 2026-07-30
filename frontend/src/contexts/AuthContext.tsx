@@ -1,5 +1,14 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import { getAuthStatus, login as apiLogin, logout as apiLogout, setup as apiSetup, register as apiRegister } from "@/api/client";
+import {
+  getAuthStatus,
+  login as apiLogin,
+  logout as apiLogout,
+  setup as apiSetup,
+  register as apiRegister,
+  setUnauthorizedCallback,
+  setSetupCallback,
+} from "@/api/client";
+import type { RegisterResult } from "@/types";
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -9,11 +18,13 @@ interface AuthContextType {
   displayName: string;
   userId: string;
   role: string;
+  registrationEnabled: boolean;
+  registrationRequiresApproval: boolean;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   setup: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string, displayName?: string) => Promise<void>;
+  register: (username: string, password: string, displayName: string, email: string) => Promise<RegisterResult>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -25,7 +36,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [displayName, setDisplayName] = useState("");
   const [userId, setUserId] = useState("");
   const [role, setRole] = useState("");
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
+  const [registrationRequiresApproval, setRegistrationRequiresApproval] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    setUnauthorizedCallback(() => {
+      setIsAuthenticated(false);
+      setUsername("");
+      setDisplayName("");
+      setUserId("");
+      setRole("");
+    });
+    setSetupCallback(() => {
+      setIsInitialized(false);
+      setIsAuthenticated(false);
+    });
+  }, []);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -37,6 +64,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setDisplayName(status.displayName || "");
         setUserId(status.userId || "");
         setRole(status.role || "");
+        setRegistrationEnabled(status.registrationEnabled === true);
+        setRegistrationRequiresApproval(status.registrationRequiresApproval !== false);
       } catch {
         setIsAuthenticated(false);
         setUsername("");
@@ -78,13 +107,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRole(result.role || "");
   }, []);
 
-  const register = useCallback(async (user: string, password: string, displayName?: string) => {
-    const result = await apiRegister(user, password, displayName);
-    setIsAuthenticated(true);
-    setUsername(result.username);
-    setDisplayName(displayName || "");
-    setUserId(result.userId || "");
-    setRole(result.role || "");
+  const register = useCallback(async (user: string, password: string, displayName: string, email: string) => {
+    const result = await apiRegister(user, password, displayName, email);
+    if (!result.requiresApproval) {
+      setIsAuthenticated(true);
+      setUsername(result.username);
+      setDisplayName(result.displayName || displayName);
+      setUserId(result.userId || "");
+      setRole(result.role || "");
+    }
+    return result;
   }, []);
 
   return (
@@ -97,6 +129,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         displayName,
         userId,
         role,
+        registrationEnabled,
+        registrationRequiresApproval,
         isLoading,
         login,
         logout,

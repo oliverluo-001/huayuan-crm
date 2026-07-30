@@ -1,41 +1,73 @@
 import {
-  Injectable,
   CanActivate,
   ExecutionContext,
+  Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { Reflector } from '@nestjs/core';
+import { InjectRepository } from '@nestjs/typeorm';
+import { JwtService } from '@nestjs/jwt';
+import { Repository } from 'typeorm';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { User } from '../../modules/auth/entities/user.entity';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
-    private jwtService: JwtService,
-    private configService: ConfigService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly reflector: Reflector,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
-    const token = this.extractTokenFromHeader(request);
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
 
-    if (!token) {
-      throw new UnauthorizedException('未授权访问');
-    }
+    const request = context.switchToHttp().getRequest();
+    const token = this.extractToken(request);
+    if (!token) throw new UnauthorizedException('登录已失效，请重新登录');
 
     try {
       const payload = await this.jwtService.verifyAsync(token, {
         secret: this.configService.get<string>('JWT_SECRET'),
       });
-      request['user'] = payload;
-    } catch {
-      throw new UnauthorizedException('无效的令牌');
+      const user = await this.userRepository.findOne({ where: { id: Number(payload.sub) } });
+      if (
+        !user ||
+        user.status !== 'active' ||
+        !user.active ||
+        Number(payload.ver || 0) !== Number(user.tokenVersion || 0)
+      ) {
+        throw new UnauthorizedException('账号不可用或登录已失效');
+      }
+      request.user = {
+        sub: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        role: user.role,
+        ver: user.tokenVersion,
+      };
+      return true;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      throw new UnauthorizedException('登录已失效，请重新登录');
     }
-
-    return true;
   }
 
-  private extractTokenFromHeader(request: any): string | undefined {
-    const [type, token] = request.headers.authorization?.split(' ') ?? [];
-    return type === 'Bearer' ? token : undefined;
+  private extractToken(request: any): string | undefined {
+    const [type, bearerToken] = request.headers.authorization?.split(' ') ?? [];
+    if (type === 'Bearer' && bearerToken) return bearerToken;
+    const cookies = String(request.headers.cookie || '').split(';');
+    for (const cookie of cookies) {
+      const [name, ...parts] = cookie.trim().split('=');
+      if (name === 'crm_session') return decodeURIComponent(parts.join('='));
+    }
+    return undefined;
   }
 }

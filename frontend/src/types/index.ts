@@ -6,6 +6,9 @@ export interface AuthStatus {
   displayName?: string;
   userId?: string;
   role?: string;
+  registrationMode?: "approval" | "open" | "disabled";
+  registrationEnabled?: boolean;
+  registrationRequiresApproval?: boolean;
 }
 
 export interface LoginResult {
@@ -16,13 +19,25 @@ export interface LoginResult {
   role?: string;
 }
 
+export interface RegisterResult extends LoginResult {
+  requiresApproval: boolean;
+  message?: string;
+}
+
 export interface User {
   id: string;
   username: string;
   displayName?: string;
   email?: string;
-  role: "sales" | "manager" | "admin";
+  role: "admin" | "sales" | "viewer";
+  status: "active" | "pending" | "rejected";
+  active: boolean;
+  registrationSource?: "setup" | "admin" | "self";
+  approvedAt?: string;
+  approvedBy?: string;
+  lastLoginAt?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 // Customer types

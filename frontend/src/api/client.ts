@@ -1,6 +1,7 @@
 import type {
   AuthStatus,
   LoginResult,
+  RegisterResult,
   Customer,
   CustomerListResult,
   Customer360,
@@ -37,6 +38,7 @@ import type {
 export type {
   AuthStatus,
   LoginResult,
+  RegisterResult,
   Customer,
   CustomerListResult,
   Customer360,
@@ -137,46 +139,61 @@ async function api<T = unknown>(url: string, options: ApiOptions = {}): Promise<
 
 // Auth API
 export async function getAuthStatus(): Promise<AuthStatus> {
-  const result = await api<{ hasUser?: boolean; userCount?: number; initialized?: boolean; authenticated?: boolean; username?: string }>("/api/auth/status", { silent: true });
-  // Backend may return { hasUser } (wrapped by TransformInterceptor -> { data: { hasUser } })
-  // or directly { initialized, authenticated, username }
+  const result = await api<Partial<AuthStatus>>("/api/auth/status", { silent: true });
   return {
-    initialized: result.initialized ?? result.hasUser ?? false,
+    initialized: result.initialized ?? false,
     authenticated: result.authenticated ?? false,
     username: result.username ?? "",
+    displayName: result.displayName ?? "",
+    userId: result.userId ?? "",
+    role: result.role ?? "",
+    registrationMode: result.registrationMode ?? "approval",
+    registrationEnabled: result.registrationEnabled ?? false,
+    registrationRequiresApproval: result.registrationRequiresApproval ?? true,
   };
 }
 
 export async function setup(username: string, password: string): Promise<LoginResult> {
-  const result = await api<{ user?: { username?: string }; username?: string; ok?: boolean }>("/api/auth/setup", {
+  const result = await api<LoginResult & { user?: Partial<LoginResult> }>("/api/auth/setup", {
     method: "POST",
     body: { username, password },
   });
   return {
     ok: result.ok ?? true,
     username: result.username ?? result.user?.username ?? "",
+    displayName: result.displayName ?? result.user?.displayName ?? "",
+    userId: result.userId ?? result.user?.userId ?? "",
+    role: result.role ?? result.user?.role ?? "",
   };
 }
 
 export async function login(username: string, password: string): Promise<LoginResult> {
-  const result = await api<{ user?: { username?: string }; username?: string; ok?: boolean }>("/api/auth/login", {
+  const result = await api<LoginResult & { user?: Partial<LoginResult> }>("/api/auth/login", {
     method: "POST",
     body: { username, password },
   });
   return {
     ok: result.ok ?? true,
     username: result.username ?? result.user?.username ?? "",
+    displayName: result.displayName ?? result.user?.displayName ?? "",
+    userId: result.userId ?? result.user?.userId ?? "",
+    role: result.role ?? result.user?.role ?? "",
   };
 }
 
-export async function register(username: string, password: string, displayName?: string): Promise<LoginResult> {
-  const result = await api<{ user?: { username?: string }; username?: string; ok?: boolean }>("/api/auth/register", {
+export async function register(username: string, password: string, displayName: string, email: string): Promise<RegisterResult> {
+  const result = await api<RegisterResult & { user?: Partial<LoginResult> }>("/api/auth/register", {
     method: "POST",
-    body: { username, password, displayName: displayName || username, role: "sales" },
+    body: { username, password, displayName, email },
   });
   return {
     ok: result.ok ?? true,
     username: result.username ?? result.user?.username ?? "",
+    displayName: result.displayName ?? result.user?.displayName ?? displayName,
+    userId: result.userId ?? result.user?.userId ?? "",
+    role: result.role ?? result.user?.role ?? "sales",
+    requiresApproval: result.requiresApproval ?? true,
+    message: result.message,
   };
 }
 
@@ -548,8 +565,8 @@ export async function previewImport(file: File): Promise<{ duplicateCount: numbe
 
 // Users API
 export async function getUsers(): Promise<User[]> {
-  const result = await api<{ users: User[] }>("/api/users");
-  return result.users || [];
+  const result = await api<User[] | { users: User[] }>("/api/users");
+  return Array.isArray(result) ? result : result.users || [];
 }
 
 export async function createUser(data: { username: string; displayName: string; email?: string; role: string; password: string }): Promise<User> {
@@ -561,7 +578,15 @@ export async function updateUser(id: string, data: Partial<User>): Promise<User>
 }
 
 export async function resetUserPassword(id: string, password: string): Promise<void> {
-  await api(`/api/users/${encodeURIComponent(id)}/reset-password`, { method: "POST", body: { password } });
+  await api(`/api/users/${encodeURIComponent(id)}/reset-password`, { method: "POST", body: { newPassword: password } });
+}
+
+export async function approveUser(id: string): Promise<User> {
+  return api<User>(`/api/users/${encodeURIComponent(id)}/approve`, { method: "POST" });
+}
+
+export async function rejectUser(id: string): Promise<User> {
+  return api<User>(`/api/users/${encodeURIComponent(id)}/reject`, { method: "POST" });
 }
 
 // Backup API
@@ -617,4 +642,12 @@ export async function restoreTrashItem(id: string): Promise<void> {
 
 export async function deleteTrashItem(id: string): Promise<void> {
   await api(`/api/trash/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function getAccount(): Promise<User> {
+  return api<User>("/api/auth/account");
+}
+
+export async function updateAccount(data: { displayName: string; email: string }): Promise<User> {
+  return api<User>("/api/auth/account", { method: "PUT", body: data });
 }

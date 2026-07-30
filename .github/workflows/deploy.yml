@@ -73,6 +73,13 @@ jobs:
             DB_LOGGING=false
             JWT_SECRET=${{ secrets.JWT_SECRET }}
             JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN || '7d' }}
+            SESSION_TTL_HOURS=168
+            COOKIE_SECURE=true
+            TRUST_PROXY=true
+            CORS_ORIGINS=${{ secrets.CORS_ORIGINS || 'https://crm.huayuanflange.com' }}
+            REGISTRATION_MODE=approval
+            LOGIN_MAX_ATTEMPTS=5
+            LOGIN_LOCK_MINUTES=15
             DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
             DEEPSEEK_BASE_URL=${{ secrets.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1' }}
             EOF
@@ -80,6 +87,7 @@ jobs:
             # 安装生产依赖
             cd backend
             npm install --omit=dev
+            node dist/scripts/migrate.js
 
             # 使用 PM2 ecosystem 启动/重启
             cd $DEPLOY_DIR

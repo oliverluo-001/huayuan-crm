@@ -127,7 +127,10 @@ huayuan-crm/
 - 商机管线管理
 
 ### 系统管理
-- JWT 身份认证
+- MySQL 持久化团队账号
+- HttpOnly Cookie 会话与全局 API 鉴权
+- 在线注册、管理员审批、角色权限与账号停用
+- 登录失败锁定、密码重置后旧会话失效
 - 搜索数据源配置
 - AI 模型配置（DeepSeek / OpenAI 兼容）
 - 邮件服务器配置（SMTP / IMAP）
@@ -149,6 +152,9 @@ npm ci
 cp backend/.env.example backend/.env
 # 编辑 backend/.env 填写数据库配置
 
+# 已有数据库升级到当前结构（保留原业务数据）
+npm run db:migrate -w backend
+
 # 运行开发服务（前后端同时启动）
 npm run dev
 ```
@@ -156,6 +162,25 @@ npm run dev
 - 前端开发服务器: `http://localhost:9527`
 - 后端 API 服务器: `http://localhost:9528`
 - 前端通过 Vite proxy 将 `/api` 请求转发到后端
+
+### 在线账号模式
+
+第一次启动时创建初始管理员。之后团队成员可在登录页提交注册申请，管理员在“设置 → 团队账号”中批准、拒绝、分配角色或停用账号。
+
+```env
+REGISTRATION_MODE=approval
+SESSION_TTL_HOURS=168
+LOGIN_MAX_ATTEMPTS=5
+LOGIN_LOCK_MINUTES=15
+COOKIE_SECURE=false
+CORS_ORIGINS=http://localhost:9527
+```
+
+- `approval`: 允许注册，管理员批准后才能登录（推荐）。
+- `open`: 注册后立即启用，只适合受控内网。
+- `disabled`: 关闭公开注册，仅管理员创建账号。
+- 生产环境使用 HTTPS 时设置 `COOKIE_SECURE=true`。
+- `DB_SYNCHRONIZE=false` 时必须在部署中运行 `npm run db:migrate -w backend`。迁移只增加或调整账号字段，不会清空客户、邮件或销售数据。
 
 ## 生产部署
 
@@ -184,6 +209,7 @@ npm run dev
 | `DB_DATABASE` | 数据库名 |
 | `JWT_SECRET` | JWT 密钥 |
 | `JWT_EXPIRES_IN` | JWT 过期时间 |
+| `CORS_ORIGINS` | 允许访问 API 的前端域名，多个域名用英文逗号分隔 |
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥 (可选) |
 
 ### 部署流程
@@ -194,7 +220,7 @@ npm run dev
 2. 安装依赖 (`npm ci`)
 3. 构建前后端 (`npm run build`)
 4. 通过 SCP 上传到服务器
-5. 服务器端：写入 `.env` → 安装生产依赖 → PM2 重启 → 部署前端静态文件 → Nginx 重载
+5. 服务器端：写入 `.env` → 安装生产依赖 → 执行 MySQL 增量迁移 → PM2 重启 → 部署前端静态文件 → Nginx 重载
 
 ## 端口说明
 

@@ -6,8 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Save, KeyRound, Plus, Trash2, TestTube, RefreshCw, Loader2, Download, Database, Users, Ban, Shield, Clock, Edit } from "lucide-react";
+import { Save, KeyRound, Plus, Trash2, TestTube, RefreshCw, Loader2, Download, Database, Users, Ban, Shield, Clock, Edit, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   getState,
   saveSmtpProfile,
@@ -22,6 +23,10 @@ import {
   createUser,
   updateUser,
   resetUserPassword,
+  approveUser,
+  rejectUser,
+  getAccount,
+  updateAccount,
   getBackupData,
   createBackup,
   saveBackupSettings,
@@ -45,6 +50,8 @@ import {
 } from "@/api/client";
 
 export function SettingsPage() {
+  const { role } = useAuth();
+  const isAdmin = role === "admin";
   const [isLoading, setIsLoading] = useState(true);
 
   const [smtpForm, setSmtpForm] = useState<{
@@ -123,16 +130,14 @@ export function SettingsPage() {
   const [resetPasswordFor, setResetPasswordFor] = useState<string | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [userEditForm, setUserEditForm] = useState({ displayName: "", email: "", role: "sales" });
+  const [userEditForm, setUserEditForm] = useState({ displayName: "", email: "", role: "sales", active: true });
 
   // Audit & Trash
   const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
   const [trashItems, setTrashItems] = useState<any[]>([]);
 
-  const [accountInfo, setAccountInfo] = useState<{
-    username: string;
-    createdAt: string;
-  } | null>(null);
+  const [accountInfo, setAccountInfo] = useState<User | null>(null);
+  const [accountForm, setAccountForm] = useState({ displayName: "", email: "" });
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -160,12 +165,6 @@ export function SettingsPage() {
           imapMailbox: state.settings.imapProfile.imapMailbox || "INBOX",
           imapScanLimit: state.settings.imapProfile.imapScanLimit?.toString() || "50",
           imapUseSmtpCredentials: state.settings.imapProfile.imapUseSmtpCredentials ?? false,
-        });
-      }
-      if ((state as any).username) {
-        setAccountInfo({
-          username: (state as any).username,
-          createdAt: (state as any).createdAt || "",
         });
       }
       // AI Profile
@@ -239,8 +238,8 @@ export function SettingsPage() {
       toast.error("两次输入的新密码不一致");
       return;
     }
-    if (passwordForm.newPassword.length < 6) {
-      toast.error("新密码长度至少为6位");
+    if (passwordForm.newPassword.length < 8) {
+      toast.error("新密码长度至少为8位");
       return;
     }
     try {
@@ -395,7 +394,22 @@ export function SettingsPage() {
 
   // Team user handlers
   const fetchUsers = useCallback(async () => {
+    if (!isAdmin) {
+      setUsers([]);
+      return;
+    }
     try { setUsers(await getUsers()); } catch {}
+  }, [isAdmin]);
+
+  const fetchAccount = useCallback(async () => {
+    try {
+      const account = await getAccount();
+      setAccountInfo(account);
+      setAccountForm({
+        displayName: account.displayName || "",
+        email: account.email || "",
+      });
+    } catch {}
   }, []);
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -417,6 +431,32 @@ export function SettingsPage() {
       toast.success("账号信息已更新");
       setEditingUserId(null);
       fetchUsers();
+    } catch {}
+  };
+
+  const handleApproveUser = async (userId: string) => {
+    try {
+      await approveUser(userId);
+      toast.success("注册申请已批准");
+      fetchUsers();
+    } catch {}
+  };
+
+  const handleRejectUser = async (userId: string) => {
+    if (!confirm("确认拒绝此注册申请？")) return;
+    try {
+      await rejectUser(userId);
+      toast.success("注册申请已拒绝");
+      fetchUsers();
+    } catch {}
+  };
+
+  const handleSaveAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const account = await updateAccount(accountForm);
+      setAccountInfo(account);
+      toast.success("个人资料已更新");
     } catch {}
   };
 
@@ -451,10 +491,11 @@ export function SettingsPage() {
     fetchEmailPolicy();
     fetchSuppressions();
     fetchBackups();
+    fetchAccount();
     fetchUsers();
     fetchAuditLogs();
     fetchTrash();
-  }, [fetchData, fetchEmailPolicy, fetchSuppressions, fetchBackups, fetchUsers, fetchAuditLogs, fetchTrash]);
+  }, [fetchData, fetchEmailPolicy, fetchSuppressions, fetchBackups, fetchAccount, fetchUsers, fetchAuditLogs, fetchTrash]);
 
   return (
     <div className="space-y-8">
@@ -722,7 +763,7 @@ export function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>账户信息</CardTitle>
-              <CardDescription>当前登录账户基本信息</CardDescription>
+              <CardDescription>维护当前登录账户的个人资料</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -731,10 +772,47 @@ export function SettingsPage() {
                   <Skeleton className="h-4 w-48" />
                 </div>
               ) : accountInfo ? (
-                <div className="space-y-2">
-                  <p><span className="text-muted-foreground">用户名：</span>{accountInfo.username}</p>
-                  <p><span className="text-muted-foreground">创建时间：</span>{accountInfo.createdAt ? new Date(accountInfo.createdAt).toLocaleString() : "-"}</p>
-                </div>
+                <form onSubmit={handleSaveAccount} className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>用户名</Label>
+                      <Input value={accountInfo.username} disabled />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>角色</Label>
+                      <Input
+                        value={({ admin: "管理员", sales: "销售", viewer: "只读" } as Record<string, string>)[accountInfo.role] || accountInfo.role}
+                        disabled
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>显示名称</Label>
+                      <Input
+                        value={accountForm.displayName}
+                        onChange={(e) => setAccountForm({ ...accountForm, displayName: e.target.value })}
+                        maxLength={80}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>工作邮箱</Label>
+                      <Input
+                        type="email"
+                        value={accountForm.email}
+                        onChange={(e) => setAccountForm({ ...accountForm, email: e.target.value })}
+                        maxLength={190}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="text-xs text-muted-foreground">
+                      创建时间：{accountInfo.createdAt ? new Date(accountInfo.createdAt).toLocaleString() : "-"}
+                    </p>
+                    <Button type="submit">
+                      <Save className="mr-2 h-4 w-4" />
+                      保存个人资料
+                    </Button>
+                  </div>
+                </form>
               ) : (
                 <p className="text-muted-foreground">无法获取账户信息</p>
               )}
@@ -949,7 +1027,7 @@ export function SettingsPage() {
                       value={passwordForm.newPassword}
                       onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
                       required
-                      minLength={6}
+                      minLength={8}
                     />
                   </div>
                   <div className="space-y-2">
@@ -1194,7 +1272,7 @@ export function SettingsPage() {
           </Card>
 
           {/* Team Accounts */}
-          <Card>
+          {isAdmin && <Card>
             <CardHeader>
               <CardTitle>团队账号</CardTitle>
               <CardDescription>管理多用户账号和权限</CardDescription>
@@ -1249,7 +1327,7 @@ export function SettingsPage() {
                       value={userForm.password}
                       onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
                       required
-                      minLength={6}
+                      minLength={8}
                     />
                   </div>
                 </div>
@@ -1270,8 +1348,24 @@ export function SettingsPage() {
                           <Badge variant="outline" className="text-xs">
                             {({ admin: "管理员", sales: "销售", viewer: "只读" } as Record<string, string>)[u.role] || u.role}
                           </Badge>
+                          <Badge
+                            variant="outline"
+                            className={
+                              u.status === "active"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : u.status === "pending"
+                                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                                  : "border-red-200 bg-red-50 text-red-700"
+                            }
+                          >
+                            {u.status === "active" ? (u.active ? "已启用" : "已停用") : u.status === "pending" ? "待审批" : "已拒绝"}
+                          </Badge>
                         </div>
                         {u.email && <p className="text-xs text-muted-foreground">{u.email}</p>}
+                        <p className="text-xs text-muted-foreground">
+                          {u.registrationSource === "self" ? "自主注册" : u.registrationSource === "setup" ? "初始管理员" : "管理员创建"}
+                          {u.lastLoginAt ? ` · 最近登录 ${new Date(u.lastLoginAt).toLocaleString()}` : ""}
+                        </p>
                       </div>
                       <div className="flex items-center gap-2">
                         {editingUserId === u.id ? (
@@ -1291,6 +1385,14 @@ export function SettingsPage() {
                               <option value="sales">销售</option>
                               <option value="viewer">只读</option>
                             </select>
+                            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <input
+                                type="checkbox"
+                                checked={userEditForm.active}
+                                onChange={(e) => setUserEditForm({ ...userEditForm, active: e.target.checked })}
+                              />
+                              启用
+                            </label>
                             <Button size="sm" onClick={() => handleEditUser(u.id)}>保存</Button>
                             <Button size="sm" variant="ghost" onClick={() => setEditingUserId(null)}>取消</Button>
                           </div>
@@ -1302,13 +1404,26 @@ export function SettingsPage() {
                               className="w-36 h-8 text-sm"
                               value={resetPasswordValue}
                               onChange={(e) => setResetPasswordValue(e.target.value)}
+                              minLength={8}
                             />
                             <Button size="sm" onClick={() => handleResetPassword(u.id)}>确认</Button>
                             <Button size="sm" variant="ghost" onClick={() => { setResetPasswordFor(null); setResetPasswordValue(""); }}>取消</Button>
                           </div>
                         ) : (
                           <div className="flex items-center gap-1">
-                            <Button size="sm" variant="outline" onClick={() => { setEditingUserId(u.id); setUserEditForm({ displayName: u.displayName || "", email: u.email || "", role: u.role }); }}>
+                            {u.status === "pending" && (
+                              <>
+                                <Button size="sm" onClick={() => handleApproveUser(u.id)}>
+                                  <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                                  批准
+                                </Button>
+                                <Button size="sm" variant="outline" className="text-destructive" onClick={() => handleRejectUser(u.id)}>
+                                  <XCircle className="h-3.5 w-3.5 mr-1" />
+                                  拒绝
+                                </Button>
+                              </>
+                            )}
+                            <Button size="sm" variant="outline" onClick={() => { setEditingUserId(u.id); setUserEditForm({ displayName: u.displayName || "", email: u.email || "", role: u.role, active: u.active }); }}>
                               <Edit className="h-3.5 w-3.5 mr-1" />
                               编辑
                             </Button>
@@ -1324,7 +1439,7 @@ export function SettingsPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </Card>}
 
           {/* Recycle Bin & Audit Logs */}
           <Card>

@@ -1,17 +1,19 @@
-import { IsString, IsOptional, IsEmail, IsEnum, MinLength, IsNotEmpty } from 'class-validator';
+import { IsBoolean, IsString, IsOptional, IsEmail, IsEnum, MinLength, IsNotEmpty, MaxLength, Matches } from 'class-validator';
 
 export class CreateUserDto {
   @IsString()
   @IsNotEmpty({ message: '用户名不能为空' })
-  @MinLength(2, { message: '用户名至少2个字符' })
+  @Matches(/^[a-zA-Z0-9_.-]{3,32}$/, { message: '账号格式不正确' })
   username: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   displayName?: string;
 
   @IsEmail()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsEnum(['admin', 'sales', 'viewer'])
@@ -20,27 +22,35 @@ export class CreateUserDto {
 
   @IsString()
   @IsNotEmpty({ message: '密码不能为空' })
-  @MinLength(6, { message: '密码至少6个字符' })
+  @MinLength(8, { message: '密码至少8个字符' })
+  @MaxLength(128)
   password: string;
 }
 
 export class UpdateUserDto {
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   displayName?: string;
 
   @IsEmail()
   @IsOptional()
+  @MaxLength(255)
   email?: string;
 
   @IsEnum(['admin', 'sales', 'viewer'])
   @IsOptional()
   role?: 'admin' | 'sales' | 'viewer';
+
+  @IsBoolean()
+  @IsOptional()
+  active?: boolean;
 }
 
 export class ResetPasswordDto {
   @IsString()
   @IsNotEmpty({ message: '密码不能为空' })
-  @MinLength(6, { message: '密码至少6个字符' })
+  @MinLength(8, { message: '密码至少8个字符' })
+  @MaxLength(128)
   newPassword: string;
 }

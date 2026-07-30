@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export function LoginScreen() {
-  const { login, register } = useAuth();
+  const { login, register, registrationEnabled, registrationRequiresApproval } = useAuth();
   const [tab, setTab] = useState("login");
 
   // Login form
@@ -19,14 +19,17 @@ export function LoginScreen() {
   // Register form
   const [regUser, setRegUser] = useState("");
   const [regDisplay, setRegDisplay] = useState("");
+  const [regEmail, setRegEmail] = useState("");
   const [regPass, setRegPass] = useState("");
   const [regConfirm, setRegConfirm] = useState("");
   const [regLoading, setRegLoading] = useState(false);
   const [regError, setRegError] = useState("");
+  const [registrationNotice, setRegistrationNotice] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError("");
+    setRegistrationNotice("");
     setLoginLoading(true);
     try {
       await login(loginUser, loginPass);
@@ -45,14 +48,23 @@ export function LoginScreen() {
       setRegError("两次输入的密码不一致");
       return;
     }
-    if (regPass.length < 6) {
-      setRegError("密码长度至少为6位");
+    if (regPass.length < 8) {
+      setRegError("密码长度至少为8位");
       return;
     }
 
     setRegLoading(true);
     try {
-      await register(regUser, regPass, regDisplay || regUser);
+      const result = await register(regUser, regPass, regDisplay || regUser, regEmail);
+      if (result.requiresApproval) {
+        setRegistrationNotice(result.message || "注册申请已提交，请等待管理员审核");
+        setRegUser("");
+        setRegDisplay("");
+        setRegEmail("");
+        setRegPass("");
+        setRegConfirm("");
+        setTab("login");
+      }
     } catch (err) {
       setRegError(err instanceof Error ? err.message : "注册失败");
     } finally {
@@ -74,17 +86,22 @@ export function LoginScreen() {
 
         <Card>
           <CardHeader>
-            <CardDescription>本机安全管理</CardDescription>
+            <CardDescription>团队安全登录</CardDescription>
             <CardTitle className="text-2xl">外贸 CRM</CardTitle>
           </CardHeader>
           <CardContent>
             <Tabs value={tab} onValueChange={setTab} className="w-full flex flex-col gap-4">
               <TabsList className="w-full">
                 <TabsTrigger value="login" className="flex-1">登录</TabsTrigger>
-                <TabsTrigger value="register" className="flex-1">注册</TabsTrigger>
+                {registrationEnabled && <TabsTrigger value="register" className="flex-1">注册</TabsTrigger>}
               </TabsList>
               <TabsContent value="login">
                 <form onSubmit={handleLogin} className="space-y-4">
+                  {registrationNotice && (
+                    <p className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+                      {registrationNotice}
+                    </p>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="login-username">账号</Label>
                     <Input
@@ -128,7 +145,8 @@ export function LoginScreen() {
                       onChange={(e) => setRegUser(e.target.value)}
                       placeholder="登录用户名"
                       required
-                      minLength={2}
+                      minLength={3}
+                      maxLength={32}
                       autoComplete="username"
                     />
                   </div>
@@ -144,15 +162,27 @@ export function LoginScreen() {
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label htmlFor="reg-email">工作邮箱 *</Label>
+                    <Input
+                      id="reg-email"
+                      type="email"
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      placeholder="name@company.com"
+                      required
+                      autoComplete="email"
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="reg-password">密码 *</Label>
                     <Input
                       id="reg-password"
                       type="password"
                       value={regPass}
                       onChange={(e) => setRegPass(e.target.value)}
-                      placeholder="至少6位"
+                      placeholder="至少8位"
                       required
-                      minLength={6}
+                      minLength={8}
                       autoComplete="new-password"
                     />
                   </div>
@@ -165,7 +195,7 @@ export function LoginScreen() {
                       onChange={(e) => setRegConfirm(e.target.value)}
                       placeholder="再次输入密码"
                       required
-                      minLength={6}
+                      minLength={8}
                       autoComplete="new-password"
                     />
                   </div>
@@ -173,7 +203,7 @@ export function LoginScreen() {
                     <p className="text-sm text-destructive">{regError}</p>
                   )}
                   <Button type="submit" className="w-full" disabled={regLoading}>
-                    {regLoading ? "注册中..." : "创建账号"}
+                    {regLoading ? "提交中..." : registrationRequiresApproval ? "提交注册申请" : "创建账号"}
                   </Button>
                 </form>
               </TabsContent>
@@ -232,9 +262,9 @@ export function SetupScreen() {
         <Card>
           <CardHeader>
             <CardDescription>首次使用</CardDescription>
-            <CardTitle className="text-2xl">创建本机管理员</CardTitle>
+            <CardTitle className="text-2xl">创建系统管理员</CardTitle>
             <p className="text-sm text-muted-foreground">
-              账号和业务数据只保存在这台电脑。
+              管理员负责审核团队账号并配置系统。
             </p>
           </CardHeader>
           <CardContent>
