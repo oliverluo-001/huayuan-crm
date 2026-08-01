@@ -30,6 +30,7 @@ import {
   getBackupData,
   createBackup,
   saveBackupSettings,
+  verifyBackup,
   getEmailPolicy,
   saveEmailPolicy,
   getSuppressions,
@@ -432,6 +433,10 @@ export function SettingsPage() {
       setEditingUserId(null);
       fetchUsers();
     } catch {}
+  };
+  const handleVerifyBackup = async (id: string) => {
+    const result = await verifyBackup(id);
+    toast.success(`备份校验通过：${result.tableCount} 个数据表，${result.rowCount} 条记录`);
   };
 
   const handleApproveUser = async (userId: string) => {
@@ -1263,6 +1268,14 @@ export function SettingsPage() {
                         <Badge variant="outline" className="ml-2 text-xs">
                           {b.size ? `${(b.size / 1024).toFixed(1)} KB` : ""}
                         </Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="outline" onClick={() => handleVerifyBackup(b.id)} title="校验备份完整性">
+                          <CheckCircle2 className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => { window.location.href = `/api/backup/${encodeURIComponent(b.id)}/download`; }} title="下载备份">
+                          <Download className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   ))}

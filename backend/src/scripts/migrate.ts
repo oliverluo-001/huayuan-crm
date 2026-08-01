@@ -26,7 +26,6 @@ async function main() {
     );
     if (applied.length) {
       console.log(`Migration already applied: ${migrationId}`);
-      return;
     }
     const [tables] = await connection.query<RowDataPacket[]>(
       `SELECT TABLE_NAME FROM information_schema.TABLES
@@ -60,16 +59,94 @@ async function main() {
       if (!(await indexExists(connection, 'idx_users_status'))) {
         await connection.query('ALTER TABLE users ADD KEY idx_users_status (status, active)');
       }
-      await connection.query('INSERT INTO schema_migrations (id) VALUES (?)', [migrationId]);
+      await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [migrationId]);
       await connection.commit();
       console.log(`Applied migration: ${migrationId}`);
     } catch (error) {
       await connection.rollback();
       throw error;
     }
+    await migrateEmailExecution(connection);
   } finally {
     await connection.end();
   }
+}
+
+async function migrateEmailExecution(connection: Connection) {
+  const id = '20260801_email_execution_and_security';
+  const [applied] = await connection.query<RowDataPacket[]>(
+    'SELECT id FROM schema_migrations WHERE id = ? LIMIT 1',
+    [id],
+  );
+  if (applied.length) {
+    console.log(`Migration already applied: ${id}`);
+    return;
+  }
+  if (!(await tableExists(connection, 'email_tasks'))) {
+    throw new Error('email_tasks 表不存在，请先初始化基础数据库结构');
+  }
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS email_task_recipients (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      task_id INT NOT NULL,
+      recipient_key VARCHAR(80) NOT NULL,
+      customer_id INT NULL,
+      contact_id INT NULL,
+      email VARCHAR(255) NOT NULL,
+      name VARCHAR(255) NOT NULL DEFAULT '',
+      company VARCHAR(255) NOT NULL DEFAULT '',
+      timezone VARCHAR(80) NOT NULL DEFAULT '',
+      status ENUM('queued','sending','sent','failed','skipped') NOT NULL DEFAULT 'queued',
+      attempts INT NOT NULL DEFAULT 0,
+      last_error TEXT NULL,
+      sent_at TIMESTAMP NULL,
+      created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uq_email_task_recipient (task_id, recipient_key),
+      KEY idx_email_task_recipient_status (task_id, status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await addColumnToTable(connection, 'email_tasks', 'start_at', 'TIMESTAMP NULL');
+  await addColumnToTable(connection, 'email_tasks', 'next_run_at', 'TIMESTAMP NULL');
+  await addColumnToTable(connection, 'email_tasks', 'failed_send_count', 'INT NOT NULL DEFAULT 0');
+  await addColumnToTable(connection, 'email_tasks', 'skipped_send_count', 'INT NOT NULL DEFAULT 0');
+  await addColumnToTable(connection, 'email_tasks', 'last_message', 'TEXT NULL');
+  await addColumnToTable(connection, 'email_logs', 'contact_id', "VARCHAR(32) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, 'email_logs', 'message_id', "VARCHAR(255) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, 'email_logs', 'attempt', 'INT NOT NULL DEFAULT 1');
+  await addColumnToTable(connection, 'customers', 'email_failure_reason', 'TEXT NULL');
+  await addColumnToTable(connection, 'customers', 'email_failed_at', 'TIMESTAMP NULL');
+  await addColumnToTable(connection, 'customers', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
+
+  await connection.query('INSERT INTO schema_migrations (id) VALUES (?)', [id]);
+  console.log(`Applied migration: ${id}`);
+}
+
+async function addColumnToTable(
+  connection: Connection,
+  table: string,
+  column: string,
+  definition: string,
+) {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    [database, table, column],
+  );
+  if (!rows.length) {
+    await connection.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+  }
+}
+
+async function tableExists(connection: Connection, table: string) {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `SELECT TABLE_NAME FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`,
+    [database, table],
+  );
+  return rows.length > 0;
 }
 
 async function addColumn(

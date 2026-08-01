@@ -72,11 +72,14 @@ jobs:
             DB_SYNCHRONIZE=false
             DB_LOGGING=false
             JWT_SECRET=${{ secrets.JWT_SECRET }}
+            CREDENTIAL_ENCRYPTION_KEY=${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
             JWT_EXPIRES_IN=${{ secrets.JWT_EXPIRES_IN || '7d' }}
             SESSION_TTL_HOURS=168
             COOKIE_SECURE=true
             TRUST_PROXY=true
             CORS_ORIGINS=${{ secrets.CORS_ORIGINS || 'https://crm.huayuanflange.com' }}
+            PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'https://crm.huayuanflange.com' }}
+            BACKUP_DIR=${{ secrets.BACKUP_DIR || '/var/backups/huayuan-crm' }}
             REGISTRATION_MODE=approval
             LOGIN_MAX_ATTEMPTS=5
             LOGIN_LOCK_MINUTES=15

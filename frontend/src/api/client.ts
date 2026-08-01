@@ -604,6 +604,10 @@ export async function saveBackupSettings(settings: Partial<BackupSettings>): Pro
   return api<BackupSettings>("/api/backup/settings", { method: "POST", body: settings });
 }
 
+export async function verifyBackup(id: string): Promise<{ valid: boolean; tableCount: number; rowCount: number }> {
+  return api(`/api/backup/${encodeURIComponent(id)}/verify`, { method: "POST" });
+}
+
 // Email Policy API
 export async function getEmailPolicy(): Promise<EmailPolicy> {
   return api("/api/settings/email-policy");

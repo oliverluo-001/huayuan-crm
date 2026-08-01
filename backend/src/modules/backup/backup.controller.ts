@@ -1,8 +1,11 @@
-import { Controller, Get, Post, Delete, Body, Param, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { BackupService } from './backup.service';
 import { SaveBackupSettingsDto } from './dto/backup.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('backup')
+@Roles('admin')
 export class BackupController {
   constructor(private backupService: BackupService) {}
 
@@ -23,11 +26,24 @@ export class BackupController {
 
   @Post('create')
   async create() {
-    return this.backupService.create('', '');
+    return this.backupService.create();
+  }
+
+  @Post(':id/verify')
+  verify(@Param('id') id: string) {
+    return this.backupService.verify(id);
+  }
+
+  @Get(':id/download')
+  async download(@Param('id') id: string, @Res() response: Response) {
+    const backup = await this.backupService.getDownload(id);
+    response.setHeader('Content-Type', 'application/json; charset=utf-8');
+    response.setHeader('Content-Disposition', `attachment; filename="${backup.filename.replace(/[^a-zA-Z0-9_.-]/g, '_')}"`);
+    response.send(backup.data);
   }
 
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number) {
+  remove(@Param('id') id: string) {
     return this.backupService.remove(id);
   }
 }
