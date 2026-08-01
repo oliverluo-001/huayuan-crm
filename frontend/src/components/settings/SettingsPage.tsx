@@ -467,7 +467,7 @@ export function SettingsPage() {
 
   // Audit & Trash handlers
   const fetchAuditLogs = useCallback(async () => {
-    try { setAuditLogs(await getAuditLogs()); } catch {}
+    try { setAuditLogs((await getAuditLogs()).items); } catch {}
   }, []);
   const fetchTrash = useCallback(async () => {
     try { setTrashItems(await getTrashItems()); } catch {}

@@ -26,6 +26,7 @@ import type {
   AppState,
   CustomerView,
   DashboardData,
+  DashboardSnapshot,
   User,
   EmailPolicy,
   EmailRecipient,
@@ -64,6 +65,7 @@ export type {
   AppState,
   CustomerView,
   DashboardData,
+  DashboardSnapshot,
   User,
   EmailPolicy,
   SuppressionEntry,
@@ -211,6 +213,10 @@ export async function changePassword(currentPassword: string, newPassword: strin
 // State API
 export async function getState(): Promise<AppState> {
   return api<AppState>("/api/state");
+}
+
+export async function getDashboard(): Promise<DashboardSnapshot> {
+  return api<DashboardSnapshot>("/api/state/dashboard");
 }
 
 // Customers API
@@ -631,8 +637,9 @@ export async function deleteSuppression(id: string): Promise<void> {
 }
 
 // Audit API
-export async function getAuditLogs(): Promise<AuditEntry[]> {
-  return api<AuditEntry[]>("/api/audit-logs");
+export async function getAuditLogs(filters: { page?: number; limit?: number; username?: string; action?: string; status?: string } = {}): Promise<{ items: AuditEntry[]; total: number; page: number; pages: number }> {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== "").map(([key, value]) => [key, String(value)])).toString();
+  return api(`/api/audit-logs${query ? `?${query}` : ""}`);
 }
 
 // Trash API

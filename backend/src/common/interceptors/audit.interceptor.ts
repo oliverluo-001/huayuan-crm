@@ -15,7 +15,7 @@ export class AuditInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const method = request.method || 'GET';
-    const path = request.route?.path || request.path || request.url || '';
+    const path = request.originalUrl || request.url || request.path || '';
 
     // Only log mutating requests
     if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
@@ -24,24 +24,43 @@ export class AuditInterceptor implements NestInterceptor {
 
     const user = request.user || {};
     const username = user.username || 'anonymous';
+    const startedAt = Date.now();
+    const ip = String(request.ip || request.socket?.remoteAddress || '').slice(0, 64);
 
     // Build a friendly action description
     const action = `${method} ${path}`;
-    const entityType = path.split('/').filter(Boolean).join(' > ') || path;
+    const details = JSON.stringify({
+      route: request.route?.path || '',
+      params: this.sanitize(request.params || {}),
+      query: this.sanitize(request.query || {}),
+    });
+
+    const write = (status: 'success' | 'failed') => this.auditService.log({
+      username,
+      userId: user.sub ? String(user.sub) : '',
+      action: status === 'failed' ? `${action} (failed)` : action,
+      method,
+      path: String(path).slice(0, 500),
+      ip,
+      status,
+      durationMs: Date.now() - startedAt,
+      details,
+    }).catch(() => undefined);
 
     return next.handle().pipe(
       tap({
         next: () => {
-          this.auditService.log(username, action, entityType).catch(() => {
-            // Silently ignore audit logging errors
-          });
+          void write('success');
         },
         error: () => {
-          this.auditService
-            .log(username, `${action} (failed)`, entityType)
-            .catch(() => {});
+          void write('failed');
         },
       }),
     );
+  }
+
+  private sanitize(value: Record<string, unknown>) {
+    const blocked = /pass|password|token|secret|api.?key|credential|body|content/i;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, blocked.test(key) ? '[REDACTED]' : String(item).slice(0, 200)]));
   }
 }

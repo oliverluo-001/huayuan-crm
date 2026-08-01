@@ -488,6 +488,10 @@ export interface AuditEntry {
   username: string;
   details: string;
   ip: string;
+  method?: string;
+  path?: string;
+  status?: "success" | "failed";
+  durationMs?: number;
   createdAt: string;
 }
 
@@ -495,4 +499,17 @@ export interface AuditEntry {
 export interface CustomerTag {
   name: string;
   count: number;
+}
+
+export interface DashboardSnapshot {
+  generatedAt: string;
+  scope: "owned" | "all";
+  metrics: DashboardData;
+  emailActivity: NonNullable<DashboardData["emailActivity"]>;
+  activeTasks: {
+    leads: Array<{ id: string; name: string; status: string; current: number; target: number }>;
+    emails: Array<{ id: string; name: string; status: string; current: number; target: number }>;
+  };
+  openTodos: Array<{ id: string; title: string; customerName: string; dueAt?: string }>;
+  recentSendLogs: Array<{ id: string; email: string; status: string; templateName?: string; message?: string; createdAt: string }>;
 }

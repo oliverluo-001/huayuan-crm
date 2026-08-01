@@ -9,9 +9,15 @@ import { AuthModule } from '../auth/auth.module';
 import { BackupModule } from '../backup/backup.module';
 import { SuppressionModule } from '../suppression/suppression.module';
 import { AuditModule } from '../audit/audit.module';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Customer, Todo } from '../customers/entities';
+import { EmailLog, EmailTask } from '../email/entities';
+import { LeadTask } from '../leads/entities';
+import { DashboardService } from './dashboard.service';
 
 @Module({
   imports: [
+    TypeOrmModule.forFeature([Customer, Todo, EmailLog, EmailTask, LeadTask]),
     CustomersModule,
     EmailModule,
     ProductsModule,
@@ -23,5 +29,6 @@ import { AuditModule } from '../audit/audit.module';
     AuditModule,
   ],
   controllers: [StateController],
+  providers: [DashboardService],
 })
 export class StateModule {}

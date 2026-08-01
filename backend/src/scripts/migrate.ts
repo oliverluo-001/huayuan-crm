@@ -67,9 +67,22 @@ async function main() {
       throw error;
     }
     await migrateEmailExecution(connection);
+    await migrateAuditMetadata(connection);
   } finally {
     await connection.end();
   }
+}
+
+async function migrateAuditMetadata(connection: Connection) {
+  const id = '20260801_audit_metadata';
+  if (!(await tableExists(connection, 'audit_logs'))) return;
+  await addColumnToTable(connection, 'audit_logs', 'user_id', "VARCHAR(32) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, 'audit_logs', 'method', "VARCHAR(10) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, 'audit_logs', 'path', "VARCHAR(500) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, 'audit_logs', 'ip', "VARCHAR(64) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, 'audit_logs', 'status', "VARCHAR(20) NOT NULL DEFAULT 'success'");
+  await addColumnToTable(connection, 'audit_logs', 'duration_ms', 'INT NOT NULL DEFAULT 0');
+  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
 }
 
 async function migrateEmailExecution(connection: Connection) {

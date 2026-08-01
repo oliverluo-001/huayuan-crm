@@ -8,6 +8,8 @@ import { UsersService } from '../auth/users.service';
 import { BackupService } from '../backup/backup.service';
 import { SuppressionService } from '../suppression/suppression.service';
 import { AuditService } from '../audit/audit.service';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { DashboardService, DashboardUser } from './dashboard.service';
 
 @Controller('state')
 export class StateController {
@@ -21,10 +23,17 @@ export class StateController {
     private readonly backupService: BackupService,
     private readonly suppressionService: SuppressionService,
     private readonly auditService: AuditService,
+    private readonly dashboardService: DashboardService,
   ) {}
 
+  @Get('dashboard')
+  getDashboard(@CurrentUser() user: DashboardUser) {
+    return this.dashboardService.getDashboard(user);
+  }
+
   @Get()
-  async getState() {
+  async getState(@CurrentUser() user: DashboardUser) {
+    const isAdmin = user.role === 'admin';
     const [
       customerResult,
       tags,
@@ -48,7 +57,7 @@ export class StateController {
       emailPolicy,
       trashItems,
     ] = await Promise.all([
-      this.customersService.findAll({}),
+      this.customersService.findAll(user.role === 'sales' ? { ownerId: String(user.sub) } : {}),
       this.customersService.getAllTags(),
       this.emailService.findAllTemplates(),
       this.emailService.findAllTasks({}),
@@ -66,13 +75,23 @@ export class StateController {
       this.usersService.findAll(),
       this.backupService.findAll(),
       this.suppressionService.findAll(),
-      this.auditService.findAll(),
+      this.auditService.findAll({ limit: 50 }),
       this.settingsService.getEmailPolicy(),
       this.customersService.findTrash(),
     ]);
 
     const customers = (customerResult as any).customers || customerResult;
     const customerTotal = (customerResult as any).total || (Array.isArray(customers) ? customers.length : 0);
+    const scopedCustomerIds = new Set((Array.isArray(customers) ? customers : []).map((customer: any) => String(customer.customerId || customer.id)));
+    const scopedSendLogs = user.role === 'sales'
+      ? sendLogs.filter((log: any) => scopedCustomerIds.has(String(log.customerId)))
+      : sendLogs;
+    const scopedTasks = user.role === 'sales'
+      ? tasks.filter((task: any) => {
+          const ids = Array.isArray(task.customerIds) ? task.customerIds : String(task.customerIds || task.customerId || '').split(',');
+          return ids.some((id: any) => scopedCustomerIds.has(String(id).trim()));
+        })
+      : tasks;
 
     // Format entities to frontend types
     const formattedCustomers = (Array.isArray(customers) ? customers : []).map((c: any) => ({
@@ -154,8 +173,8 @@ export class StateController {
     }));
 
     // Compute dashboard data
-    const sentLogs = sendLogs.filter((l: any) => l.status === 'sent');
-    const failedLogs = sendLogs.filter((l: any) => l.status === 'failed');
+    const sentLogs = scopedSendLogs.filter((l: any) => l.status === 'sent');
+    const failedLogs = scopedSendLogs.filter((l: any) => l.status === 'failed');
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const newCustomers7d = (Array.isArray(customers) ? customers : []).filter(
@@ -166,8 +185,8 @@ export class StateController {
     const highConfidenceLeads = leadTasks.reduce((sum: number, t: any) => sum + (t.cleanedLeadCount || 0), 0);
 
     // Email activity stats
-    const logs7d = sendLogs.filter((l: any) => new Date(l.createdAt) >= sevenDaysAgo);
-    const logs30d = sendLogs.filter((l: any) => new Date(l.createdAt) >= thirtyDaysAgo);
+    const logs7d = scopedSendLogs.filter((l: any) => new Date(l.createdAt || l.sentAt) >= sevenDaysAgo);
+    const logs30d = scopedSendLogs.filter((l: any) => new Date(l.createdAt || l.sentAt) >= thirtyDaysAgo);
     const sent7d = logs7d.filter((l: any) => l.status === 'sent').length;
     const failed7d = logs7d.filter((l: any) => l.status === 'failed' || l.status === 'bounced').length;
     const sent30d = logs30d.filter((l: any) => l.status === 'sent').length;
@@ -175,7 +194,7 @@ export class StateController {
 
     // Template performance
     const templateMap = new Map<string, { name: string; total: number; sent: number }>();
-    for (const log of sendLogs) {
+    for (const log of scopedSendLogs) {
       const tplName = (log as any).templateName || '未知模板';
       if (!templateMap.has(tplName)) templateMap.set(tplName, { name: tplName, total: 0, sent: 0 });
       const entry = templateMap.get(tplName)!;
@@ -192,8 +211,8 @@ export class StateController {
       customerTotal,
       tags,
       templates: formattedTemplates,
-      emailTasks: tasks,
-      sendLogs,
+      emailTasks: scopedTasks,
+      sendLogs: scopedSendLogs,
       products: formattedProducts,
       quotes: formattedQuotes,
       samples: formattedSamples,
@@ -220,20 +239,20 @@ export class StateController {
           byTemplate,
         },
       },
-      users,
-      backups,
-      suppressions,
-      auditLogs,
-      trashItems,
+      users: isAdmin ? users : [],
+      backups: isAdmin ? backups : [],
+      suppressions: isAdmin ? suppressions : [],
+      auditLogs: isAdmin ? auditLogs.items : [],
+      trashItems: isAdmin ? trashItems : [],
       settings: {
-        searchProfiles,
-        aiProfile,
-        smtpProfile,
-        imapProfile,
+        searchProfiles: isAdmin ? searchProfiles : [],
+        aiProfile: isAdmin ? aiProfile : undefined,
+        smtpProfile: isAdmin ? smtpProfile : undefined,
+        imapProfile: isAdmin ? imapProfile : undefined,
         emailPolicy,
       },
-      username: (users as any[])?.[0]?.username || '',
-      displayName: (users as any[])?.[0]?.displayName || '',
+      username: user.username || '',
+      displayName: user.displayName || '',
     };
   }
 }
