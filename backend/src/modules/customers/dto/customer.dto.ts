@@ -61,6 +61,10 @@ export class CreateCustomerDto {
   @IsOptional()
   source?: string;
 
+  @IsString()
+  @IsOptional()
+  ownerId?: string;
+
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
@@ -131,6 +135,10 @@ export class UpdateCustomerDto {
   @IsString()
   @IsOptional()
   source?: string;
+
+  @IsString()
+  @IsOptional()
+  ownerId?: string;
 
   @IsArray()
   @IsString({ each: true })

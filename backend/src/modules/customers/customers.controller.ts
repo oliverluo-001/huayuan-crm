@@ -36,6 +36,13 @@ import {
   CreateCustomerViewDto,
   UpdateCustomerViewDto,
 } from './dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+
+interface RequestUser {
+  sub: number;
+  role: 'admin' | 'sales' | 'viewer';
+}
 
 @Controller('customers')
 export class CustomersController {
@@ -44,43 +51,61 @@ export class CustomersController {
   // ==================== Customer CRUD ====================
 
   @Get()
-  async findAll(@Query() query: Record<string, any>) {
-    return this.customersService.findAll(query);
+  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
+    const scoped = { ...query };
+    if (user.role === 'sales' || query.ownerId === 'me') scoped.ownerId = String(user.sub);
+    return this.customersService.findAll(scoped);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.customersService.findOne(+id);
+  findOne(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.customersService.assertCustomerOwner(
+      +id,
+      user.role === 'sales' ? String(user.sub) : undefined,
+    );
   }
 
   @Post()
-  create(@Body() createCustomerDto: CreateCustomerDto) {
-    return this.customersService.create(createCustomerDto);
+  @Roles('admin', 'sales')
+  create(@Body() createCustomerDto: CreateCustomerDto, @CurrentUser() user: RequestUser) {
+    return this.customersService.create({
+      ...createCustomerDto,
+      ownerId: user.role === 'sales' ? String(user.sub) : createCustomerDto.ownerId,
+    });
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() updateCustomerDto: UpdateCustomerDto) {
-    return this.customersService.update(+id, updateCustomerDto);
+  @Roles('admin', 'sales')
+  async update(@Param('id') id: string, @Body() updateCustomerDto: UpdateCustomerDto, @CurrentUser() user: RequestUser) {
+    await this.assertSalesOwnership(+id, user);
+    const update = { ...updateCustomerDto };
+    if (user.role === 'sales') delete update.ownerId;
+    return this.customersService.update(+id, update);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  @Roles('admin', 'sales')
+  async remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    await this.assertSalesOwnership(+id, user);
     return this.customersService.remove(+id);
   }
 
   @Post('bulk-delete')
-  bulkDelete(@Body() bulkDeleteDto: BulkDeleteDto) {
-    return this.customersService.bulkDelete(bulkDeleteDto);
+  @Roles('admin', 'sales')
+  bulkDelete(@Body() bulkDeleteDto: BulkDeleteDto, @CurrentUser() user: RequestUser) {
+    return this.customersService.bulkDelete(bulkDeleteDto, this.salesOwnerId(user));
   }
 
   @Post('bulk-tags')
-  bulkTags(@Body() bulkTagsDto: BulkTagsDto) {
-    return this.customersService.bulkTags(bulkTagsDto);
+  @Roles('admin', 'sales')
+  bulkTags(@Body() bulkTagsDto: BulkTagsDto, @CurrentUser() user: RequestUser) {
+    return this.customersService.bulkTags(bulkTagsDto, this.salesOwnerId(user));
   }
 
   @Post('bulk-tier')
-  bulkTier(@Body() bulkTierDto: BulkTierDto) {
-    return this.customersService.bulkTier(bulkTierDto);
+  @Roles('admin', 'sales')
+  bulkTier(@Body() bulkTierDto: BulkTierDto, @CurrentUser() user: RequestUser) {
+    return this.customersService.bulkTier(bulkTierDto, this.salesOwnerId(user));
   }
 
   // ==================== 360 View ====================
@@ -119,12 +144,13 @@ export class CustomersController {
   }
 
   @Post('import')
+  @Roles('admin', 'sales')
   @UseInterceptors(FileInterceptor('file'))
-  async import(@UploadedFile() file: any) {
+  async import(@UploadedFile() file: any, @CurrentUser() user: RequestUser) {
     if (!file) {
       throw new BadRequestException('请上传文件');
     }
-    return this.customersService.parseAndImport(file);
+    return this.customersService.parseAndImport(file, this.salesOwnerId(user));
   }
 
   @Get('ids')
@@ -140,6 +166,14 @@ export class CustomersController {
   @Post(':id/clear-email-exception')
   clearEmailException(@Param('id') id: string) {
     return this.customersService.clearEmailException(+id);
+  }
+
+  private salesOwnerId(user: RequestUser) {
+    return user.role === 'sales' ? String(user.sub) : undefined;
+  }
+
+  private async assertSalesOwnership(id: number, user: RequestUser) {
+    await this.customersService.assertCustomerOwner(id, this.salesOwnerId(user));
   }
 
   // ==================== Nested Todos (frontend compatibility) ====================
@@ -388,12 +422,16 @@ export class ImportController {
 
   @Post()
   @HttpCode(200)
+  @Roles('admin', 'sales')
   @UseInterceptors(FileInterceptor('file'))
-  async import(@UploadedFile() file: any) {
+  async import(@UploadedFile() file: any, @CurrentUser() user: RequestUser) {
     if (!file) {
       throw new BadRequestException('请上传文件');
     }
-    return this.customersService.parseAndImport(file);
+    return this.customersService.parseAndImport(
+      file,
+      user.role === 'sales' ? String(user.sub) : '',
+    );
   }
 }
 

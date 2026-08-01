@@ -551,13 +551,13 @@ export async function checkMailboxBounces(): Promise<void> {
 }
 
 // Import API
-export async function importCustomers(file: File): Promise<{ total: number; created: number; updated: number }> {
+export async function importCustomers(file: File): Promise<{ total: number; created: number; updated: number; skipped: number }> {
   const formData = new FormData();
   formData.append("file", file);
   return api("/api/import", { method: "POST", rawBody: formData });
 }
 
-export async function previewImport(file: File): Promise<{ duplicateCount: number; duplicateUploadCount: number }> {
+export async function previewImport(file: File): Promise<{ total: number; withEmail: number; duplicateCount: number; duplicateUploadCount: number }> {
   const formData = new FormData();
   formData.append("file", file);
   return api("/api/import/preview", { method: "POST", rawBody: formData });

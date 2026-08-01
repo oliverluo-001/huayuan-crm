@@ -41,7 +41,7 @@ interface UploadedFile {
   mimetype: string;
   buffer: Buffer;
   size: number;
-  path: string;
+  path?: string;
   destination?: string;
   filename?: string;
   stream?: any;
@@ -138,6 +138,15 @@ export class CustomersService {
       relations: ['tags'],
     });
     if (!customer) {
+      throw new NotFoundException('客户不存在');
+    }
+    return customer;
+  }
+
+  async assertCustomerOwner(id: number, ownerId?: string) {
+    const customer = await this.findOne(id);
+    if (ownerId && customer.ownerId !== ownerId) {
+      // Do not disclose whether another salesperson owns the record.
       throw new NotFoundException('客户不存在');
     }
     return customer;
@@ -314,19 +323,19 @@ export class CustomersService {
     return { customers, total };
   }
 
-  async bulkDelete(bulkDeleteDto: BulkDeleteDto) {
+  async bulkDelete(bulkDeleteDto: BulkDeleteDto, ownerId?: string) {
     const ids = bulkDeleteDto.ids;
-    for (const id of ids) {
-      await this.customerRepository.softDelete(id);
-    }
-    return { deleted: ids.length };
+    const result = await this.customerRepository.softDelete(
+      ownerId ? { id: In(ids), ownerId } : { id: In(ids) },
+    );
+    return { deleted: result.affected || 0 };
   }
 
-  async bulkTags(bulkTagsDto: BulkTagsDto) {
+  async bulkTags(bulkTagsDto: BulkTagsDto, ownerId?: string) {
     const { ids, action, tag } = bulkTagsDto;
     const tagEntity = await this.getOrCreateTags([tag]);
     const customers = await this.customerRepository.find({
-      where: { id: In(ids) },
+      where: ownerId ? { id: In(ids), ownerId } : { id: In(ids) },
       relations: ['tags'],
     });
 
@@ -347,9 +356,11 @@ export class CustomersService {
     return { updated, tag, action };
   }
 
-  async bulkTier(bulkTierDto: BulkTierDto) {
+  async bulkTier(bulkTierDto: BulkTierDto, ownerId?: string) {
     const result = await this.customerRepository.update(
-      { id: In(bulkTierDto.ids) },
+      ownerId
+        ? { id: In(bulkTierDto.ids), ownerId }
+        : { id: In(bulkTierDto.ids) },
       { tier: bulkTierDto.tier as any },
     );
     return { updated: result.affected || 0, tier: bulkTierDto.tier };
@@ -680,19 +691,19 @@ export class CustomersService {
   // ==================== Import/Export ====================
 
   async parseAndPreview(file: UploadedFile) {
-    const filePath = file.path || '';
-    const rows = await this.parseExcelFile(filePath);
+    const rows = await this.parseExcelFile(file);
+    const normalizedRows = rows.map((row) => this.normalizeImportedRow(row));
     const customers = await this.customerRepository.find();
     const existingEmails = new Set(
-      customers.filter((c) => c.email).map((c) => c.email.toLowerCase()),
+      customers.filter((c) => c.email).map((c) => this.normalizeEmail(c.email)),
     );
 
     const duplicates: any[] = [];
     const duplicateUploadEmails = new Set<string>();
     const seenUploadEmails = new Set<string>();
 
-    for (const row of rows) {
-      const email = (row.email || row.Email || '').toLowerCase();
+    for (const row of normalizedRows) {
+      const email = row.email;
       if (!email) continue;
       if (seenUploadEmails.has(email)) {
         duplicateUploadEmails.add(email);
@@ -702,14 +713,14 @@ export class CustomersService {
         duplicates.push({
           email,
           existingCompany: customers.find((c) => c.email?.toLowerCase() === email)?.company || '',
-          incomingCompany: row.company || row.Company || '',
+          incomingCompany: row.company,
         });
       }
     }
 
     return {
       total: rows.length,
-      withEmail: rows.filter((r) => r.email || r.Email).length,
+      withEmail: normalizedRows.filter((row) => row.email).length,
       duplicateCount: duplicates.length,
       duplicateUploadCount: duplicateUploadEmails.size,
       duplicates: duplicates.slice(0, 20),
@@ -717,40 +728,57 @@ export class CustomersService {
     };
   }
 
-  async parseAndImport(file: UploadedFile) {
-    const filePath = file.path || '';
-    const rows = await this.parseExcelFile(filePath);
+  async parseAndImport(file: UploadedFile, ownerId = '') {
+    const rows = await this.parseExcelFile(file);
     let created = 0;
     let updated = 0;
+    let skipped = 0;
+
+    const existingCustomers = await this.customerRepository.find();
+    const customersByEmail = new Map(
+      existingCustomers
+        .filter((customer) => customer.email)
+        .map((customer) => [this.normalizeEmail(customer.email), customer]),
+    );
 
     for (const row of rows) {
-      const data = this.normalizeImportRow(row);
-      const existing = data.email
-        ? await this.customerRepository.findOne({ where: { email: data.email } })
-        : null;
+      const data = this.normalizeImportedRow(row);
+      if (!data.email && !data.company) {
+        skipped++;
+        continue;
+      }
+      const existing = data.email ? customersByEmail.get(data.email) : undefined;
 
       if (existing) {
-        Object.assign(existing, data);
+        Object.assign(existing, this.mergeImportedCustomer(data));
         await this.customerRepository.save(existing);
         updated++;
       } else {
         const customer = this.customerRepository.create({
           ...data,
+          ownerId,
           customerId: this.generateId('cus'),
         });
-        await this.customerRepository.save(customer);
+        const saved = await this.customerRepository.save(customer);
+        if (saved.email) customersByEmail.set(saved.email, saved);
         created++;
       }
     }
 
-    return { created, updated, total: rows.length };
+    return { created, updated, skipped, total: rows.length };
   }
 
-  private async parseExcelFile(filePath: string): Promise<any[]> {
-    const workbook = xlsx.readFile(filePath);
+  private async parseExcelFile(file: UploadedFile): Promise<any[]> {
+    if (!file?.buffer?.length && !file?.path) {
+      throw new BadRequestException('上传文件内容为空');
+    }
+    const workbook = file.buffer?.length
+      ? xlsx.read(file.buffer, { type: 'buffer' })
+      : xlsx.readFile(file.path!);
     const sheetName = workbook.SheetNames[0];
+    if (!sheetName) throw new BadRequestException('Excel/CSV 文件没有可读取的工作表');
     const sheet = workbook.Sheets[sheetName];
-    return xlsx.utils.sheet_to_json(sheet);
+    return xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false });
   }
 
   private normalizeImportRow(row: any) {
@@ -767,6 +795,47 @@ export class CustomersService {
       notes: row.notes || row.Notes || row['备注'] || '',
       source: 'import',
     };
+  }
+
+  private normalizeImportedRow(row: Record<string, unknown>) {
+    const value = (...keys: string[]) => {
+      for (const key of keys) {
+        const candidate = row[key];
+        if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+          return String(candidate).trim();
+        }
+      }
+      return '';
+    };
+    return {
+      company: value('company', 'Company', '公司', '公司名称', '客户名称'),
+      contact: value('contact', 'Contact', '联系人', '联系人姓名', '姓名'),
+      email: this.normalizeEmail(value('email', 'Email', '邮箱', '电子邮箱', 'E-mail', 'E-Mail')),
+      phone: value('phone', 'Phone', '电话', '手机号', '联系电话'),
+      website: value('website', 'Website', '官网', '网站', '网址'),
+      region: value('region', 'Region', '地区', '城市', '市场区域'),
+      country: value('country', 'Country', '国家', '国家/地区'),
+      business: value('business', 'Business', '主营业务', '行业', '业务'),
+      product: value('product', 'Product', '产品', '主营产品'),
+      customerType: value('customerType', 'Customer Type', '客户类型'),
+      timezone: value('timezone', 'Timezone', '时区', '客户时区'),
+      notes: value('notes', 'Notes', '备注'),
+      source: 'import',
+    };
+  }
+
+  private mergeImportedCustomer(incoming: ReturnType<CustomersService['normalizeImportedRow']>) {
+    const merged: Record<string, string> = {};
+    for (const [key, value] of Object.entries(incoming)) {
+      if (String(value || '').trim()) merged[key] = value;
+    }
+    // Profile fields merge in place, so ownership, lifecycle, email health,
+    // tags, activities and historical email logs remain untouched.
+    return merged;
+  }
+
+  private normalizeEmail(value: string) {
+    return String(value || '').trim().toLowerCase();
   }
 
   // ==================== Customer Views ====================

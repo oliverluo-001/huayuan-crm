@@ -47,6 +47,7 @@ import {
   createCustomerTag,
   deleteCustomerTag,
   importCustomers,
+  previewImport,
   getCustomerViews,
   createCustomerView,
   deleteCustomerView,
@@ -129,9 +130,17 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
     if (!file) return;
     setIsImporting(true);
     try {
+      const preview = await previewImport(file);
+      const duplicateCount = preview.duplicateCount + preview.duplicateUploadCount;
+      if (duplicateCount > 0) {
+        const confirmed = window.confirm(
+          `检测到 ${duplicateCount} 条重复邮箱。继续后将合并资料：新文件中的非空内容优先，空白字段和原有邮件记录会保留。是否继续？`,
+        );
+        if (!confirmed) return;
+      }
       const result = await importCustomers(file);
-      toast.success(`导入成功：新增 ${result.created} 条，更新 ${result.updated} 条`);
-      fetchCustomers();
+      toast.success(`导入完成：新增 ${result.created} 条，合并 ${result.updated} 条，跳过 ${result.skipped} 条。`);
+      await fetchCustomers();
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
