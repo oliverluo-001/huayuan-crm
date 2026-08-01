@@ -283,7 +283,7 @@ export interface B2BLeadTask {
   industry?: string;
   buyerType?: string;
   targetCount?: number;
-  status: "draft" | "running" | "completed" | "cancelled" | "failed";
+  status: "draft" | "ready" | "running" | "paused" | "completed" | "exhausted" | "cancelled" | "failed";
   cleanedLeadCount?: number;
   automationCursor?: number;
   automationProgress?: B2BAutomationProgress;

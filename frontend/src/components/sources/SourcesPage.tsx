@@ -141,8 +141,8 @@ export function SourcesPage() {
 
   const providerPresets: Record<string, { apiUrl: string }> = {
     "brave-search": { apiUrl: "https://api.search.brave.com/res/v1/web/search" },
-    "serper": { apiUrl: "https://serpapi.com/search" },
-    "serpapi": { apiUrl: "https://serpapi.com/search" },
+    "serper": { apiUrl: "https://google.serper.dev/search" },
+    "serpapi": { apiUrl: "https://serpapi.com/search.json" },
     "generic-json": { apiUrl: "" },
   };
 

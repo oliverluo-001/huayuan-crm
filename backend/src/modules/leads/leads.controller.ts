@@ -23,6 +23,8 @@ import {
   ImportCustomersDto,
   GenerateQueriesDto,
 } from './dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 // ─── Lead Associations Controller ────────────────────────────────────────
 
@@ -105,7 +107,9 @@ export class LeadTasksController {
       queries = createTaskDto.searchQueries;
     } else {
       queries = this.leadsService.generateSearchQueries(createTaskDto.productName || createTaskDto.name || '获客任务', {
-        regions: createTaskDto.targetRegions,
+        regions: createTaskDto.targetCountries?.length
+          ? createTaskDto.targetCountries
+          : createTaskDto.targetRegions,
         segments: createTaskDto.targetSegments,
         aliases: createTaskDto.productAliases,
         industries: createTaskDto.buyerIndustries,
@@ -166,11 +170,17 @@ export class LeadTasksController {
   }
 
   @Post(':id/import-customers')
+  @Roles('admin', 'sales')
   importToCustomers(
     @Param('id') id: string,
     @Body() dto: ImportCustomersDto,
+    @CurrentUser() user: { sub: number; role: string },
   ) {
-    return this.leadsService.importToCustomers(+id, dto);
+    return this.leadsService.importToCustomers(
+      +id,
+      dto,
+      user.role === 'sales' ? String(user.sub) : '',
+    );
   }
 
   @Get(':id/export')

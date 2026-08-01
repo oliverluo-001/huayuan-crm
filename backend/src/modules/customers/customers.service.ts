@@ -768,6 +768,39 @@ export class CustomersService {
     return { created, updated, skipped, total: rows.length };
   }
 
+  async upsertLeadCustomer(data: Partial<Customer>, ownerId = '') {
+    const email = this.normalizeEmail(data.email || '');
+    const existing = email
+      ? await this.customerRepository.findOne({ where: { email } })
+      : null;
+    const profile = this.mergeImportedCustomer({
+      company: String(data.company || ''),
+      contact: String(data.contact || ''),
+      email,
+      phone: String(data.phone || ''),
+      website: String(data.website || ''),
+      region: String(data.region || ''),
+      country: String(data.country || ''),
+      business: String(data.business || ''),
+      product: String(data.product || ''),
+      customerType: String(data.customerType || ''),
+      timezone: String(data.timezone || ''),
+      notes: String(data.notes || ''),
+      source: String(data.source || 'lead'),
+    });
+    if (existing) {
+      Object.assign(existing, profile);
+      return { customer: await this.customerRepository.save(existing), created: false };
+    }
+    const customer = this.customerRepository.create({
+      ...profile,
+      ownerId,
+      journeyStage: 'lead',
+      customerId: this.generateId('cus'),
+    });
+    return { customer: await this.customerRepository.save(customer), created: true };
+  }
+
   private async parseExcelFile(file: UploadedFile): Promise<any[]> {
     if (!file?.buffer?.length && !file?.path) {
       throw new BadRequestException('上传文件内容为空');

@@ -73,7 +73,7 @@ function automationProgressPercent(task: B2BLeadTask): number {
   const progress = task.automationProgress || ({} as B2BAutomationProgress);
   const queryTotal = Math.max(0, Number(progress.totalQueries || task.searchQueries?.length) || 0);
   const queryIndex = Math.max(0, Number(progress.searchedQueries ?? task.automationCursor) || 0);
-  if (!task || ["completed", "cancelled", "failed"].includes(task.status) && !queryTotal) return 100;
+  if (!task || ["completed", "exhausted", "cancelled", "failed"].includes(task.status) && !queryTotal) return 100;
   if (progress.stage === "validating" || progress.stage === "cleaning") return 96;
   if (task.status === "completed" && queryIndex >= queryTotal && queryTotal > 0) return 100;
   return queryTotal ? Math.min(95, Math.round((queryIndex / queryTotal) * 100)) : task.status === "running" ? 3 : 0;

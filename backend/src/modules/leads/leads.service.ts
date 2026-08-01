@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, In, Brackets } from 'typeorm';
+import { resolveMx } from 'node:dns/promises';
 import { Lead, LeadTask } from './entities';
 import {
   CreateLeadDto,
@@ -15,6 +16,8 @@ import {
   ImportCustomersDto,
   GenerateQueriesDto,
 } from './dto';
+import { LeadSearchService, SearchCandidate } from './lead-search.service';
+import { CustomersService } from '../customers/customers.service';
 
 // ─── Constants ───────────────────────────────────────────────────────────
 
@@ -44,11 +47,15 @@ export class LeadsService {
     private leadRepository: Repository<Lead>,
     @InjectRepository(LeadTask)
     private leadTaskRepository: Repository<LeadTask>,
+    private leadSearchService: LeadSearchService,
+    private customersService: CustomersService,
   ) {}
 
   // ==================== Lead Associations ====================
 
   async getAssociation(productName: string): Promise<{ association: LeadAssociationResponseDto }> {
+    return { association: await this.leadSearchService.associateProduct(productName) };
+    /* Legacy fallback retained below for schema compatibility. */
     const canonicalName = productName.trim();
     const entry = PRODUCT_INDUSTRY_MAP[canonicalName.toLowerCase()] || PRODUCT_INDUSTRY_MAP.default;
 
@@ -97,22 +104,27 @@ export class LeadsService {
   ): string[] {
     const { regions = ['Global'], segments = ['importer'], aliases = [], industries = [] } = options;
     const queries: string[] = [];
-    const allNames = [productName, ...aliases].filter(Boolean);
+    const allNames = [...new Set([productName, ...aliases].map((item) => item.trim()).filter(Boolean))];
+    const markets = regions.length ? regions : ['Global'];
+    const buyerSegments = segments.length ? segments : ['importer', 'distributor', 'stockist'];
+    const exclusions = '-wikipedia -news -jobs -pdf';
 
-    for (const name of allNames.slice(0, 3)) {
-      for (const segment of segments.slice(0, 5)) {
-        for (const region of regions.slice(0, 3)) {
-          if (region === 'Global') {
-            queries.push(`"${name}" ${segment}`);
-          } else {
-            queries.push(`"${name}" ${segment} ${region}`);
-          }
+    for (const name of allNames.slice(0, 5)) {
+      for (const segment of buyerSegments.slice(0, 6)) {
+        for (const region of markets.slice(0, 5)) {
+          const market = region === 'Global' ? '' : ` "${region}"`;
+          queries.push(`"${name}" "${segment}"${market} "contact us" ${exclusions}`.trim());
+          queries.push(`"${name}" "${segment}"${market} (sales OR enquiry OR procurement) ${exclusions}`.trim());
         }
       }
     }
-
-    // Deduplicate and limit
-    return [...new Set(queries)].slice(0, 50);
+    for (const industry of industries.slice(0, 6)) {
+      for (const region of markets.slice(0, 3)) {
+        const market = region === 'Global' ? '' : ` "${region}"`;
+        queries.push(`"${productName}" "${industry}" (supplier OR contractor OR distributor)${market} ${exclusions}`.trim());
+      }
+    }
+    return [...new Set(queries)].slice(0, 80);
   }
 
   // ==================== Leads ====================
@@ -256,7 +268,16 @@ export class LeadsService {
     }
 
     // Initialize progress if first run
-    const queries = task.searchQueries || [];
+    const queries = task.searchQueries?.length
+      ? task.searchQueries
+      : this.generateSearchQueries(task.productName || task.name, {
+          regions: task.targetRegions,
+          segments: task.targetSegments,
+          aliases: task.productAliases,
+          industries: task.buyerIndustries,
+        });
+    if (!queries.length) throw new BadRequestException('未生成有效搜索策略');
+    task.searchQueries = queries;
     task.status = 'running';
     task.cancelRequested = false;
     task.automationProgress = {
@@ -264,6 +285,8 @@ export class LeadsService {
       progress: 0,
       queryTotal: queries.length,
       queryIndex: task.automationCursor || 0,
+      totalQueries: queries.length,
+      searchedQueries: task.automationCursor || 0,
       searchedResults: 0,
       websitesCrawled: 0,
       publicEmailsFound: 0,
@@ -339,6 +362,8 @@ export class LeadsService {
         progress: Math.round(((i + 1) / totalQueries) * 95),
         queryTotal: totalQueries,
         queryIndex: i + 1,
+        totalQueries,
+        searchedQueries: i,
         currentQuery: query,
         searchedResults: Number(current.automationProgress?.searchedResults || 0),
         websitesCrawled: Number(current.automationProgress?.websitesCrawled || 0),
@@ -352,8 +377,44 @@ export class LeadsService {
         lastMessage: `正在搜索: ${query}`,
       });
 
-      // Simulate processing delay
-      await this.delay(2000);
+      try {
+        const productNames = [current.productName, ...(current.productAliases || [])].filter(Boolean);
+        const discovery = await this.leadSearchService.discover(
+          query,
+          productNames,
+          current.targetSegments || current.buyerCompanyTypes || [],
+        );
+        const added = await this.saveDiscoveredCandidates(current, discovery.candidates);
+        const totalFound = await this.leadRepository.count({ where: { taskId: current.taskId } });
+        await this.leadTaskRepository.update(task.id, {
+          rawLeadCount: totalFound,
+          leadCount: totalFound,
+          automationProgress: {
+            ...progress,
+            searchedQueries: i + 1,
+            searchedResults: Number(progress.searchedResults || 0) + discovery.searched,
+            websitesCrawled: Number(progress.websitesCrawled || 0) + discovery.crawled,
+            publicEmailsFound: Number(progress.publicEmailsFound || 0) + added.withEmail,
+            leadsFound: totalFound,
+          } as any,
+          lastMessage: `已完成 ${i + 1}/${totalQueries} 个查询，累计发现 ${totalFound} 条企业线索`,
+        });
+        if (totalFound >= Math.max(1, current.targetCount || 100)) break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.leadTaskRepository.update(task.id, {
+          automationProgress: { ...progress, searchedQueries: i + 1, lastError: message } as any,
+          lastMessage: `查询失败，继续下一条：${message}`,
+        });
+        if (/搜索 API|搜索数据源均不可用/.test(message)) {
+          await this.leadTaskRepository.update(task.id, {
+            status: 'exhausted',
+            automationStage: 'failed',
+            lastMessage: message,
+          });
+          return;
+        }
+      }
     }
 
     // Mark as cleaning
@@ -364,11 +425,13 @@ export class LeadsService {
         progress: 96,
         queryTotal: totalQueries,
         queryIndex: totalQueries,
+        totalQueries,
+        searchedQueries: totalQueries,
       } as any,
       lastMessage: '搜索完成，正在清洗数据…',
     });
 
-    await this.delay(1000);
+    await this.cleanLeads(task.id);
 
     // Mark as validating
     await this.leadTaskRepository.update(task.id, {
@@ -378,27 +441,29 @@ export class LeadsService {
         progress: 98,
         queryTotal: totalQueries,
         queryIndex: totalQueries,
+        totalQueries,
+        searchedQueries: totalQueries,
       } as any,
       lastMessage: '正在去重、验证与评分…',
     });
-
-    await this.delay(1000);
 
     // Mark as completed
     const finalTask = await this.findOneTask(task.id);
     const leadCount = await this.leadRepository.count({ where: { taskId: finalTask.taskId } });
     await this.leadTaskRepository.update(task.id, {
-      status: 'completed',
-      automationStage: 'completed',
+      status: leadCount > 0 ? 'completed' : 'exhausted',
+      automationStage: leadCount > 0 ? 'completed' : 'failed',
       automationCursor: totalQueries,
       automationProgress: {
         stage: 'completed',
         progress: 100,
         queryTotal: totalQueries,
         queryIndex: totalQueries,
-        searchedResults: leadCount,
-        websitesCrawled: leadCount,
-        publicEmailsFound: leadCount,
+        totalQueries,
+        searchedQueries: totalQueries,
+        searchedResults: Number(finalTask.automationProgress?.searchedResults || 0),
+        websitesCrawled: Number(finalTask.automationProgress?.websitesCrawled || 0),
+        publicEmailsFound: Number(finalTask.automationProgress?.publicEmailsFound || 0),
       } as any,
       cleanedLeadCount: leadCount,
       lastMessage: `搜索完成，共发现 ${leadCount} 条线索`,
@@ -430,7 +495,7 @@ export class LeadsService {
     const needsReview = leads.filter((l) => l.recommendedAction === 'Needs Review').length;
     const remove = leads.filter((l) => l.recommendedAction === 'Remove').length;
     const hardBounce = leads.filter((l) => l.recommendedAction === 'Hard Bounce').length;
-    const duplicatesRemoved = leads.length; // simplified
+    const duplicatesRemoved = leads.filter((lead) => lead.status === 'duplicate').length;
 
     const byLargeRegion: Record<string, number> = {};
     const byTargetSegment: Record<string, number> = {};
@@ -510,43 +575,79 @@ export class LeadsService {
     let needsReview = 0;
     let remove = 0;
     let hardBounce = 0;
+    let duplicateCount = 0;
+    const seenEmails = new Set<string>();
+    const seenCompanies = new Set<string>();
 
     for (const lead of leads) {
-      // Basic scoring
-      let score = 0;
-      if (lead.company) score += 20;
-      if (lead.website) score += 15;
-      if (lead.email) score += 25;
-      if (lead.email && lead.email.includes('@')) score += 10;
-      if (lead.phone) score += 5;
-      if (lead.country) score += 5;
-      if (lead.targetSegment) score += 10;
-      if (lead.business) score += 10;
+      const email = String(lead.email || '').trim().toLowerCase();
+      const companyKey = `${this.normalizeCompany(lead.company)}|${String(lead.country || '').toLowerCase()}`;
+      const duplicate = (email && seenEmails.has(email)) ||
+        (this.normalizeCompany(lead.company) && seenCompanies.has(companyKey));
+      if (email) seenEmails.add(email);
+      if (this.normalizeCompany(lead.company)) seenCompanies.add(companyKey);
 
-      lead.leadScore = score;
-
-      if (score >= 60 && lead.email) {
-        lead.recommendedAction = 'Ready to Email';
-        lead.leadTier = 'high';
-        lead.confidence = 'High';
-        readyToEmail++;
-      } else if (score >= 30) {
-        lead.recommendedAction = 'Needs Review';
-        lead.leadTier = 'medium';
-        lead.confidence = 'Medium';
-        needsReview++;
-      } else if (score > 0) {
+      if (duplicate) {
+        lead.status = 'duplicate';
         lead.recommendedAction = 'Remove';
-        lead.leadTier = 'review';
-        lead.confidence = 'Low';
-        remove++;
-      } else {
-        lead.recommendedAction = 'Hard Bounce';
         lead.leadTier = 'remove';
         lead.confidence = 'Low';
-        hardBounce++;
+        lead.cleaningNotes = this.appendNote(lead.cleaningNotes, '重复邮箱或同国家重复公司');
+        duplicateCount++;
+        await this.leadRepository.save(lead);
+        continue;
       }
 
+      const validation = await this.validateLeadEmail(email);
+      const sourceReachable = lead.sourceHttpStatus >= 200 && lead.sourceHttpStatus <= 499;
+      const sourceHost = this.hostname(lead.sourceUrl || lead.website);
+      const emailDomain = email.split('@')[1] || '';
+      const domainMatch = Boolean(emailDomain && sourceHost &&
+        (sourceHost === emailDomain || sourceHost.endsWith(`.${emailDomain}`) || emailDomain.endsWith(`.${sourceHost}`)));
+      const freeEmail = /^(gmail|yahoo|hotmail|outlook|live|icloud|qq|163|126)\./i.test(emailDomain);
+      const preferredEmail = /^(sales|info|export|enquiry|inquiries|contact|procurement|purchasing|rfq|quotes)@/i.test(email);
+
+      let score = 0;
+      if (lead.matchedProductKeyword) score += 25;
+      if (lead.targetSegment || lead.buyerType) score += 20;
+      if (sourceReachable) score += 20;
+      if (domainMatch) score += 15;
+      if (['Company Website', 'Contact Page'].includes(lead.sourceType)) score += 10;
+      if (preferredEmail) score += 10;
+      if (freeEmail) score -= 20;
+      if (lead.sourceType === 'Directory / Marketplace') score -= 20;
+      if (!sourceReachable) score -= 30;
+      if (validation.hardBounce) score -= 50;
+      if (validation.blocked) score -= 100;
+      lead.leadScore = Math.max(0, Math.min(100, score));
+      lead.email = email;
+      lead.emailStatus = validation.valid ? 'verified' : validation.hardBounce || validation.blocked ? 'invalid' : 'unknown';
+      lead.emailSourceDomainMatch = domainMatch;
+      lead.confidence = lead.leadScore >= 80 ? 'High' : lead.leadScore >= 50 ? 'Medium' : 'Low';
+      lead.cleaningNotes = this.appendNote(
+        lead.cleaningNotes,
+        [validation.note, domainMatch ? '邮箱域名与官网匹配' : email ? '邮箱域名与来源需复核' : '未发现公开邮箱', !sourceReachable ? '来源页面当前不可访问' : '']
+          .filter(Boolean).join('；'),
+      );
+
+      if (validation.hardBounce) {
+        lead.recommendedAction = 'Hard Bounce';
+        lead.leadTier = 'remove';
+        hardBounce++;
+      } else if (validation.blocked) {
+        lead.recommendedAction = 'Remove';
+        lead.leadTier = 'remove';
+        remove++;
+      } else if (validation.valid && sourceReachable && lead.confidence === 'High' &&
+        (domainMatch || ['Company Website', 'Contact Page'].includes(lead.sourceType)) && !freeEmail) {
+        lead.recommendedAction = 'Ready to Email';
+        lead.leadTier = 'high';
+        readyToEmail++;
+      } else {
+        lead.recommendedAction = 'Needs Review';
+        lead.leadTier = lead.confidence === 'Medium' ? 'medium' : 'review';
+        needsReview++;
+      }
       await this.leadRepository.save(lead);
     }
 
@@ -560,7 +661,7 @@ export class LeadsService {
     const total = leads.length;
     await this.leadTaskRepository.update(task.id, {
       cleanedLeadCount: total,
-      duplicateCount: 0,
+      duplicateCount,
     });
 
     return {
@@ -570,14 +671,14 @@ export class LeadsService {
         needsReview,
         remove,
         hardBounce,
-        duplicatesRemoved: 0,
+        duplicatesRemoved: duplicateCount,
         byLargeRegion,
         byTargetSegment,
       },
     };
   }
 
-  async importToCustomers(taskId: number, dto: ImportCustomersDto) {
+  async importToCustomers(taskId: number, dto: ImportCustomersDto, ownerId = '') {
     const task = await this.findOneTask(taskId);
     let leads: Lead[];
 
@@ -598,12 +699,30 @@ export class LeadsService {
       (l) => l.company && !l.crmCustomerId && l.recommendedAction !== 'Remove' && l.recommendedAction !== 'Hard Bounce',
     );
 
-    // Mark as imported
+    let created = 0;
+    let merged = 0;
     for (const lead of importable) {
-      lead.crmCustomerId = `imported_${lead.leadId}`;
+      const result = await this.customersService.upsertLeadCustomer({
+        company: lead.company,
+        contact: lead.contactName,
+        email: lead.email,
+        phone: lead.phone,
+        website: lead.website,
+        region: lead.region,
+        country: lead.country,
+        business: lead.business,
+        product: task.productName,
+        customerType: lead.targetSegment || lead.buyerType,
+        notes: `获客来源：${lead.sourceUrl}\n${lead.cleaningNotes || ''}`.trim(),
+        source: lead.sourceUrl || lead.sourceName || 'lead',
+      }, ownerId);
+      lead.crmCustomerId = result.customer.customerId;
+      lead.convertedCustomerId = result.customer.customerId;
       lead.leadStatus = 'converted';
       lead.status = 'converted';
       await this.leadRepository.save(lead);
+      if (result.created) created++;
+      else merged++;
     }
 
     await this.leadTaskRepository.update(task.id, {
@@ -611,8 +730,8 @@ export class LeadsService {
     });
 
     return {
-      imported: importable.length,
-      merged: 0,
+      imported: created,
+      merged,
     };
   }
 
@@ -651,6 +770,107 @@ export class LeadsService {
     }
 
     return csvRows.join('\n');
+  }
+
+  private async saveDiscoveredCandidates(task: LeadTask, candidates: SearchCandidate[]) {
+    let added = 0;
+    let withEmail = 0;
+    for (const candidate of candidates) {
+      const email = candidate.email.trim().toLowerCase();
+      const existing = await this.leadRepository.findOne({
+        where: email
+          ? [{ taskId: task.taskId, email }, { taskId: task.taskId, sourceUrl: candidate.sourceUrl }]
+          : { taskId: task.taskId, sourceUrl: candidate.sourceUrl },
+      });
+      if (existing) continue;
+      const region = (task.targetRegions || []).find((item) => item !== 'Global') || task.targetRegion || '';
+      const lead = this.leadRepository.create({
+        taskId: task.taskId,
+        leadId: this.generateId('lead'),
+        company: candidate.company,
+        email,
+        website: candidate.website,
+        region,
+        country: region,
+        largeRegion: this.largeRegionFor(region),
+        business: candidate.business,
+        targetSegment: candidate.targetSegment,
+        buyerType: candidate.targetSegment,
+        sourceUrl: candidate.sourceUrl,
+        sourcePage: candidate.sourceUrl,
+        sourceType: candidate.sourceType,
+        sourceName: candidate.sourceName,
+        sourceHttpStatus: candidate.sourceHttpStatus,
+        matchedProductKeyword: candidate.matchedProductKeyword,
+        cleaningNotes: candidate.fitNote || '公开网页与产品及买家身份匹配',
+        confidence: email ? 'Medium' : 'Low',
+        recommendedAction: 'Needs Review',
+        leadStatus: 'new',
+        status: 'candidate',
+        rawData: candidate.rawData,
+      });
+      await this.leadRepository.save(lead);
+      added++;
+      if (email) withEmail++;
+    }
+    return { added, withEmail };
+  }
+
+  private largeRegionFor(countryOrRegion: string) {
+    const value = countryOrRegion.toLowerCase();
+    const groups: Array<[string, string[]]> = [
+      ['Middle East', ['uae', 'united arab emirates', 'saudi arabia', 'qatar', 'oman', 'bahrain', 'kuwait', 'iraq', 'jordan', 'turkey', 'israel']],
+      ['Southeast Asia', ['singapore', 'malaysia', 'indonesia', 'thailand', 'vietnam', 'philippines', 'cambodia', 'myanmar', 'laos', 'brunei']],
+      ['North America', ['usa', 'united states', 'canada', 'mexico']],
+      ['Europe', ['uk', 'united kingdom', 'germany', 'netherlands', 'italy', 'france', 'spain', 'belgium', 'poland', 'norway', 'sweden', 'denmark', 'ireland']],
+      ['Oceania', ['australia', 'new zealand']],
+      ['Africa', ['south africa', 'nigeria', 'kenya', 'egypt', 'morocco', 'ghana', 'tanzania', 'angola']],
+      ['South America', ['chile', 'peru', 'brazil', 'argentina', 'colombia', 'ecuador']],
+      ['South Asia', ['india', 'pakistan', 'bangladesh', 'sri lanka']],
+      ['East Asia', ['japan', 'south korea', 'china', 'taiwan']],
+    ];
+    return groups.find(([, countries]) => countries.includes(value))?.[0] || countryOrRegion;
+  }
+
+  private async validateLeadEmail(email: string) {
+    if (!email) return { valid: false, hardBounce: false, blocked: false, note: '未发现公开邮箱' };
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return { valid: false, hardBounce: false, blocked: true, note: '邮箱格式无效' };
+    }
+    const prefix = email.split('@')[0];
+    if (['no-reply', 'noreply', 'donotreply', 'abuse', 'postmaster', 'hostmaster'].includes(prefix)) {
+      return { valid: false, hardBounce: false, blocked: true, note: '禁止发送的系统邮箱' };
+    }
+    try {
+      const records = await resolveMx(email.split('@')[1]);
+      if (!records.length) return { valid: false, hardBounce: true, blocked: false, note: '邮箱域名没有 MX 记录' };
+      return { valid: true, hardBounce: false, blocked: false, note: '邮箱格式及 MX 记录有效' };
+    } catch (error: any) {
+      const hardBounce = ['ENOTFOUND', 'ENODATA', 'NXDOMAIN'].includes(String(error?.code || '').toUpperCase());
+      return {
+        valid: false,
+        hardBounce,
+        blocked: false,
+        note: hardBounce ? '邮箱域名不存在 / NXDOMAIN' : 'MX 查询暂时失败，需人工复核',
+      };
+    }
+  }
+
+  private normalizeCompany(value: string) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/\b(limited|ltd|llc|fze|fzco|gmbh|inc|incorporated|company|co|pte|sdn\s*bhd|bv)\b\.?/g, ' ')
+      .replace(/[^a-z0-9\p{L}]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private hostname(value: string) {
+    try { return new URL(value).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; }
+  }
+
+  private appendNote(existing: string, note: string) {
+    return [String(existing || '').trim(), note.trim()].filter(Boolean).join('；');
   }
 
   // ==================== Utils ====================
