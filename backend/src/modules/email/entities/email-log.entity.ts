@@ -17,8 +17,23 @@ export class EmailLog {
   @Column({ name: 'customer_id', type: 'varchar', length: 32, default: '' })
   customerId: string;
 
+  @Column({ name: 'contact_id', type: 'varchar', length: 32, default: '' })
+  contactId: string;
+
+  @Column({ name: 'customer_name', type: 'varchar', length: 255, default: '' })
+  customerName: string;
+
   @Column({ name: 'email_task_id', type: 'varchar', length: 32, default: '' })
   emailTaskId: string;
+
+  @Column({ name: 'task_name', type: 'varchar', length: 255, default: '' })
+  taskName: string;
+
+  @Column({ name: 'template_id', type: 'varchar', length: 32, default: '' })
+  templateId: string;
+
+  @Column({ name: 'template_name', type: 'varchar', length: 255, default: '' })
+  templateName: string;
 
   @Column({ name: 'recipient_email', type: 'varchar', length: 255 })
   recipientEmail: string;
@@ -31,6 +46,12 @@ export class EmailLog {
 
   @Column({ name: 'error_message', type: 'text', nullable: true })
   errorMessage: string;
+
+  @Column({ name: 'message_id', type: 'varchar', length: 255, default: '' })
+  messageId: string;
+
+  @Column({ type: 'int', default: 1 })
+  attempt: number;
 
   @Column({ name: 'sent_at', type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   sentAt: Date;

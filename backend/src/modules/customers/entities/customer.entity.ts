@@ -11,7 +11,20 @@ import {
 import { Tag } from './tag.entity';
 
 export type CustomerTier = 'A' | 'B' | 'C' | 'D' | '';
-export type JourneyStage = 'prospect' | 'lead' | 'qualified' | 'proposal' | 'negotiation' | 'closed' | '';
+export type JourneyStage =
+  | 'new'
+  | 'contacted'
+  | 'replied'
+  | 'qualified'
+  | 'opportunity'
+  | 'won'
+  | 'lost'
+  | 'prospect'
+  | 'lead'
+  | 'proposal'
+  | 'negotiation'
+  | 'closed'
+  | '';
 export type EmailStatus = 'valid' | 'invalid' | 'unknown';
 export type CustomerHealth = 'good' | 'warning' | 'critical' | '';
 

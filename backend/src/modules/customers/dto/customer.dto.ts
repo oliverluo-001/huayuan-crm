@@ -45,9 +45,9 @@ export class CreateCustomerDto {
   @IsOptional()
   tier?: 'A' | 'B' | 'C' | 'D' | '';
 
-  @IsEnum(['prospect', 'lead', 'qualified', 'proposal', 'negotiation', 'closed', ''])
+  @IsEnum(['new', 'contacted', 'replied', 'qualified', 'opportunity', 'won', 'lost', 'prospect', 'lead', 'proposal', 'negotiation', 'closed', ''])
   @IsOptional()
-  journeyStage?: 'prospect' | 'lead' | 'qualified' | 'proposal' | 'negotiation' | 'closed' | '';
+  journeyStage?: 'new' | 'contacted' | 'replied' | 'qualified' | 'opportunity' | 'won' | 'lost' | 'prospect' | 'lead' | 'proposal' | 'negotiation' | 'closed' | '';
 
   @IsString()
   @IsOptional()
@@ -116,9 +116,9 @@ export class UpdateCustomerDto {
   @IsOptional()
   tier?: 'A' | 'B' | 'C' | 'D' | '';
 
-  @IsEnum(['prospect', 'lead', 'qualified', 'proposal', 'negotiation', 'closed', ''])
+  @IsEnum(['new', 'contacted', 'replied', 'qualified', 'opportunity', 'won', 'lost', 'prospect', 'lead', 'proposal', 'negotiation', 'closed', ''])
   @IsOptional()
-  journeyStage?: 'prospect' | 'lead' | 'qualified' | 'proposal' | 'negotiation' | 'closed' | '';
+  journeyStage?: 'new' | 'contacted' | 'replied' | 'qualified' | 'opportunity' | 'won' | 'lost' | 'prospect' | 'lead' | 'proposal' | 'negotiation' | 'closed' | '';
 
   @IsString()
   @IsOptional()

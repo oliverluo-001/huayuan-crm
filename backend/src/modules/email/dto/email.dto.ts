@@ -13,6 +13,10 @@ export class CreateTemplateDto {
   @IsOptional()
   @IsArray()
   variables?: string[];
+
+  @IsOptional()
+  @IsArray()
+  images?: Array<{ id: string; name?: string; dataUrl: string }>;
 }
 
 export class UpdateTemplateDto {
@@ -31,6 +35,10 @@ export class UpdateTemplateDto {
   @IsOptional()
   @IsArray()
   variables?: string[];
+
+  @IsOptional()
+  @IsArray()
+  images?: Array<{ id: string; name?: string; dataUrl: string }>;
 }
 
 // Frontend-facing EmailTask DTO — accepts batch email task fields
@@ -53,8 +61,7 @@ export class CreateEmailTaskDto {
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  customerIds?: string[];
+  customerIds?: Array<string | number>;
 
   @IsOptional()
   @IsString()
@@ -149,6 +156,14 @@ export class UpdateEmailTaskDto {
   @IsOptional()
   @IsDateString()
   scheduledAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  startAt?: string;
+
+  @IsOptional()
+  @IsArray()
+  customerIds?: Array<string | number>;
 
   @IsOptional()
   @IsString()

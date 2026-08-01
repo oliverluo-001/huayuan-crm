@@ -155,18 +155,7 @@ export class UnsubscribeController {
   }
 
   private async getUnsubscribeSecret(): Promise<string> {
-    const setting = await this.settingsService.findOne('unsubscribe_secret');
-    if (setting && typeof setting === 'object' && (setting as any).value) {
-      return (setting as any).value;
-    }
-    if (typeof setting === 'string') {
-      return setting;
-    }
-    // Generate a random secret if none exists
-    const crypto = require('node:crypto');
-    const secret = crypto.randomBytes(32).toString('hex');
-    await this.settingsService.upsert('unsubscribe_secret', secret);
-    return secret;
+    return this.settingsService.getOrCreateUnsubscribeSecret();
   }
 }
 

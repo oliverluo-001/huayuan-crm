@@ -143,6 +143,50 @@ export class CustomersService {
     return customer;
   }
 
+  async findByIdentifier(identifier: string | number) {
+    const value = String(identifier ?? '').trim();
+    const numericId = Number(value);
+    const customer = await this.customerRepository.findOne({
+      where: Number.isInteger(numericId) && numericId > 0
+        ? [{ id: numericId }, { customerId: value }]
+        : { customerId: value },
+    });
+    if (!customer) throw new NotFoundException('客户不存在');
+    return customer;
+  }
+
+  async findContactByIdentifier(identifier: string | number) {
+    const value = String(identifier ?? '').trim();
+    const numericId = Number(value);
+    const contact = await this.contactRepository.findOne({
+      where: Number.isInteger(numericId) && numericId > 0
+        ? [{ id: numericId }, { contactId: value }]
+        : { contactId: value },
+    });
+    if (!contact) throw new NotFoundException('联系人不存在');
+    return contact;
+  }
+
+  async markEmailSent(customerId: number, subject: string, recipientEmail: string) {
+    const customer = await this.findOne(customerId);
+    if (!['replied', 'opportunity', 'won', 'lost', 'closed'].includes(customer.journeyStage)) {
+      customer.journeyStage = 'contacted';
+    }
+    customer.lastActivityAt = new Date();
+    customer.lastActivityType = 'email';
+    customer.health = 'good';
+    await this.customerRepository.save(customer);
+    const activity = this.activityRepository.create({
+      customerId,
+      activityId: this.generateId('activity'),
+      type: 'email',
+      subject,
+      content: `邮件已发送至 ${recipientEmail}`,
+    });
+    await this.activityRepository.save(activity);
+    return customer;
+  }
+
   async create(createCustomerDto: CreateCustomerDto) {
     if (createCustomerDto.email) {
       const existing = await this.customerRepository.findOne({

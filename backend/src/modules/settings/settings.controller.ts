@@ -8,6 +8,7 @@ import {
   HttpCode,
 } from '@nestjs/common';
 import { SettingsService } from './settings.service';
+import { Roles } from '../../common/decorators/roles.decorator';
 import {
   SearchProfileDto,
   AiProfileDto,
@@ -17,17 +18,13 @@ import {
 } from './dto';
 
 @Controller('settings')
+@Roles('admin')
 export class SettingsController {
   constructor(private readonly settingsService: SettingsService) {}
 
   @Get()
   findAll() {
     return this.settingsService.findAll();
-  }
-
-  @Get(':key')
-  findOne(@Param('key') key: string) {
-    return this.settingsService.findOne(key);
   }
 
   // ==================== Search Profiles ====================
@@ -84,6 +81,12 @@ export class SettingsController {
     return this.settingsService.saveSmtpProfile(profile);
   }
 
+  @Post('smtp-profile/test')
+  @HttpCode(200)
+  testSmtpProfile() {
+    return this.settingsService.testSmtpProfile();
+  }
+
   // ==================== IMAP Profile ====================
 
   @Get('imap-profile')
@@ -106,5 +109,10 @@ export class SettingsController {
   @Post('email-policy')
   saveEmailPolicy(@Body() policy: EmailPolicyDto) {
     return this.settingsService.saveEmailPolicy(policy);
+  }
+
+  @Get(':key')
+  findOne(@Param('key') key: string) {
+    return this.settingsService.findOne(key);
   }
 }

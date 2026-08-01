@@ -86,6 +86,15 @@ export class EmailTask {
   @Column({ name: 'successful_send_count', type: 'int', default: 0 })
   successfulSendCount: number;
 
+  @Column({ name: 'failed_send_count', type: 'int', default: 0 })
+  failedSendCount: number;
+
+  @Column({ name: 'skipped_send_count', type: 'int', default: 0 })
+  skippedSendCount: number;
+
+  @Column({ name: 'last_message', type: 'text', nullable: true })
+  lastMessage: string;
+
   @Column({ name: 'error_message', type: 'text', nullable: true })
   errorMessage: string;
 
