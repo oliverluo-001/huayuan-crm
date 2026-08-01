@@ -133,14 +133,14 @@ export class LeadsService {
     const where: any = {};
 
     if (filters.q) {
-      return this.leadRepository
+      const query = this.leadRepository
         .createQueryBuilder('lead')
         .where(
-          `lead.company LIKE :q OR lead.contactName LIKE :q OR lead.email LIKE :q OR lead.website LIKE :q`,
+          `(lead.company LIKE :q OR lead.contactName LIKE :q OR lead.email LIKE :q OR lead.website LIKE :q)`,
           { q: `%${filters.q}%` },
-        )
-        .orderBy('lead.createdAt', 'DESC')
-        .getMany();
+        );
+      if (filters.ownerId) query.andWhere('lead.ownerId = :ownerId', { ownerId: filters.ownerId });
+      return query.orderBy('lead.createdAt', 'DESC').getMany();
     }
 
     if (filters.leadStatus) where.leadStatus = filters.leadStatus;
@@ -148,6 +148,7 @@ export class LeadsService {
     if (filters.taskId) where.taskId = filters.taskId;
     if (filters.region) where.region = Like(`%${filters.region}%`);
     if (filters.country) where.country = Like(`%${filters.country}%`);
+    if (filters.ownerId) where.ownerId = filters.ownerId;
 
     return this.leadRepository.find({
       where,
@@ -155,29 +156,32 @@ export class LeadsService {
     });
   }
 
-  async findOne(id: number) {
+  async findOne(id: number, ownerId?: string) {
     const lead = await this.leadRepository.findOne({ where: { id } });
     if (!lead) {
       throw new NotFoundException('线索不存在');
     }
+    if (ownerId && lead.ownerId !== ownerId) throw new NotFoundException('线索不存在');
     return lead;
   }
 
-  async create(createLeadDto: CreateLeadDto) {
+  async create(createLeadDto: CreateLeadDto, ownerId = '') {
     const lead = this.leadRepository.create({
       ...createLeadDto,
+      ownerId,
       leadId: this.generateId('lead'),
     });
     return this.leadRepository.save(lead);
   }
 
-  async update(id: number, updateLeadDto: UpdateLeadDto) {
-    const lead = await this.findOne(id);
+  async update(id: number, updateLeadDto: UpdateLeadDto, ownerId?: string) {
+    const lead = await this.findOne(id, ownerId);
     Object.assign(lead, updateLeadDto);
     return this.leadRepository.save(lead);
   }
 
-  async remove(id: number) {
+  async remove(id: number, ownerId?: string) {
+    await this.findOne(id, ownerId);
     const result = await this.leadRepository.delete(id);
     if (result.affected === 0) {
       throw new NotFoundException('线索不存在');
@@ -185,19 +189,17 @@ export class LeadsService {
     return { deleted: true };
   }
 
-  async bulkDelete(bulkDeleteDto: BulkDeleteLeadsDto) {
+  async bulkDelete(bulkDeleteDto: BulkDeleteLeadsDto, ownerId?: string) {
     const leads = await this.leadRepository.find({
-      where: { leadId: In(bulkDeleteDto.ids) },
+      where: { leadId: In(bulkDeleteDto.ids), ...(ownerId ? { ownerId } : {}) },
     });
-    const result = await this.leadRepository.delete({
-      leadId: In(bulkDeleteDto.ids),
-    });
+    const result = leads.length ? await this.leadRepository.delete({ id: In(leads.map((lead) => lead.id)) }) : { affected: 0 };
     return { deleted: result.affected || 0 };
   }
 
-  async convertLeads(convertDto: ConvertLeadsDto) {
+  async convertLeads(convertDto: ConvertLeadsDto, ownerId?: string) {
     const leads = await this.leadRepository.find({
-      where: { leadId: In(convertDto.ids) },
+      where: { leadId: In(convertDto.ids), ...(ownerId ? { ownerId } : {}) },
     });
 
     const converted: any[] = [];
@@ -220,23 +222,26 @@ export class LeadsService {
   async findTasks(filters: Record<string, any> = {}) {
     const where: any = {};
     if (filters.status) where.status = filters.status;
+    if (filters.ownerId) where.ownerId = filters.ownerId;
     return this.leadTaskRepository.find({
       where,
       order: { createdAt: 'DESC' },
     });
   }
 
-  async findOneTask(id: number) {
+  async findOneTask(id: number, ownerId?: string) {
     const task = await this.leadTaskRepository.findOne({ where: { id } });
     if (!task) {
       throw new NotFoundException('任务不存在');
     }
+    if (ownerId && task.ownerId !== ownerId) throw new NotFoundException('任务不存在');
     return task;
   }
 
-  async createTask(createTaskDto: CreateLeadTaskDto) {
+  async createTask(createTaskDto: CreateLeadTaskDto, ownerId = '') {
     const task = this.leadTaskRepository.create({
       ...createTaskDto,
+      ownerId,
       name: createTaskDto.productName || createTaskDto.name || '获客任务',
       taskId: this.generateId('task'),
       status: 'draft',
@@ -244,15 +249,15 @@ export class LeadsService {
     return this.leadTaskRepository.save(task);
   }
 
-  async updateTask(id: number, updateTaskDto: UpdateLeadTaskDto) {
-    const task = await this.findOneTask(id);
+  async updateTask(id: number, updateTaskDto: UpdateLeadTaskDto, ownerId?: string) {
+    const task = await this.findOneTask(id, ownerId);
     Object.assign(task, updateTaskDto);
     return this.leadTaskRepository.save(task);
   }
 
-  async removeTask(id: number) {
+  async removeTask(id: number, ownerId?: string) {
     // Also remove associated leads
-    const task = await this.findOneTask(id);
+    const task = await this.findOneTask(id, ownerId);
     await this.leadRepository.delete({ taskId: task.taskId });
     const result = await this.leadTaskRepository.delete(id);
     if (result.affected === 0) {
@@ -261,8 +266,8 @@ export class LeadsService {
     return { deleted: true };
   }
 
-  async runTask(id: number) {
-    const task = await this.findOneTask(id);
+  async runTask(id: number, ownerId?: string) {
+    const task = await this.findOneTask(id, ownerId);
     if (task.status === 'running') {
       return { started: false, message: '任务已经在自动运行中' };
     }
@@ -302,8 +307,8 @@ export class LeadsService {
     return { started: true };
   }
 
-  async cancelTask(id: number) {
-    const task = await this.findOneTask(id);
+  async cancelTask(id: number, ownerId?: string) {
+    const task = await this.findOneTask(id, ownerId);
     if (task.status !== 'running') {
       throw new BadRequestException('任务不在运行状态');
     }
@@ -313,8 +318,8 @@ export class LeadsService {
     return { cancelled: true };
   }
 
-  async generateQueries(id: number, dto: GenerateQueriesDto) {
-    const task = await this.findOneTask(id);
+  async generateQueries(id: number, dto: GenerateQueriesDto, ownerId?: string) {
+    const task = await this.findOneTask(id, ownerId);
 
     if (dto.regenerate) {
       const queries = this.generateSearchQueries(task.productName || task.name, {
@@ -472,8 +477,8 @@ export class LeadsService {
 
   // ─── Task Leads ────────────────────────────────────────────────────────
 
-  async getTaskLeads(taskId: number, filters: Record<string, any> = {}) {
-    const task = await this.findOneTask(taskId);
+  async getTaskLeads(taskId: number, filters: Record<string, any> = {}, ownerId?: string) {
+    const task = await this.findOneTask(taskId, ownerId);
     const where: any = { taskId: task.taskId };
 
     if (filters.largeRegion) where.largeRegion = filters.largeRegion;
@@ -519,8 +524,8 @@ export class LeadsService {
     };
   }
 
-  async importLeads(taskId: number, leadsData: Record<string, any>[]) {
-    const task = await this.findOneTask(taskId);
+  async importLeads(taskId: number, leadsData: Record<string, any>[], ownerId?: string) {
+    const task = await this.findOneTask(taskId, ownerId);
     const now = new Date();
     let imported = 0;
 
@@ -528,6 +533,7 @@ export class LeadsService {
       try {
         const lead = this.leadRepository.create({
           taskId: task.taskId,
+          ownerId: task.ownerId,
           leadId: this.generateId('lead'),
           company: data.company || data.companyName || '未知公司',
           contactName: data.contactName || data.contact || '',
@@ -567,8 +573,8 @@ export class LeadsService {
     return { imported };
   }
 
-  async cleanLeads(taskId: number) {
-    const task = await this.findOneTask(taskId);
+  async cleanLeads(taskId: number, ownerId?: string) {
+    const task = await this.findOneTask(taskId, ownerId);
     const leads = await this.leadRepository.find({ where: { taskId: task.taskId } });
 
     let readyToEmail = 0;
@@ -679,7 +685,7 @@ export class LeadsService {
   }
 
   async importToCustomers(taskId: number, dto: ImportCustomersDto, ownerId = '') {
-    const task = await this.findOneTask(taskId);
+    const task = await this.findOneTask(taskId, ownerId || undefined);
     let leads: Lead[];
 
     if (dto.importAll) {
@@ -701,8 +707,10 @@ export class LeadsService {
 
     let created = 0;
     let merged = 0;
+    let skipped = 0;
     for (const lead of importable) {
-      const result = await this.customersService.upsertLeadCustomer({
+      try {
+        const result = await this.customersService.upsertLeadCustomer({
         company: lead.company,
         contact: lead.contactName,
         email: lead.email,
@@ -715,14 +723,19 @@ export class LeadsService {
         customerType: lead.targetSegment || lead.buyerType,
         notes: `获客来源：${lead.sourceUrl}\n${lead.cleaningNotes || ''}`.trim(),
         source: lead.sourceUrl || lead.sourceName || 'lead',
-      }, ownerId);
-      lead.crmCustomerId = result.customer.customerId;
-      lead.convertedCustomerId = result.customer.customerId;
-      lead.leadStatus = 'converted';
-      lead.status = 'converted';
-      await this.leadRepository.save(lead);
-      if (result.created) created++;
-      else merged++;
+        }, ownerId);
+        lead.crmCustomerId = result.customer.customerId;
+        lead.convertedCustomerId = result.customer.customerId;
+        lead.leadStatus = 'converted';
+        lead.status = 'converted';
+        await this.leadRepository.save(lead);
+        if (result.created) created++;
+        else merged++;
+      } catch (error: any) {
+        skipped++;
+        lead.reviewReason = error?.message || '客户导入失败';
+        await this.leadRepository.save(lead);
+      }
     }
 
     await this.leadTaskRepository.update(task.id, {
@@ -732,11 +745,12 @@ export class LeadsService {
     return {
       imported: created,
       merged,
+      skipped,
     };
   }
 
-  async exportLeads(taskId: number, type: string): Promise<string> {
-    const task = await this.findOneTask(taskId);
+  async exportLeads(taskId: number, type: string, ownerId?: string): Promise<string> {
+    const task = await this.findOneTask(taskId, ownerId);
     const where: any = { taskId: task.taskId };
 
     if (type === 'ready') where.recommendedAction = 'Ready to Email';
@@ -786,6 +800,7 @@ export class LeadsService {
       const region = (task.targetRegions || []).find((item) => item !== 'Global') || task.targetRegion || '';
       const lead = this.leadRepository.create({
         taskId: task.taskId,
+        ownerId: task.ownerId,
         leadId: this.generateId('lead'),
         company: candidate.company,
         email,

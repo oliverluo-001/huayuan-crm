@@ -15,7 +15,8 @@ import {
   deleteSearchProfile,
   saveAiProfile,
   testAiProfile,
-  getState,
+  getSearchProfiles,
+  getAiProfile,
   type SearchProfile,
   type AiProfile,
 } from "@/api/client";
@@ -44,15 +45,15 @@ export function SourcesPage() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const state = await getState();
-      setSearchProfiles(state.settings?.searchProfiles || []);
-      if (state.settings?.aiProfile) {
+      const [profiles, aiProfile] = await Promise.all([getSearchProfiles(), getAiProfile()]);
+      setSearchProfiles(profiles);
+      if (aiProfile) {
         setAiForm({
-          provider: state.settings.aiProfile.provider || "deepseek",
-          baseUrl: state.settings.aiProfile.baseUrl || "https://api.deepseek.com/v1",
-          model: state.settings.aiProfile.model || "deepseek-v4-flash",
+          provider: aiProfile.provider || "deepseek",
+          baseUrl: aiProfile.baseUrl || "https://api.deepseek.com/v1",
+          model: aiProfile.model || "deepseek-v4-flash",
           apiKey: "",
-          enabled: state.settings.aiProfile.enabled || false,
+          enabled: aiProfile.enabled || false,
         });
       }
     } finally {
@@ -71,6 +72,7 @@ export function SourcesPage() {
         name: searchForm.name,
         provider: searchForm.provider,
         apiUrl: searchForm.apiUrl,
+        apiKey: searchForm.apiKey,
       });
       toast.success("搜索源已保存");
       setSearchForm({

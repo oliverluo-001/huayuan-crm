@@ -16,6 +16,9 @@ export class LeadTask {
   @Column({ name: 'task_id', type: 'varchar', length: 32, unique: true })
   taskId: string;
 
+  @Column({ name: 'owner_id', type: 'varchar', length: 32, default: '' })
+  ownerId: string;
+
   @Column({ type: 'varchar', length: 255 })
   name: string;
 

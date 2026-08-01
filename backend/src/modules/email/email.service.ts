@@ -118,15 +118,16 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     const where: any = {};
     if (filters.status) where.status = filters.status;
     if (filters.customerId) where.customerId = filters.customerId;
+    if (filters.ownerId) where.ownerId = filters.ownerId;
     const tasks = await this.taskRepository.find({ where, order: { createdAt: 'DESC' } });
     return tasks.map((task) => this.formatTask(task));
   }
 
-  async findOneTask(idOrEmailTaskId: string) {
-    return this.formatTask(await this.findTaskEntity(idOrEmailTaskId));
+  async findOneTask(idOrEmailTaskId: string, ownerId?: string) {
+    return this.formatTask(await this.findTaskEntity(idOrEmailTaskId, ownerId));
   }
 
-  async createTask(createDto: CreateEmailTaskDto) {
+  async createTask(createDto: CreateEmailTaskDto, ownerId = '') {
     const customerIds = (createDto.customerIds || []).map((id) => String(id));
     if (customerIds.length === 0) throw new BadRequestException('请至少选择一个收件客户');
     if (!createDto.templateId) throw new BadRequestException('请选择邮件模板');
@@ -137,6 +138,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
     const task = this.taskRepository.create({
       ...createDto,
+      ownerId,
       emailTaskId: this.generateId('etask'),
       customerIds: JSON.stringify(customerIds),
       subject: createDto.subject || template.subject,
@@ -157,8 +159,8 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     return this.formatTask(await this.taskRepository.save(task));
   }
 
-  async updateTask(idOrEmailTaskId: string, updateDto: UpdateEmailTaskDto) {
-    const task = await this.findTaskEntity(idOrEmailTaskId);
+  async updateTask(idOrEmailTaskId: string, updateDto: UpdateEmailTaskDto, ownerId?: string) {
+    const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
     const { customerIds, scheduledAt, startAt, ...rest } = updateDto;
     Object.assign(task, rest);
     if (customerIds) task.customerIds = JSON.stringify(customerIds.map((id: string | number) => String(id)));
@@ -167,8 +169,8 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     return this.formatTask(await this.taskRepository.save(task));
   }
 
-  async removeTask(idOrEmailTaskId: string) {
-    const task = await this.findTaskEntity(idOrEmailTaskId);
+  async removeTask(idOrEmailTaskId: string, ownerId?: string) {
+    const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
     if (['sending', 'active'].includes(task.status)) {
       throw new BadRequestException('请先取消运行中的邮件任务');
     }
@@ -177,8 +179,8 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     return { deleted: true };
   }
 
-  async runTask(idOrEmailTaskId: string) {
-    const task = await this.findTaskEntity(idOrEmailTaskId);
+  async runTask(idOrEmailTaskId: string, ownerId?: string) {
+    const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
     if (['active', 'sending'].includes(task.status)) return this.formatTask(task);
     if (task.status === 'cancelled') throw new BadRequestException('已取消任务不能重新启动');
 
@@ -198,8 +200,8 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     return this.formatTask(task);
   }
 
-  async cancelTask(idOrEmailTaskId: string) {
-    const task = await this.findTaskEntity(idOrEmailTaskId);
+  async cancelTask(idOrEmailTaskId: string, ownerId?: string) {
+    const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
     task.status = 'cancelled';
     task.nextRunAt = null;
     task.lastMessage = '任务已取消';
@@ -232,11 +234,12 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     const where: any = {};
     if (filters.status) where.status = filters.status;
     if (filters.customerId) where.customerId = filters.customerId;
+    if (filters.ownerId) where.ownerId = filters.ownerId;
     const logs = await this.logRepository.find({ where, order: { sentAt: 'DESC' } });
     return logs.map((log) => this.formatLog(log));
   }
 
-  async removeLog(idOrLogId: string) {
+  async removeLog(idOrLogId: string, ownerId?: string) {
     const numericId = Number(idOrLogId);
     const log = await this.logRepository.findOne({
       where: Number.isInteger(numericId) && numericId > 0
@@ -244,6 +247,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         : { logId: idOrLogId },
     });
     if (!log) throw new NotFoundException('发送日志不存在');
+    if (ownerId && log.ownerId !== ownerId) throw new NotFoundException('发送日志不存在');
     await this.logRepository.remove(log);
     return { deleted: true };
   }
@@ -452,6 +456,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         recipient.sentAt = new Date();
         await this.recipientRepository.save(recipient);
         await this.createLog({
+          ownerId: task.ownerId,
           customerId: customer?.customerId || '',
           contactId: recipient.contactId ? String(recipient.contactId) : '',
           customerName: recipient.company,
@@ -480,6 +485,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         recipient.status = 'failed';
         await this.recipientRepository.save(recipient);
         await this.createLog({
+          ownerId: task.ownerId,
           customerId: customer?.customerId || '',
           contactId: recipient.contactId ? String(recipient.contactId) : '',
           customerName: recipient.company,
@@ -652,7 +658,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async findTaskEntity(idOrEmailTaskId: string) {
+  private async findTaskEntity(idOrEmailTaskId: string, ownerId?: string) {
     const numericId = Number(idOrEmailTaskId);
     const task = await this.taskRepository.findOne({
       where: Number.isInteger(numericId) && numericId > 0
@@ -660,6 +666,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         : { emailTaskId: idOrEmailTaskId },
     });
     if (!task) throw new NotFoundException('邮件任务不存在');
+    if (ownerId && task.ownerId !== ownerId) throw new NotFoundException('邮件任务不存在');
     return task;
   }
 

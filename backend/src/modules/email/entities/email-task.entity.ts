@@ -25,6 +25,9 @@ export class EmailTask {
   @Column({ name: 'customer_id', type: 'varchar', length: 32, default: '' })
   customerId: string;
 
+  @Column({ name: 'owner_id', type: 'varchar', length: 32, default: '' })
+  ownerId: string;
+
   @Column({ name: 'template_id', type: 'varchar', length: 32, default: '' })
   templateId: string;
 

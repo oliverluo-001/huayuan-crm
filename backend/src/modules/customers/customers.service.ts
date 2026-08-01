@@ -88,6 +88,8 @@ export class CustomersService {
         )
         .orderBy('customer.createdAt', 'DESC');
 
+      if (queryFilters.ownerId) qb.andWhere('customer.ownerId = :ownerId', { ownerId: queryFilters.ownerId });
+
       if (take > 0) qb.skip(skip).take(take);
       const [customers, total] = await qb.getManyAndCount();
       return { customers, total };
@@ -112,7 +114,7 @@ export class CustomersService {
       where.health = queryFilters.health as any;
     }
     if (queryFilters.tag) {
-      return this.findByTag(queryFilters.tag, skip, take);
+      return this.findByTag(queryFilters.tag, skip, take, queryFilters.ownerId);
     }
 
     if (take > 0) {
@@ -311,12 +313,13 @@ export class CustomersService {
     return this.customerRepository.save(customer);
   }
 
-  private async findByTag(tagName: string, skip: number, take: number) {
+  private async findByTag(tagName: string, skip: number, take: number, ownerId?: string) {
     const qb = this.customerRepository
       .createQueryBuilder('customer')
       .leftJoinAndSelect('customer.tags', 'tag')
       .where('tag.name = :tagName', { tagName })
       .orderBy('customer.createdAt', 'DESC');
+    if (ownerId) qb.andWhere('customer.ownerId = :ownerId', { ownerId });
 
     if (take > 0) qb.skip(skip).take(take);
     const [customers, total] = await qb.getManyAndCount();
@@ -366,8 +369,8 @@ export class CustomersService {
     return { updated: result.affected || 0, tier: bulkTierDto.tier };
   }
 
-  async getCustomer360(id: number) {
-    const customer = await this.findOne(id);
+  async getCustomer360(id: number, ownerId?: string) {
+    const customer = await this.assertCustomerOwner(id, ownerId);
     const [contacts, activities, todos, opportunities, quotes, samples] =
       await Promise.all([
         this.contactRepository.find({
@@ -448,16 +451,16 @@ export class CustomersService {
 
   // ==================== Contacts ====================
 
-  async findContacts(customerId: number) {
-    await this.findOne(customerId);
+  async findContacts(customerId: number, ownerId?: string) {
+    await this.assertCustomerOwner(customerId, ownerId);
     return this.contactRepository.find({
       where: { customerId },
       order: { isPrimary: 'DESC', name: 'ASC' },
     });
   }
 
-  async createContact(customerId: number, createContactDto: CreateContactDto) {
-    await this.findOne(customerId);
+  async createContact(customerId: number, createContactDto: CreateContactDto, ownerId?: string) {
+    await this.assertCustomerOwner(customerId, ownerId);
 
     if (createContactDto.isPrimary) {
       await this.contactRepository.update(
@@ -475,10 +478,11 @@ export class CustomersService {
     return this.contactRepository.save(contact);
   }
 
-  async updateContact(id: number, updateContactDto: UpdateContactDto) {
+  async updateContact(id: number, updateContactDto: UpdateContactDto, ownerId?: string) {
     const contact = await this.contactRepository.findOne({ where: { id } });
     if (!contact) throw new NotFoundException('联系人不存在');
 
+    await this.assertCustomerOwner(contact.customerId, ownerId);
     if (updateContactDto.isPrimary) {
       await this.contactRepository.update(
         { customerId: contact.customerId },
@@ -490,7 +494,10 @@ export class CustomersService {
     return this.contactRepository.save(contact);
   }
 
-  async deleteContact(id: number) {
+  async deleteContact(id: number, ownerId?: string) {
+    const contact = await this.contactRepository.findOne({ where: { id } });
+    if (!contact) throw new NotFoundException('联系人不存在');
+    await this.assertCustomerOwner(contact.customerId, ownerId);
     const result = await this.contactRepository.delete(id);
     if (result.affected === 0) throw new NotFoundException('联系人不存在');
     return { deleted: true };
@@ -498,16 +505,16 @@ export class CustomersService {
 
   // ==================== Activities ====================
 
-  async findActivities(customerId: number) {
-    await this.findOne(customerId);
+  async findActivities(customerId: number, ownerId?: string) {
+    await this.assertCustomerOwner(customerId, ownerId);
     return this.activityRepository.find({
       where: { customerId },
       order: { createdAt: 'DESC' },
     });
   }
 
-  async createActivity(customerId: number, createActivityDto: CreateActivityDto) {
-    await this.findOne(customerId);
+  async createActivity(customerId: number, createActivityDto: CreateActivityDto, ownerId?: string) {
+    await this.assertCustomerOwner(customerId, ownerId);
     if (!createActivityDto.subject && !createActivityDto.content) {
       throw new BadRequestException('请填写跟进内容');
     }
@@ -527,6 +534,7 @@ export class CustomersService {
     const where: FindOptionsWhere<Todo> = {};
     if (filters.status) where.status = filters.status;
     if (filters.customerId) where.customerId = filters.customerId;
+    if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
     return this.todoRepository.find({
       where,
       order: { status: 'ASC', dueAt: 'ASC' },
@@ -564,6 +572,7 @@ export class CustomersService {
   async findOpportunities(filters: Record<string, any> = {}) {
     const where: FindOptionsWhere<Opportunity> = {};
     if (filters.customerId) where.customerId = filters.customerId;
+    if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
     return this.opportunityRepository.find({
       where,
       order: { updatedAt: 'DESC' },
@@ -598,6 +607,7 @@ export class CustomersService {
     const where: FindOptionsWhere<Quote> = {};
     if (filters.customerId) where.customerId = filters.customerId;
     if (filters.status) where.status = filters.status as any;
+    if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
     return this.quoteRepository.find({
       where,
       relations: ['items'],
@@ -660,6 +670,7 @@ export class CustomersService {
     const where: FindOptionsWhere<Sample> = {};
     if (filters.customerId) where.customerId = filters.customerId;
     if (filters.status) where.status = filters.status as any;
+    if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
     return this.sampleRepository.find({
       where,
       order: { updatedAt: 'DESC' },
@@ -686,6 +697,42 @@ export class CustomersService {
     const result = await this.sampleRepository.delete(id);
     if (result.affected === 0) throw new NotFoundException('样品记录不存在');
     return { deleted: true };
+  }
+
+  async findContactsForCustomers(customerIds: number[]) {
+    if (!customerIds.length) return [];
+    return this.contactRepository.find({
+      where: { customerId: In(customerIds) },
+      order: { isPrimary: 'DESC', name: 'ASC' },
+    });
+  }
+
+  async assertTodoOwner(id: number, ownerId?: string) {
+    const item = await this.todoRepository.findOne({ where: { id } });
+    if (!item) throw new NotFoundException('待办不存在');
+    await this.assertCustomerOwner(item.customerId, ownerId);
+    return item;
+  }
+
+  async assertOpportunityOwner(id: number, ownerId?: string) {
+    const item = await this.opportunityRepository.findOne({ where: { id } });
+    if (!item) throw new NotFoundException('商机不存在');
+    await this.assertCustomerOwner(item.customerId, ownerId);
+    return item;
+  }
+
+  async assertQuoteOwner(id: number, ownerId?: string) {
+    const item = await this.quoteRepository.findOne({ where: { id } });
+    if (!item) throw new NotFoundException('报价不存在');
+    await this.assertCustomerOwner(item.customerId, ownerId);
+    return item;
+  }
+
+  async assertSampleOwner(id: number, ownerId?: string) {
+    const item = await this.sampleRepository.findOne({ where: { id } });
+    if (!item) throw new NotFoundException('样品不存在');
+    await this.assertCustomerOwner(item.customerId, ownerId);
+    return item;
   }
 
   // ==================== Import/Export ====================
@@ -750,6 +797,10 @@ export class CustomersService {
       const existing = data.email ? customersByEmail.get(data.email) : undefined;
 
       if (existing) {
+        if (ownerId && existing.ownerId !== ownerId) {
+          skipped++;
+          continue;
+        }
         Object.assign(existing, this.mergeImportedCustomer(data));
         await this.customerRepository.save(existing);
         updated++;
@@ -789,6 +840,9 @@ export class CustomersService {
       source: String(data.source || 'lead'),
     });
     if (existing) {
+      if (ownerId && existing.ownerId !== ownerId) {
+        throw new BadRequestException('该邮箱已存在于其他负责人客户中，请联系管理员调整归属');
+      }
       Object.assign(existing, profile);
       return { customer: await this.customerRepository.save(existing), created: false };
     }
@@ -873,28 +927,33 @@ export class CustomersService {
 
   // ==================== Customer Views ====================
 
-  async findViews() {
+  async findViews(ownerId?: string) {
     return this.customerViewRepository.find({
+      where: ownerId ? { ownerId } : {},
       order: { createdAt: 'DESC' },
     });
   }
 
-  async createView(createDto: CreateCustomerViewDto) {
+  async createView(createDto: CreateCustomerViewDto, ownerId = '') {
     const view = this.customerViewRepository.create({
       ...createDto,
+      ownerId,
       viewId: this.generateId('view'),
     });
     return this.customerViewRepository.save(view);
   }
 
-  async updateView(id: number, updateDto: UpdateCustomerViewDto) {
+  async updateView(id: number, updateDto: UpdateCustomerViewDto, ownerId?: string) {
     const view = await this.customerViewRepository.findOne({ where: { id } });
     if (!view) throw new NotFoundException('视图不存在');
+    if (ownerId && view.ownerId !== ownerId) throw new NotFoundException('筛选器不存在');
     Object.assign(view, updateDto);
     return this.customerViewRepository.save(view);
   }
 
-  async deleteView(id: number) {
+  async deleteView(id: number, ownerId?: string) {
+    const view = await this.customerViewRepository.findOne({ where: { id } });
+    if (!view || (ownerId && view.ownerId !== ownerId)) throw new NotFoundException('筛选器不存在');
     const result = await this.customerViewRepository.delete(id);
     if (result.affected === 0) throw new NotFoundException('视图不存在');
     return { deleted: true };

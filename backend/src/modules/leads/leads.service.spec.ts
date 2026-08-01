@@ -6,6 +6,7 @@ describe('LeadsService CRM conversion', () => {
     taskId: 'task_1',
     productName: 'forged flanges',
     importedCustomerCount: 0,
+    ownerId: '7',
   };
   const lead = {
     id: 2,
@@ -82,6 +83,11 @@ describe('LeadsService CRM conversion', () => {
     expect(lead.crmCustomerId).toBe('cus_real_1');
     expect(lead.convertedCustomerId).toBe('cus_real_1');
     expect(lead.leadStatus).toBe('converted');
-    expect(result).toEqual({ imported: 1, merged: 0 });
+    expect(result).toEqual({ imported: 1, merged: 0, skipped: 0 });
+  });
+
+  it('hides tasks owned by another salesperson', async () => {
+    taskRepository.findOne.mockResolvedValue({ ...task, ownerId: '8' });
+    await expect(service.findOneTask(1, '7')).rejects.toThrow('任务不存在');
   });
 });

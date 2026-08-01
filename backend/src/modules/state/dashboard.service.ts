@@ -42,21 +42,15 @@ export class DashboardService {
     const logWhere = ownerId
       ? externalCustomerIds.length ? { customerId: In(externalCustomerIds) } : { id: -1 }
       : {};
-    const canSeeGlobalTasks = user.role !== 'sales';
+    const taskWhere = ownerId ? { ownerId } : {};
 
     const [newCustomers7d, openTodos, recentLogs, activeLeadTasks, activeEmailTasks, allLeadTasks, allLogs] = await Promise.all([
       newCustomerQb.getCount(),
       this.todos.find({ where: todoWhere, relations: ['customer'], order: { dueAt: 'ASC' }, take: 8 }),
       this.emailLogs.find({ where: logWhere, order: { sentAt: 'DESC' }, take: 8 }),
-      canSeeGlobalTasks
-        ? this.leadTasks.find({ where: { status: In(['draft', 'ready', 'running', 'paused']) }, order: { updatedAt: 'DESC' }, take: 5 })
-        : Promise.resolve([]),
-      canSeeGlobalTasks
-        ? this.emailTasks.find({ where: { status: In(['pending', 'active', 'sending']) }, order: { updatedAt: 'DESC' }, take: 5 })
-        : Promise.resolve([]),
-      canSeeGlobalTasks
-        ? this.leadTasks.find({ select: ['rawLeadCount', 'cleanedLeadCount'] })
-        : Promise.resolve([]),
+      this.leadTasks.find({ where: { ...taskWhere, status: In(['draft', 'ready', 'running', 'paused']) }, order: { updatedAt: 'DESC' }, take: 5 }),
+      this.emailTasks.find({ where: { ...taskWhere, status: In(['pending', 'active', 'sending']) }, order: { updatedAt: 'DESC' }, take: 5 }),
+      this.leadTasks.find({ where: taskWhere, select: ['rawLeadCount', 'cleanedLeadCount'] }),
       this.emailLogs.find({ where: logWhere, select: ['status', 'templateName', 'sentAt'] }),
     ]);
 

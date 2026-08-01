@@ -20,6 +20,9 @@ export class Lead {
   @Column({ name: 'task_id', type: 'varchar', length: 32, default: '' })
   taskId: string;
 
+  @Column({ name: 'owner_id', type: 'varchar', length: 32, default: '' })
+  ownerId: string;
+
   @Column({ type: 'varchar', length: 255, default: '' })
   company: string;
 

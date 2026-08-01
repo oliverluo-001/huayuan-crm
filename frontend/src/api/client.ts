@@ -23,7 +23,6 @@ import type {
   AiProfile,
   SmtpProfile,
   ImapProfile,
-  AppState,
   CustomerView,
   DashboardData,
   DashboardSnapshot,
@@ -62,7 +61,6 @@ export type {
   AiProfile,
   SmtpProfile,
   ImapProfile,
-  AppState,
   CustomerView,
   DashboardData,
   DashboardSnapshot,
@@ -210,11 +208,6 @@ export async function changePassword(currentPassword: string, newPassword: strin
   });
 }
 
-// State API
-export async function getState(): Promise<AppState> {
-  return api<AppState>("/api/state");
-}
-
 export async function getDashboard(): Promise<DashboardSnapshot> {
   return api<DashboardSnapshot>("/api/state/dashboard");
 }
@@ -262,6 +255,10 @@ export async function bulkUpdateCustomerTier(ids: string[], tier: string): Promi
 }
 
 // Customer Tags API
+export async function getCustomerTags(): Promise<string[]> {
+  return api<string[]>("/api/customers/tags");
+}
+
 export async function createCustomerTag(name: string): Promise<void> {
   await api("/api/customer-tags", { method: "POST", body: { name } });
 }
@@ -277,7 +274,7 @@ export async function getCustomerViews(): Promise<CustomerView[]> {
 }
 
 export async function createCustomerView(name: string, filters: Record<string, string>): Promise<CustomerView> {
-  return api<CustomerView>("/api/customer-views", { method: "POST", body: { name, filters } });
+  return api<CustomerView>("/api/customer-views", { method: "POST", body: { name, filters, columns: [] } });
 }
 
 export async function deleteCustomerView(id: string): Promise<void> {
@@ -460,6 +457,10 @@ export async function getEmailRecipientIds(params?: Record<string, string>): Pro
 }
 
 // Send Logs API
+export async function getSendLogs(): Promise<SendLog[]> {
+  return api<SendLog[]>("/api/email-logs");
+}
+
 export async function deleteSendLog(id: string): Promise<void> {
   await api(`/api/send-logs/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
@@ -513,7 +514,7 @@ export async function saveLeadQueries(taskId: string, regenerate?: boolean, quer
 export async function importB2BLeadsToCustomers(
   taskId: string,
   data: { ids?: string[]; importAll?: boolean }
-): Promise<{ imported: number; merged: number }> {
+): Promise<{ imported: number; merged: number; skipped?: number }> {
   return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/import-customers`, {
     method: "POST",
     body: data,
@@ -521,6 +522,10 @@ export async function importB2BLeadsToCustomers(
 }
 
 // Search Profiles API
+export async function getSearchProfiles(): Promise<SearchProfile[]> {
+  return api<SearchProfile[]>("/api/settings/search-profiles");
+}
+
 export async function createSearchProfile(data: Partial<SearchProfile>): Promise<SearchProfile> {
   return api<SearchProfile>("/api/settings/search-profiles", { method: "POST", body: data });
 }
@@ -534,6 +539,10 @@ export async function deleteSearchProfile(id: string): Promise<void> {
 }
 
 // AI Profile API
+export async function getAiProfile(): Promise<AiProfile> {
+  return api<AiProfile>("/api/settings/ai-profile");
+}
+
 export async function saveAiProfile(data: Partial<AiProfile>): Promise<void> {
   await api("/api/settings/ai-profile", { method: "POST", body: data });
 }
@@ -543,11 +552,19 @@ export async function testAiProfile(): Promise<{ ok: boolean; message?: string }
 }
 
 // SMTP Profile API
+export async function getSmtpProfile(): Promise<SmtpProfile> {
+  return api<SmtpProfile>("/api/settings/smtp-profile");
+}
+
 export async function saveSmtpProfile(data: Partial<SmtpProfile>): Promise<void> {
   await api("/api/settings/smtp-profile", { method: "POST", body: data });
 }
 
 // IMAP Profile API
+export async function getImapProfile(): Promise<ImapProfile> {
+  return api<ImapProfile>("/api/settings/imap-profile");
+}
+
 export async function saveImapProfile(data: Partial<ImapProfile>): Promise<void> {
   await api("/api/settings/imap-profile", { method: "POST", body: data });
 }

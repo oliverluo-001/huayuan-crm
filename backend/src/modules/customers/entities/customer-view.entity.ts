@@ -14,6 +14,9 @@ export class CustomerView {
   @Column({ name: 'view_id', type: 'varchar', length: 32, unique: true })
   viewId: string;
 
+  @Column({ name: 'owner_id', type: 'varchar', length: 32, default: '' })
+  ownerId: string;
+
   @Column({ type: 'varchar', length: 100 })
   name: string;
 
@@ -21,7 +24,7 @@ export class CustomerView {
   columns: string[];
 
   @Column({ type: 'json', nullable: true })
-  filters: any[];
+  filters: Record<string, string> | any[];
 
   @Column({ name: 'sort_by', type: 'varchar', length: 50, nullable: true })
   sortBy: string;

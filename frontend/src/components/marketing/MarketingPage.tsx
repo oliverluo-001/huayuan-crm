@@ -22,8 +22,8 @@ import {
   cancelEmailTask,
   deleteEmailTask,
   deleteSendLog,
+  getSendLogs,
   getCustomers,
-  getState,
   type EmailTemplate,
   type EmailTask,
   type Customer,
@@ -665,8 +665,7 @@ function SendLogsTab() {
   const fetchLogs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const state = await getState();
-      setLogs(state.sendLogs as any);
+      setLogs(await getSendLogs());
     } finally {
       setIsLoading(false);
     }

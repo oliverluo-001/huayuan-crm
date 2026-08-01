@@ -16,6 +16,11 @@ import {
   CreateEmailTaskDto,
   UpdateEmailTaskDto,
 } from './dto';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+
+interface RequestUser { sub: number; role: 'admin' | 'sales' | 'viewer' }
+const ownerScope = (user: RequestUser) => user.role === 'sales' ? String(user.sub) : undefined;
 
 @Controller('templates')
 export class TemplatesController {
@@ -33,16 +38,19 @@ export class TemplatesController {
   }
 
   @Post()
+  @Roles('admin', 'sales')
   create(@Body() createDto: CreateTemplateDto) {
     return this.emailService.createTemplate(createDto);
   }
 
   @Put(':id')
+  @Roles('admin', 'sales')
   update(@Param('id') id: string, @Body() updateDto: UpdateTemplateDto) {
     return this.emailService.updateTemplate(+id, updateDto);
   }
 
   @Delete(':id')
+  @Roles('admin', 'sales')
   remove(@Param('id') id: string) {
     return this.emailService.removeTemplate(+id);
   }
@@ -53,41 +61,46 @@ export class EmailTasksController {
   constructor(private readonly emailService: EmailService) {}
 
   @Get()
-  async findAll(@Query() query: Record<string, any>) {
-    const tasks = await this.emailService.findAllTasks(query);
+  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
+    const tasks = await this.emailService.findAllTasks({ ...query, ownerId: ownerScope(user) });
     return { tasks };
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.emailService.findOneTask(id);
+  findOne(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.emailService.findOneTask(id, ownerScope(user));
   }
 
   @Post()
-  create(@Body() createDto: CreateEmailTaskDto) {
-    return this.emailService.createTask(createDto);
+  @Roles('admin', 'sales')
+  create(@Body() createDto: CreateEmailTaskDto, @CurrentUser() user: RequestUser) {
+    return this.emailService.createTask(createDto, ownerScope(user) || '');
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() updateDto: UpdateEmailTaskDto) {
-    return this.emailService.updateTask(id, updateDto);
+  @Roles('admin', 'sales')
+  update(@Param('id') id: string, @Body() updateDto: UpdateEmailTaskDto, @CurrentUser() user: RequestUser) {
+    return this.emailService.updateTask(id, updateDto, ownerScope(user));
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.emailService.removeTask(id);
+  @Roles('admin', 'sales')
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.emailService.removeTask(id, ownerScope(user));
   }
 
   @Post(':id/run')
+  @Roles('admin', 'sales')
   @HttpCode(200)
-  async run(@Param('id') id: string) {
-    return this.emailService.runTask(id);
+  async run(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.emailService.runTask(id, ownerScope(user));
   }
 
   @Post(':id/cancel')
+  @Roles('admin', 'sales')
   @HttpCode(200)
-  async cancel(@Param('id') id: string) {
-    return this.emailService.cancelTask(id);
+  async cancel(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.emailService.cancelTask(id, ownerScope(user));
   }
 }
 
@@ -96,13 +109,14 @@ export class EmailLogsController {
   constructor(private readonly emailService: EmailService) {}
 
   @Get()
-  findAll(@Query() query: Record<string, any>) {
-    return this.emailService.findAllLogs(query);
+  findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
+    return this.emailService.findAllLogs({ ...query, ownerId: ownerScope(user) });
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.emailService.removeLog(id);
+  @Roles('admin', 'sales')
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.emailService.removeLog(id, ownerScope(user));
   }
 }
 
@@ -111,6 +125,7 @@ export class EmailBouncesController {
   constructor(private readonly emailService: EmailService) {}
 
   @Post('check')
+  @Roles('admin')
   @HttpCode(200)
   async check() {
     return this.emailService.checkBounces();
@@ -123,7 +138,8 @@ export class SendLogsController {
   constructor(private readonly emailService: EmailService) {}
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.emailService.removeLog(id);
+  @Roles('admin', 'sales')
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.emailService.removeLog(id, ownerScope(user));
   }
 }

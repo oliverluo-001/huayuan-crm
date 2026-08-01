@@ -93,7 +93,6 @@ async function migrateEmailExecution(connection: Connection) {
   );
   if (applied.length) {
     console.log(`Migration already applied: ${id}`);
-    return;
   }
   if (!(await tableExists(connection, 'email_tasks'))) {
     throw new Error('email_tasks 表不存在，请先初始化基础数据库结构');
@@ -126,14 +125,31 @@ async function migrateEmailExecution(connection: Connection) {
   await addColumnToTable(connection, 'email_tasks', 'failed_send_count', 'INT NOT NULL DEFAULT 0');
   await addColumnToTable(connection, 'email_tasks', 'skipped_send_count', 'INT NOT NULL DEFAULT 0');
   await addColumnToTable(connection, 'email_tasks', 'last_message', 'TEXT NULL');
+  await addColumnToTable(connection, 'email_tasks', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
   await addColumnToTable(connection, 'email_logs', 'contact_id', "VARCHAR(32) NOT NULL DEFAULT ''");
   await addColumnToTable(connection, 'email_logs', 'message_id', "VARCHAR(255) NOT NULL DEFAULT ''");
   await addColumnToTable(connection, 'email_logs', 'attempt', 'INT NOT NULL DEFAULT 1');
+  await addColumnToTable(connection, 'email_logs', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
   await addColumnToTable(connection, 'customers', 'email_failure_reason', 'TEXT NULL');
   await addColumnToTable(connection, 'customers', 'email_failed_at', 'TIMESTAMP NULL');
   await addColumnToTable(connection, 'customers', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
+  if (await tableExists(connection, 'lead_tasks')) {
+    await addColumnToTable(connection, 'lead_tasks', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
+  }
+  if (await tableExists(connection, 'leads')) {
+    await addColumnToTable(connection, 'leads', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
+  }
+  if (await tableExists(connection, 'customer_views')) {
+    await addColumnToTable(connection, 'customer_views', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
+    await addIndexIfMissing(connection, 'customer_views', 'idx_customer_views_owner', 'owner_id');
+  }
+  await addIndexIfMissing(connection, 'customers', 'idx_customers_owner', 'owner_id');
+  await addIndexIfMissing(connection, 'email_tasks', 'idx_email_tasks_owner', 'owner_id');
+  await addIndexIfMissing(connection, 'email_logs', 'idx_email_logs_owner', 'owner_id');
+  if (await tableExists(connection, 'lead_tasks')) await addIndexIfMissing(connection, 'lead_tasks', 'idx_lead_tasks_owner', 'owner_id');
+  if (await tableExists(connection, 'leads')) await addIndexIfMissing(connection, 'leads', 'idx_leads_owner', 'owner_id');
 
-  await connection.query('INSERT INTO schema_migrations (id) VALUES (?)', [id]);
+  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
   console.log(`Applied migration: ${id}`);
 }
 
@@ -184,6 +200,15 @@ async function indexExists(connection: Connection, indexName: string) {
     [database, indexName],
   );
   return rows.length > 0;
+}
+
+async function addIndexIfMissing(connection: Connection, table: string, indexName: string, column: string) {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `SELECT INDEX_NAME FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+    [database, table, indexName],
+  );
+  if (!rows.length) await connection.query(`ALTER TABLE \`${table}\` ADD INDEX \`${indexName}\` (\`${column}\`)`);
 }
 
 main().catch((error) => {

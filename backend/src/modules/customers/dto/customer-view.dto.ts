@@ -5,12 +5,12 @@ export class CreateCustomerViewDto {
   @MaxLength(100)
   name: string;
 
-  @IsArray()
-  columns: string[];
-
   @IsOptional()
   @IsArray()
-  filters?: any[];
+  columns?: string[];
+
+  @IsOptional()
+  filters?: Record<string, string> | any[];
 
   @IsOptional()
   @IsString()
@@ -32,8 +32,7 @@ export class UpdateCustomerViewDto {
   columns?: string[];
 
   @IsOptional()
-  @IsArray()
-  filters?: any[];
+  filters?: Record<string, string> | any[];
 
   @IsOptional()
   @IsString()

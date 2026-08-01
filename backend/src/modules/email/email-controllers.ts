@@ -15,6 +15,7 @@ import { CustomersService } from '../customers/customers.service';
 import { SuppressionService } from '../suppression/suppression.service';
 import { SettingsService } from '../settings/settings.service';
 import { createUnsubscribeToken, verifyUnsubscribeToken } from '../../common/utils/unsubscribe';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller()
 export class EmailRecipientsController {
@@ -25,7 +26,7 @@ export class EmailRecipientsController {
   ) {}
 
   @Get('email-recipients')
-  async findAll(@Query() query: Record<string, any>) {
+  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: { sub: number; role: string }) {
     const q = (query.q || '').toLowerCase();
     const needIds = query.ids === 'true';
     const offset = Math.max(0, Number(query.offset) || 0);
@@ -38,9 +39,22 @@ export class EmailRecipientsController {
     if (query.region) filters.region = query.region;
     if (query.emailStatus) filters.emailStatus = query.emailStatus;
     if (query.ownerId) filters.ownerId = query.ownerId;
+    if (user.role === 'sales') filters.ownerId = String(user.sub);
 
     const result = await this.customersService.findAll(filters);
     const customers = Array.isArray(result) ? result : result.customers || [];
+    const customerNumericIds = customers.map((customer: any) => Number(customer.id)).filter(Number.isInteger);
+    const [allContacts, suppressions] = await Promise.all([
+      this.customersService.findContactsForCustomers(customerNumericIds),
+      this.suppressionService.findAll(),
+    ]);
+    const contactsByCustomer = new Map<number, typeof allContacts>();
+    for (const contact of allContacts) {
+      const contacts = contactsByCustomer.get(contact.customerId) || [];
+      contacts.push(contact);
+      contactsByCustomer.set(contact.customerId, contacts);
+    }
+    const suppressedEmails = new Set(suppressions.map((item: any) => String(item.email || '').toLowerCase().trim()));
 
     const rows: any[] = [];
     const seenEmails = new Set<string>();
@@ -51,7 +65,7 @@ export class EmailRecipientsController {
 
       if (customerEmail && !seenEmails.has(customerEmail)) {
         seenEmails.add(customerEmail);
-        const customerSuppressed = await this.suppressionService.isSuppressed(customerEmail);
+        const customerSuppressed = suppressedEmails.has(customerEmail);
         const recipientKey = `customer:${customerId}`;
         const searchText = `${customerEmail} ${(customer as any).company || ''} ${(customer as any).contact || ''}`.toLowerCase();
         if (!q || searchText.includes(q)) {
@@ -71,15 +85,13 @@ export class EmailRecipientsController {
       }
 
       // Check contacts for this customer
-      const contacts = await this.customersService.findContacts(
-        typeof customer.id === 'number' ? customer.id : parseInt(customer.id, 10) || 0,
-      );
+      const contacts = contactsByCustomer.get(Number(customer.id)) || [];
       for (const contact of contacts) {
         const contactEmail = (contact.email || '').toLowerCase().trim();
         if (!contactEmail || seenEmails.has(contactEmail)) continue;
         seenEmails.add(contactEmail);
 
-        const contactSuppressed = await this.suppressionService.isSuppressed(contactEmail);
+        const contactSuppressed = suppressedEmails.has(contactEmail);
         const recipientKey = `contact:${contact.contactId || contact.id}`;
         const searchText = `${contactEmail} ${contact.name} ${(customer as any).company || ''}`.toLowerCase();
         if (!q || searchText.includes(q)) {

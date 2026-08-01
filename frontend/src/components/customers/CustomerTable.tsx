@@ -46,6 +46,7 @@ import {
   bulkUpdateCustomerTier,
   createCustomerTag,
   deleteCustomerTag,
+  getCustomerTags,
   importCustomers,
   previewImport,
   getCustomerViews,
@@ -151,13 +152,15 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
     setIsLoading(true);
     try {
       const offset = (page - 1) * CUSTOMER_PAGE_SIZE;
-      const result = await getCustomers(offset, CUSTOMER_PAGE_SIZE, filters);
+      const [result, availableTags, views] = await Promise.all([
+        getCustomers(offset, CUSTOMER_PAGE_SIZE, filters),
+        getCustomerTags(),
+        getCustomerViews(),
+      ]);
       setCustomers(result.customers);
       setTotal(result.total);
-      // Load tags and views from state endpoint
-      const state = await import("@/api/client").then((m) => m.getState());
-      setTags(state.tags || []);
-      setSavedViews(state.settings?.customerViews || []);
+      setTags(availableTags);
+      setSavedViews(views);
     } finally {
       setIsLoading(false);
     }

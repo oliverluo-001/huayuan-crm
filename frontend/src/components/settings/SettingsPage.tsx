@@ -10,7 +10,10 @@ import { Save, KeyRound, Plus, Trash2, TestTube, RefreshCw, Loader2, Download, D
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  getState,
+  getSmtpProfile,
+  getImapProfile,
+  getAiProfile,
+  getSearchProfiles,
   saveSmtpProfile,
   saveImapProfile,
   changePassword,
@@ -141,35 +144,40 @@ export function SettingsPage() {
   const [accountForm, setAccountForm] = useState({ displayName: "", email: "" });
 
   const fetchData = useCallback(async () => {
+    if (!isAdmin) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
-      const state = await getState();
-      if (state.settings?.smtpProfile) {
+      const [smtpProfile, imapProfile, aiProfile, profiles] = await Promise.all([
+        getSmtpProfile(), getImapProfile(), getAiProfile(), getSearchProfiles(),
+      ]);
+      if (smtpProfile) {
         setSmtpForm({
-          smtpProvider: state.settings.smtpProfile.smtpProvider || "custom",
-          smtpHost: state.settings.smtpProfile.smtpHost || "",
-          smtpPort: state.settings.smtpProfile.smtpPort?.toString() || "465",
-          smtpSecure: state.settings.smtpProfile.smtpSecure ?? true,
-          smtpUser: state.settings.smtpProfile.smtpUser || "",
-          smtpFrom: state.settings.smtpProfile.smtpFrom || "",
+          smtpProvider: smtpProfile.smtpProvider || "custom",
+          smtpHost: smtpProfile.smtpHost || "",
+          smtpPort: smtpProfile.smtpPort?.toString() || "465",
+          smtpSecure: smtpProfile.smtpSecure ?? true,
+          smtpUser: smtpProfile.smtpUser || "",
+          smtpFrom: smtpProfile.smtpFrom || "",
           smtpPass: "",
-          credentialStatus: state.settings.smtpProfile.credentialStatus || "not_set",
+          credentialStatus: smtpProfile.credentialStatus || "not_set",
         });
       }
-      if (state.settings?.imapProfile) {
+      if (imapProfile) {
         setImapForm({
-          imapEnabled: state.settings.imapProfile.imapEnabled ?? false,
-          imapHost: state.settings.imapProfile.imapHost || "",
-          imapPort: state.settings.imapProfile.imapPort?.toString() || "993",
-          imapSecure: state.settings.imapProfile.imapSecure ?? true,
-          imapUser: state.settings.imapProfile.imapUser || "",
-          imapMailbox: state.settings.imapProfile.imapMailbox || "INBOX",
-          imapScanLimit: state.settings.imapProfile.imapScanLimit?.toString() || "50",
-          imapUseSmtpCredentials: state.settings.imapProfile.imapUseSmtpCredentials ?? false,
+          imapEnabled: imapProfile.imapEnabled ?? false,
+          imapHost: imapProfile.imapHost || "",
+          imapPort: imapProfile.imapPort?.toString() || "993",
+          imapSecure: imapProfile.imapSecure ?? true,
+          imapUser: imapProfile.imapUser || "",
+          imapMailbox: imapProfile.imapMailbox || "INBOX",
+          imapScanLimit: imapProfile.imapScanLimit?.toString() || "50",
+          imapUseSmtpCredentials: imapProfile.imapUseSmtpCredentials ?? false,
         });
       }
       // AI Profile
-      const aiProfile = state.settings?.aiProfile;
       if (aiProfile) {
         setAiProfileForm({
           provider: aiProfile.provider || "deepseek",
@@ -187,7 +195,7 @@ export function SettingsPage() {
         );
       }
       // Search profiles
-      setSearchProfiles(state.settings?.searchProfiles || []);
+      setSearchProfiles(profiles);
     } finally {
       setIsLoading(false);
     }
@@ -411,7 +419,7 @@ export function SettingsPage() {
         email: account.email || "",
       });
     } catch {}
-  }, []);
+  }, [isAdmin]);
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -492,15 +500,17 @@ export function SettingsPage() {
   };
 
   useEffect(() => {
-    fetchData();
-    fetchEmailPolicy();
-    fetchSuppressions();
-    fetchBackups();
     fetchAccount();
-    fetchUsers();
-    fetchAuditLogs();
-    fetchTrash();
-  }, [fetchData, fetchEmailPolicy, fetchSuppressions, fetchBackups, fetchAccount, fetchUsers, fetchAuditLogs, fetchTrash]);
+    if (isAdmin) {
+      fetchData();
+      fetchEmailPolicy();
+      fetchSuppressions();
+      fetchBackups();
+      fetchUsers();
+      fetchAuditLogs();
+      fetchTrash();
+    }
+  }, [isAdmin, fetchData, fetchEmailPolicy, fetchSuppressions, fetchBackups, fetchAccount, fetchUsers, fetchAuditLogs, fetchTrash]);
 
   return (
     <div className="space-y-8">

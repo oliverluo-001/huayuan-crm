@@ -86,4 +86,23 @@ describe('CustomersService imports', () => {
       emailStatus: 'valid',
     });
   });
+
+  it('does not overwrite a duplicate email owned by another salesperson', async () => {
+    const existing = {
+      id: 2,
+      customerId: 'cus_2',
+      company: 'Protected Account',
+      email: 'buyer@example.com',
+      ownerId: '8',
+    };
+    customerRepository.find.mockResolvedValue([existing]);
+
+    const result = await service.parseAndImport(upload([
+      { Company: 'Incoming Override', Email: 'buyer@example.com' },
+    ]), '7');
+
+    expect(result).toEqual({ created: 0, updated: 0, skipped: 1, total: 1 });
+    expect(existing.company).toBe('Protected Account');
+    expect(customerRepository.save).not.toHaveBeenCalled();
+  });
 });

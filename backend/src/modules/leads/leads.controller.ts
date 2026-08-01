@@ -26,9 +26,13 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 
+interface RequestUser { sub: number; role: 'admin' | 'sales' | 'viewer' }
+const ownerScope = (user: RequestUser) => user.role === 'sales' ? String(user.sub) : undefined;
+
 // ─── Lead Associations Controller ────────────────────────────────────────
 
 @Controller('lead-associations')
+@Roles('admin', 'sales')
 export class LeadAssociationsController {
   constructor(private readonly leadsService: LeadsService) {}
 
@@ -45,38 +49,43 @@ export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
   @Get()
-  findAll(@Query() query: Record<string, any>) {
-    return this.leadsService.findAll(query);
+  findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
+    return this.leadsService.findAll({ ...query, ownerId: ownerScope(user) });
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.leadsService.findOne(+id);
+  findOne(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leadsService.findOne(+id, ownerScope(user));
   }
 
   @Post()
-  create(@Body() createLeadDto: CreateLeadDto) {
-    return this.leadsService.create(createLeadDto);
+  @Roles('admin', 'sales')
+  create(@Body() createLeadDto: CreateLeadDto, @CurrentUser() user: RequestUser) {
+    return this.leadsService.create(createLeadDto, ownerScope(user) || '');
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() updateLeadDto: UpdateLeadDto) {
-    return this.leadsService.update(+id, updateLeadDto);
+  @Roles('admin', 'sales')
+  update(@Param('id') id: string, @Body() updateLeadDto: UpdateLeadDto, @CurrentUser() user: RequestUser) {
+    return this.leadsService.update(+id, updateLeadDto, ownerScope(user));
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.leadsService.remove(+id);
+  @Roles('admin', 'sales')
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leadsService.remove(+id, ownerScope(user));
   }
 
   @Post('convert')
-  convert(@Body() convertDto: ConvertLeadsDto) {
-    return this.leadsService.convertLeads(convertDto);
+  @Roles('admin', 'sales')
+  convert(@Body() convertDto: ConvertLeadsDto, @CurrentUser() user: RequestUser) {
+    return this.leadsService.convertLeads(convertDto, ownerScope(user));
   }
 
   @Post('bulk-delete')
-  bulkDelete(@Body() bulkDeleteDto: BulkDeleteLeadsDto) {
-    return this.leadsService.bulkDelete(bulkDeleteDto);
+  @Roles('admin', 'sales')
+  bulkDelete(@Body() bulkDeleteDto: BulkDeleteLeadsDto, @CurrentUser() user: RequestUser) {
+    return this.leadsService.bulkDelete(bulkDeleteDto, ownerScope(user));
   }
 }
 
@@ -87,19 +96,21 @@ export class LeadTasksController {
   constructor(private readonly leadsService: LeadsService) {}
 
   @Get()
-  async findAll(@Query() query: Record<string, any>) {
-    const tasks = await this.leadsService.findTasks(query);
+  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
+    const tasks = await this.leadsService.findTasks({ ...query, ownerId: ownerScope(user) });
     return { tasks };
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.leadsService.findOneTask(+id);
+  findOne(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leadsService.findOneTask(+id, ownerScope(user));
   }
 
   @Post()
-  async create(@Body() createTaskDto: CreateLeadTaskDto) {
-    const result = await this.leadsService.createTask(createTaskDto);
+  @Roles('admin', 'sales')
+  async create(@Body() createTaskDto: CreateLeadTaskDto, @CurrentUser() user: RequestUser) {
+    const ownerId = ownerScope(user) || '';
+    const result = await this.leadsService.createTask(createTaskDto, ownerId);
 
     // Generate initial queries if not provided
     let queries: string[] = [];
@@ -114,59 +125,66 @@ export class LeadTasksController {
         aliases: createTaskDto.productAliases,
         industries: createTaskDto.buyerIndustries,
       });
-      await this.leadsService.updateTask(result.id, { searchQueries: queries } as any);
+      await this.leadsService.updateTask(result.id, { searchQueries: queries } as any, ownerScope(user));
     }
 
     return { task: result, queries };
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() updateTaskDto: UpdateLeadTaskDto) {
-    return this.leadsService.updateTask(+id, updateTaskDto);
+  @Roles('admin', 'sales')
+  update(@Param('id') id: string, @Body() updateTaskDto: UpdateLeadTaskDto, @CurrentUser() user: RequestUser) {
+    return this.leadsService.updateTask(+id, updateTaskDto, ownerScope(user));
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.leadsService.removeTask(+id);
+  @Roles('admin', 'sales')
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leadsService.removeTask(+id, ownerScope(user));
   }
 
   @Post(':id/run')
-  run(@Param('id') id: string) {
-    return this.leadsService.runTask(+id);
+  @Roles('admin', 'sales')
+  run(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leadsService.runTask(+id, ownerScope(user));
   }
 
   @Post(':id/cancel')
-  cancel(@Param('id') id: string) {
-    return this.leadsService.cancelTask(+id);
+  @Roles('admin', 'sales')
+  cancel(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leadsService.cancelTask(+id, ownerScope(user));
   }
 
   @Post(':id/generate-queries')
+  @Roles('admin', 'sales')
   async generateQueries(
     @Param('id') id: string,
-    @Body() dto: GenerateQueriesDto,
+    @Body() dto: GenerateQueriesDto, @CurrentUser() user: RequestUser,
   ) {
-    return this.leadsService.generateQueries(+id, dto);
+    return this.leadsService.generateQueries(+id, dto, ownerScope(user));
   }
 
   @Get(':id/leads')
   getLeads(
     @Param('id') id: string,
-    @Query() query: Record<string, any>,
+    @Query() query: Record<string, any>, @CurrentUser() user: RequestUser,
   ) {
-    return this.leadsService.getTaskLeads(+id, query);
+    return this.leadsService.getTaskLeads(+id, query, ownerScope(user));
   }
 
   @Post(':id/import-leads')
+  @Roles('admin', 'sales')
   importLeads(
     @Param('id') id: string,
-    @Body() dto: ImportLeadsDto,
+    @Body() dto: ImportLeadsDto, @CurrentUser() user: RequestUser,
   ) {
-    return this.leadsService.importLeads(+id, dto.leads);
+    return this.leadsService.importLeads(+id, dto.leads, ownerScope(user));
   }
 
   @Post(':id/clean')
-  cleanLeads(@Param('id') id: string) {
-    return this.leadsService.cleanLeads(+id);
+  @Roles('admin', 'sales')
+  cleanLeads(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.leadsService.cleanLeads(+id, ownerScope(user));
   }
 
   @Post(':id/import-customers')
@@ -174,7 +192,7 @@ export class LeadTasksController {
   importToCustomers(
     @Param('id') id: string,
     @Body() dto: ImportCustomersDto,
-    @CurrentUser() user: { sub: number; role: string },
+    @CurrentUser() user: RequestUser,
   ) {
     return this.leadsService.importToCustomers(
       +id,
@@ -187,9 +205,9 @@ export class LeadTasksController {
   async exportLeads(
     @Param('id') id: string,
     @Query('type') type: string,
-    @Res() res: Response,
+    @Res() res: Response, @CurrentUser() user: RequestUser,
   ) {
-    const data = await this.leadsService.exportLeads(+id, type || 'all');
+    const data = await this.leadsService.exportLeads(+id, type || 'all', ownerScope(user));
     const filename = `leads_${id}_${type || 'all'}_${Date.now()}`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}.csv"`);
