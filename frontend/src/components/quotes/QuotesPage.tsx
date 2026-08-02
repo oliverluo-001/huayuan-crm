@@ -22,8 +22,12 @@ import {
   type Product,
   type Opportunity,
 } from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { canManageCrmData } from "@/auth/permissions";
 
 export function QuotesPage() {
+  const { role } = useAuth();
+  const canManage = canManageCrmData(role);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -140,7 +144,7 @@ export function QuotesPage() {
   return (
     <div className="space-y-6">
       {/* Form */}
-      <Card>
+      {canManage && <Card>
         <CardHeader>
           <CardTitle>{editingId ? "编辑报价" : "创建报价"}</CardTitle>
         </CardHeader>
@@ -179,7 +183,7 @@ export function QuotesPage() {
                     <SelectItem value="">不关联商机</SelectItem>
                     {filteredOpportunities.map((opp) => (
                       <SelectItem key={opp.id} value={opp.id}>
-                        {opp.title}
+                        {opp.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -299,7 +303,7 @@ export function QuotesPage() {
             </div>
           </form>
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* Table */}
       <Card>
@@ -353,22 +357,22 @@ export function QuotesPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => handleEdit(quote)}>
+                      {canManage && <Button variant="ghost" size="sm" onClick={() => handleEdit(quote)}>
                         <Edit className="h-4 w-4" />
-                      </Button>
+                      </Button>}
                       <a href={`/api/quotes/${quote.id}/export`} target="_blank" rel="noopener noreferrer">
                         <Button variant="ghost" size="sm">
                           <Download className="h-4 w-4" />
                         </Button>
                       </a>
-                      <Button
+                      {canManage && <Button
                         variant="ghost"
                         size="sm"
                         className="text-destructive"
                         onClick={() => handleDelete(quote.id)}
                       >
                         <Trash2 className="h-4 w-4" />
-                      </Button>
+                      </Button>}
                     </div>
                   </TableCell>
                 </TableRow>

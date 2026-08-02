@@ -4,6 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { canManageCrmData } from "@/auth/permissions";
 import "./LeadsPage.css";
 import {
   getB2BLeadTasks,
@@ -45,13 +47,6 @@ const AUTOMATION_STAGE_LABELS: Record<string, string> = {
   completed: "已完成",
   cancelled: "已停止",
   failed: "执行失败",
-};
-
-const RECOMMENDED_ACTION_LABELS: Record<string, { label: string; className: string }> = {
-  "Ready to Email": { label: "Ready to Email", className: "action-ready-to-email" },
-  "Needs Review": { label: "Needs Review", className: "action-needs-review" },
-  "Remove": { label: "Remove", className: "action-remove" },
-  "Hard Bounce": { label: "Hard Bounce", className: "action-hard-bounce" },
 };
 
 const LEGACY_REGIONS = [
@@ -137,6 +132,9 @@ function parseLeadImport(textValue: string): Record<string, string>[] {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function LeadsPage() {
+  const { role } = useAuth();
+  const canManage = canManageCrmData(role);
+
   // Wizard state
   const [currentStage, setCurrentStage] = useState(1);
   const [productName, setProductName] = useState("");
@@ -240,7 +238,7 @@ export function LeadsPage() {
         setQueryText(task.searchQueries.join("\n"));
       }
     }
-  }, [activeTaskId, fetchLeadsForTask]);
+  }, [activeTaskId, fetchLeadsForTask, tasks]);
 
   // ─── Polling ────────────────────────────────────────────────────────────
 
@@ -510,7 +508,8 @@ export function LeadsPage() {
   const handleSelectLead = (id: string, checked: boolean) => {
     setSelectedLeadIds((prev) => {
       const next = new Set(prev);
-      checked ? next.add(id) : next.delete(id);
+      if (checked) next.add(id);
+      else next.delete(id);
       return next;
     });
   };
@@ -640,8 +639,6 @@ export function LeadsPage() {
   );
 
   const renderSegmentOptions = () => {
-    const preferred = (association as any)?.recommendedSegments || [];
-    const initialSegments = preferred.length ? preferred : LEGACY_SEGMENTS.slice(0, 3);
     return (
       <fieldset className="full">
         <legend>买家类型</legend>
@@ -764,15 +761,17 @@ export function LeadsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="check-col" style={{ width: 40 }}>
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  disabled={importableLeads.length === 0}
-                  onChange={(e) => handleSelectAll(e.target.checked)}
-                  aria-label="全选当前可用结果"
-                />
-              </TableHead>
+              {canManage && (
+                <TableHead className="check-col" style={{ width: 40 }}>
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    disabled={importableLeads.length === 0}
+                    onChange={(e) => handleSelectAll(e.target.checked)}
+                    aria-label="全选当前可用结果"
+                  />
+                </TableHead>
+              )}
               <TableHead>公司与官网</TableHead>
               <TableHead>公开邮箱</TableHead>
               <TableHead>区域</TableHead>
@@ -786,7 +785,7 @@ export function LeadsPage() {
           <TableBody>
             {leads.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9}>
+                <TableCell colSpan={canManage ? 9 : 8}>
                   {running
                     ? "自动搜索进行中，发现公开邮箱后将自动去重、验证并在这里显示。"
                     : "暂无搜索结果，请从上方输入产品开始。"}
@@ -798,14 +797,16 @@ export function LeadsPage() {
                 const grade = gradeForConfidence(lead.confidence);
                 return (
                   <TableRow key={lead.id}>
-                    <TableCell className="check-col">
-                      <input
-                        type="checkbox"
-                        checked={selectedLeadIds.has(lead.id)}
-                        disabled={!importable}
-                        onChange={(e) => handleSelectLead(lead.id, e.target.checked)}
-                      />
-                    </TableCell>
+                    {canManage && (
+                      <TableCell className="check-col">
+                        <input
+                          type="checkbox"
+                          checked={selectedLeadIds.has(lead.id)}
+                          disabled={!importable}
+                          onChange={(e) => handleSelectLead(lead.id, e.target.checked)}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell>
                       <strong>{lead.company || "未识别公司"}</strong>
                       <div className="meta clipped">
@@ -945,11 +946,12 @@ export function LeadsPage() {
           <h2>B2B 智能获客</h2>
           <p className="section-description">从产品需求出发，自动定位潜在买家并沉淀到客户库。</p>
         </div>
+        {!canManage && <span className="status-pill">只读权限</span>}
       </div>
 
-      {renderStageBar()}
+      {canManage && renderStageBar()}
 
-      <section className="lead-wizard">
+      {canManage && <section className="lead-wizard">
         {/* Step 1: Product Association */}
         <article className={`lead-step-card ${currentStage >= 1 ? "active" : ""}`} id="leadAssociationStep">
           <div className="lead-step-heading">
@@ -1038,7 +1040,7 @@ export function LeadsPage() {
             </form>
           )}
         </article>
-      </section>
+      </section>}
 
       {/* Run Panel: Task list, info, controls, query editor */}
       <section className="lead-run-panel">
@@ -1073,7 +1075,7 @@ export function LeadsPage() {
           renderTaskSummary()
         )}
 
-        <div className="actions lead-run-actions">
+        {canManage && <div className="actions lead-run-actions">
           <Button
             id="startB2BAutomationBtn"
             onClick={handleStartAutomation}
@@ -1097,7 +1099,7 @@ export function LeadsPage() {
           >
             删除任务
           </Button>
-        </div>
+        </div>}
 
         <details className="lead-advanced">
           <summary>高级：查看或调整搜索策略</summary>
@@ -1108,10 +1110,11 @@ export function LeadsPage() {
               id="leadQueryEditor"
               rows={10}
               value={queryText}
-              onChange={(e) => setQueryText(e.target.value)}
+              readOnly={!canManage}
+              onChange={canManage ? (e) => setQueryText(e.target.value) : undefined}
             />
           </div>
-          <div className="actions">
+          {canManage && <div className="actions">
             <Button
               variant="outline"
               id="saveLeadQueriesBtn"
@@ -1128,12 +1131,12 @@ export function LeadsPage() {
             >
               重新生成
             </Button>
-          </div>
+          </div>}
         </details>
       </section>
 
       {/* Manual Import Section */}
-      <details className="lead-capture">
+      {canManage && <details className="lead-capture">
         <summary>可选：手动补充公开线索</summary>
         <form
           className="lead-import-form"
@@ -1176,7 +1179,7 @@ export function LeadsPage() {
             </Button>
           </div>
         </form>
-      </details>
+      </details>}
 
       {/* Results Section */}
       <section className="lead-pool-section">
@@ -1189,7 +1192,7 @@ export function LeadsPage() {
                 : "完成产品联想并启动任务后，结果会显示在这里。"}
             </p>
           </div>
-          <div className="actions">
+          {canManage && <div className="actions">
             <Button
               id="importSelectedB2BLeadsBtn"
               onClick={() => handleImportToCustomers(false)}
@@ -1205,7 +1208,7 @@ export function LeadsPage() {
             >
               导入全部可用
             </Button>
-          </div>
+          </div>}
         </div>
 
         {renderLeadSummaryCards()}

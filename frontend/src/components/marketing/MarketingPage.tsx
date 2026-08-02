@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Edit, Trash2, Play, StopCircle, Mail, ImageIcon } from "lucide-react";
+import { Plus, Edit, Trash2, Play, StopCircle, ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
   getTemplates,
@@ -29,8 +29,12 @@ import {
   type Customer,
   type SendLog,
 } from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { canManageCrmData } from "@/auth/permissions";
 
 export function MarketingPage() {
+  const { role } = useAuth();
+  const canManage = canManageCrmData(role);
   const [activeTab, setActiveTab] = useState("templates");
 
   return (
@@ -42,21 +46,21 @@ export function MarketingPage() {
       </TabsList>
 
       <TabsContent value="templates">
-        <TemplatesTab />
+        <TemplatesTab canManage={canManage} />
       </TabsContent>
 
       <TabsContent value="tasks">
-        <EmailTasksTab />
+        <EmailTasksTab canManage={canManage} />
       </TabsContent>
 
       <TabsContent value="logs">
-        <SendLogsTab />
+        <SendLogsTab canManage={canManage} />
       </TabsContent>
     </Tabs>
   );
 }
 
-function TemplatesTab() {
+function TemplatesTab({ canManage }: { canManage: boolean }) {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -187,7 +191,7 @@ function TemplatesTab() {
       } else {
         setForm({ ...form, body: form.body + imageHtml });
       }
-    } catch (err) {
+    } catch {
       toast.error("图片处理失败");
     }
     if (imageInputRef.current) imageInputRef.current.value = "";
@@ -195,7 +199,7 @@ function TemplatesTab() {
 
   return (
     <div className="space-y-6">
-      <Card>
+      {canManage && <Card>
         <CardHeader>
           <CardTitle>{editingId ? "编辑模板" : "新增模板"}</CardTitle>
         </CardHeader>
@@ -277,7 +281,7 @@ function TemplatesTab() {
             </div>
           </form>
         </CardContent>
-      </Card>
+      </Card>}
 
       <Card>
         <CardHeader>
@@ -292,7 +296,7 @@ function TemplatesTab() {
               <TableHead>名称</TableHead>
               <TableHead>标题</TableHead>
               <TableHead>更新时间</TableHead>
-              <TableHead className="w-24">操作</TableHead>
+              {canManage && <TableHead className="w-24">操作</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -302,12 +306,12 @@ function TemplatesTab() {
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-48" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                  {canManage && <TableCell><Skeleton className="h-4 w-16" /></TableCell>}
                 </TableRow>
               ))
             ) : templates.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={canManage ? 4 : 3} className="text-center py-8 text-muted-foreground">
                   暂无模板
                 </TableCell>
               </TableRow>
@@ -319,7 +323,7 @@ function TemplatesTab() {
                   <TableCell className="text-sm text-muted-foreground">
                     {template.updatedAt ? new Date(template.updatedAt).toLocaleDateString() : "-"}
                   </TableCell>
-                  <TableCell>
+                  {canManage && <TableCell>
                     <div className="flex gap-1">
                       <Button variant="ghost" size="sm" onClick={() => handleEdit(template)}>
                         <Edit className="h-4 w-4" />
@@ -333,7 +337,7 @@ function TemplatesTab() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
-                  </TableCell>
+                  </TableCell>}
                 </TableRow>
               ))
             )}
@@ -344,7 +348,7 @@ function TemplatesTab() {
   );
 }
 
-function EmailTasksTab() {
+function EmailTasksTab({ canManage }: { canManage: boolean }) {
   const [tasks, setTasks] = useState<EmailTask[]>([]);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -451,7 +455,7 @@ function EmailTasksTab() {
 
   return (
     <div className="space-y-6">
-      <Card>
+      {canManage && <Card>
         <CardHeader>
           <CardTitle>创建邮件任务</CardTitle>
         </CardHeader>
@@ -548,7 +552,7 @@ function EmailTasksTab() {
             </Button>
           </form>
         </CardContent>
-      </Card>
+      </Card>}
 
       <Card>
         <CardHeader>
@@ -566,21 +570,21 @@ function EmailTasksTab() {
               <TableHead>状态</TableHead>
               <TableHead>收件 / 批次</TableHead>
               <TableHead>执行信息</TableHead>
-              <TableHead className="w-28">操作</TableHead>
+              {canManage && <TableHead className="w-28">操作</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               [...Array(3)].map((_, i) => (
                 <TableRow key={i}>
-                  {[...Array(7)].map((_, j) => (
+                  {[...Array(canManage ? 7 : 6)].map((_, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-20" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : tasks.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={canManage ? 7 : 6} className="text-center py-8 text-muted-foreground">
                   暂无邮件任务
                 </TableCell>
               </TableRow>
@@ -624,7 +628,7 @@ function EmailTasksTab() {
                       {(task as any).startAt ? ` | 开始 ${new Date((task as any).startAt).toLocaleDateString()}` : ""}
                       {task.lastRunAt ? ` | 上次 ${new Date(task.lastRunAt).toLocaleDateString()}` : ""}
                     </TableCell>
-                    <TableCell>
+                    {canManage && <TableCell>
                       <div className="flex gap-1">
                         {task.status === "pending" && (
                           <Button variant="ghost" size="sm" onClick={() => handleRun(task.id)} title="运行">
@@ -646,7 +650,7 @@ function EmailTasksTab() {
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
-                    </TableCell>
+                    </TableCell>}
                   </TableRow>
                 );
               })
@@ -658,7 +662,7 @@ function EmailTasksTab() {
   );
 }
 
-function SendLogsTab() {
+function SendLogsTab({ canManage }: { canManage: boolean }) {
   const [logs, setLogs] = useState<SendLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -695,21 +699,21 @@ function SendLogsTab() {
               <TableHead>邮箱</TableHead>
               <TableHead>状态</TableHead>
               <TableHead>消息</TableHead>
-              <TableHead className="w-16">操作</TableHead>
+              {canManage && <TableHead className="w-16">操作</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               [...Array(5)].map((_, i) => (
                 <TableRow key={i}>
-                  {[...Array(5)].map((_, j) => (
+                  {[...Array(canManage ? 5 : 4)].map((_, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-20" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : logs.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={canManage ? 5 : 4} className="text-center py-8 text-muted-foreground">
                   暂无发送记录
                 </TableCell>
               </TableRow>
@@ -732,7 +736,7 @@ function SendLogsTab() {
                   <TableCell className="text-muted-foreground text-sm">
                     {log.templateName || log.message || "-"}
                   </TableCell>
-                  <TableCell>
+                  {canManage && <TableCell>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -741,7 +745,7 @@ function SendLogsTab() {
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
-                  </TableCell>
+                  </TableCell>}
                 </TableRow>
               ))
             )}

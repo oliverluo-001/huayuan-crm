@@ -575,6 +575,7 @@ export class CustomersService {
     if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
     return this.opportunityRepository.find({
       where,
+      relations: ['customer'],
       order: { updatedAt: 'DESC' },
     });
   }

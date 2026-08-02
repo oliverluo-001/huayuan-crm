@@ -82,7 +82,7 @@ export function SourcesPage() {
         apiKey: "",
       });
       fetchData();
-    } catch (error) {
+    } catch {
       // Error handled by API client
     }
   };
@@ -96,7 +96,7 @@ export function SourcesPage() {
       } else {
         toast.error(`连接失败: ${result.message || "未知错误"}`);
       }
-    } catch (error) {
+    } catch {
       // Error handled by API client
     } finally {
       setTestingId(null);
@@ -109,7 +109,7 @@ export function SourcesPage() {
       await deleteSearchProfile(id);
       toast.success("搜索源已删除");
       fetchData();
-    } catch (error) {
+    } catch {
       // Error handled by API client
     }
   };
@@ -120,7 +120,7 @@ export function SourcesPage() {
       await saveAiProfile(aiForm);
       toast.success("AI 配置已保存");
       fetchData();
-    } catch (error) {
+    } catch {
       // Error handled by API client
     }
   };
@@ -134,7 +134,7 @@ export function SourcesPage() {
       } else {
         toast.error(`连接失败: ${result.message || "未知错误"}`);
       }
-    } catch (error) {
+    } catch {
       // Error handled by API client
     } finally {
       setAiTesting(false);

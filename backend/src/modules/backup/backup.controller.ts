@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Delete, Body, Param, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { BackupService } from './backup.service';
-import { SaveBackupSettingsDto } from './dto/backup.dto';
+import { RestoreBackupDto, SaveBackupSettingsDto } from './dto/backup.dto';
 import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('backup')
@@ -32,6 +32,16 @@ export class BackupController {
   @Post(':id/verify')
   verify(@Param('id') id: string) {
     return this.backupService.verify(id);
+  }
+
+  @Post(':id/drill')
+  drill(@Param('id') id: string) {
+    return this.backupService.drill(id);
+  }
+
+  @Post(':id/restore')
+  restore(@Param('id') id: string, @Body() dto: RestoreBackupDto) {
+    return this.backupService.restore(id, dto.confirmation);
   }
 
   @Get(':id/download')

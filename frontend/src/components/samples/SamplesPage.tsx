@@ -23,6 +23,8 @@ import {
   type Product,
   type Opportunity,
 } from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { canManageCrmData } from "@/auth/permissions";
 
 const SAMPLE_STATUSES = [
   { value: "requested", label: "待申请" },
@@ -34,6 +36,8 @@ const SAMPLE_STATUSES = [
 ] as const;
 
 export function SamplesPage() {
+  const { role } = useAuth();
+  const canManage = canManageCrmData(role);
   const [samples, setSamples] = useState<Sample[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -103,7 +107,7 @@ export function SamplesPage() {
         notes: "",
       });
       fetchData();
-    } catch (error) {
+    } catch {
       // Error handled by API client
     }
   };
@@ -114,7 +118,7 @@ export function SamplesPage() {
       await deleteSample(id);
       toast.success("样品记录已删除");
       fetchData();
-    } catch (error) {
+    } catch {
       // Error handled by API client
     }
   };
@@ -124,7 +128,7 @@ export function SamplesPage() {
       await updateSample(id, { status });
       toast.success("样品状态已更新");
       fetchData();
-    } catch (error) {
+    } catch {
       // Error handled by API client
     }
   };
@@ -137,7 +141,7 @@ export function SamplesPage() {
   return (
     <div className="space-y-6">
       {/* Form */}
-      <Card>
+      {canManage && <Card>
         <CardHeader>
           <CardTitle>创建样品记录</CardTitle>
         </CardHeader>
@@ -176,7 +180,7 @@ export function SamplesPage() {
                     <SelectItem value="">不关联商机</SelectItem>
                     {filteredOpportunities.map((opp) => (
                       <SelectItem key={opp.id} value={opp.id}>
-                        {opp.title}
+                        {opp.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -275,7 +279,7 @@ export function SamplesPage() {
             </Button>
           </form>
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* Table */}
       <Card>
@@ -294,21 +298,21 @@ export function SamplesPage() {
               <TableHead>状态</TableHead>
               <TableHead>申请时间</TableHead>
               <TableHead>快递单号</TableHead>
-              <TableHead className="w-16">操作</TableHead>
+              {canManage && <TableHead className="w-16">操作</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               [...Array(5)].map((_, i) => (
                 <TableRow key={i}>
-                  {[...Array(7)].map((_, j) => (
+                  {[...Array(canManage ? 7 : 6)].map((_, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-20" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : samples.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={canManage ? 7 : 6} className="text-center py-8 text-muted-foreground">
                   暂无样品数据
                 </TableCell>
               </TableRow>
@@ -319,7 +323,7 @@ export function SamplesPage() {
                   <TableCell>{sample.productName || "-"}</TableCell>
                   <TableCell>{sample.quantity} {sample.unit}</TableCell>
                   <TableCell>
-                    <Select
+                    {canManage ? <Select
                       value={sample.status}
                       onValueChange={(v) => { if (v) handleStatusChange(sample.id, v as Sample["status"]) }}
                     >
@@ -338,11 +342,18 @@ export function SamplesPage() {
                           </SelectItem>
                         ))}
                       </SelectContent>
-                    </Select>
+                    </Select> : (
+                      <Badge variant={
+                        sample.status === "approved" ? "default" :
+                        sample.status === "rejected" ? "destructive" : "secondary"
+                      }>
+                        {SAMPLE_STATUSES.find((s) => s.value === sample.status)?.label || sample.status}
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell>{sample.requestedAt ? new Date(sample.requestedAt).toLocaleDateString() : "-"}</TableCell>
                   <TableCell className="font-mono text-sm">{sample.trackingNo || "-"}</TableCell>
-                  <TableCell>
+                  {canManage && <TableCell>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -352,7 +363,7 @@ export function SamplesPage() {
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
-                  </TableCell>
+                  </TableCell>}
                 </TableRow>
               ))
             )}

@@ -122,15 +122,16 @@ export interface Todo {
 
 export interface Opportunity {
   id: string;
+  opportunityId?: string;
   customerId: string;
   customerName?: string;
-  title: string;
-  stage: "inquiry" | "quoting" | "negotiating" | "closed-won" | "closed-lost";
-  value?: number;
-  currency?: string;
+  customer?: { id: string; customerId?: string; company: string };
+  name: string;
+  stage: "prospecting" | "qualification" | "proposal" | "negotiation" | "won" | "lost";
+  amount?: number;
   probability?: number;
   expectedCloseDate?: string;
-  notes?: string;
+  description?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -478,7 +479,7 @@ export interface Backup {
   size: number;
   createdAt: string;
   createdBy: string;
-  type: "manual" | "auto";
+  type: "manual" | "auto" | "pre-restore" | "pre-migration-rollback";
 }
 
 export interface AuditEntry {
@@ -506,6 +507,24 @@ export interface DashboardSnapshot {
   scope: "owned" | "all";
   metrics: DashboardData;
   emailActivity: NonNullable<DashboardData["emailActivity"]>;
+  trends: {
+    days30: Array<{ date: string; customers: number; sent: number; failed: number; bounced: number }>;
+  };
+  salesFunnel: {
+    stages: Array<{ stage: string; count: number; value: number; weightedValue: number }>;
+    openValue: number;
+    weightedValue: number;
+    wonValue: number;
+    winRate: number;
+  };
+  emailPerformance: {
+    total: number;
+    sent: number;
+    failed: number;
+    bounced: number;
+    deliveryRate: number;
+    bounceRate: number;
+  };
   activeTasks: {
     leads: Array<{ id: string; name: string; status: string; current: number; target: number }>;
     emails: Array<{ id: string; name: string; status: string; current: number; target: number }>;

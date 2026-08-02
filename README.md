@@ -128,6 +128,8 @@ huayuan-crm/
 
 ### 系统管理
 - MySQL 持久化团队账号
+- 管理员可创建、校验、下载和恢复数据库备份；正式恢复前会先在临时表执行恢复演练，并自动生成 `pre-restore` 回滚快照
+- 数据库迁移只允许回滚最近一条已应用且有回滚定义的迁移；遇到未登记的新迁移会拒绝跳过，回滚前自动生成 `pre-migration-rollback` 安全快照
 - HttpOnly Cookie 会话与全局 API 鉴权
 - 在线注册、管理员审批、角色权限与账号停用
 - 登录失败锁定、密码重置后旧会话失效
@@ -154,6 +156,10 @@ cp backend/.env.example backend/.env
 
 # 已有数据库升级到当前结构（保留原业务数据）
 npm run db:migrate -w backend
+
+# 回滚最近一条迁移（必须填写终端提示的最新迁移 ID）
+# 命令会先在 backups 表创建 pre-migration-rollback 安全快照
+npm run db:rollback -w backend -- --confirm=20260801_audit_metadata
 
 # 运行开发服务（前后端同时启动）
 npm run dev

@@ -1,4 +1,4 @@
-import { IsBoolean, IsNumber, IsOptional, Min } from 'class-validator';
+import { Equals, IsBoolean, IsNumber, IsOptional, Min } from 'class-validator';
 
 export class SaveBackupSettingsDto {
   @IsBoolean()
@@ -14,4 +14,9 @@ export class SaveBackupSettingsDto {
   @IsOptional()
   @Min(1)
   retentionDays?: number;
+}
+
+export class RestoreBackupDto {
+  @Equals('RESTORE')
+  confirmation: 'RESTORE';
 }

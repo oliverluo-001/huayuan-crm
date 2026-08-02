@@ -6,23 +6,31 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ALL_ROLES, hasRole, type UserRole } from "@/auth/permissions";
 
-const mainNavItems = [
-  { id: "", label: "仪表盘", icon: LayoutDashboard },
-  { id: "acquisition", label: "获客线索", icon: Target },
-  { id: "customers", label: "客户管理", icon: Users },
+type NavItem = {
+  id: string;
+  label: string;
+  icon: any;
+  roles: readonly UserRole[];
+};
+
+const mainNavItems: NavItem[] = [
+  { id: "", label: "仪表盘", icon: LayoutDashboard, roles: ALL_ROLES },
+  { id: "acquisition", label: "获客线索", icon: Target, roles: ALL_ROLES },
+  { id: "customers", label: "客户管理", icon: Users, roles: ALL_ROLES },
 ];
 
-const salesNavItems = [
-  { id: "opportunities", label: "商机", icon: FileText },
-  { id: "quotes", label: "报价", icon: FileText },
-  { id: "samples", label: "样品", icon: Package },
-  { id: "products", label: "产品", icon: Package },
+const salesNavItems: NavItem[] = [
+  { id: "opportunities", label: "商机", icon: FileText, roles: ALL_ROLES },
+  { id: "quotes", label: "报价", icon: FileText, roles: ALL_ROLES },
+  { id: "samples", label: "样品", icon: Package, roles: ALL_ROLES },
+  { id: "products", label: "产品", icon: Package, roles: ALL_ROLES },
 ];
 
-const bottomNavItems = [
-  { id: "marketing", label: "邮件营销", icon: Mail },
-  { id: "settings", label: "设置", icon: Settings },
+const bottomNavItems: NavItem[] = [
+  { id: "marketing", label: "邮件营销", icon: Mail, roles: ALL_ROLES },
+  { id: "settings", label: "设置", icon: Settings, roles: ALL_ROLES },
 ];
 
 const pageTitles: Record<string, { title: string; subtitle: string }> = {
@@ -38,13 +46,16 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
 };
 
 export function Shell() {
-  const { username, displayName, logout } = useAuth();
+  const { username, displayName, role, logout } = useAuth();
   const { theme, setTheme } = useTheme();
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const activePage = location.pathname;
-  const isSalesActive = salesNavItems.some((item) => activePage.startsWith("/" + item.id));
+  const visibleMainItems = mainNavItems.filter((item) => hasRole(role, item.roles));
+  const visibleSalesItems = salesNavItems.filter((item) => hasRole(role, item.roles));
+  const visibleBottomItems = bottomNavItems.filter((item) => hasRole(role, item.roles));
+  const isSalesActive = visibleSalesItems.some((item) => activePage.startsWith("/" + item.id));
   const [salesOpen, setSalesOpen] = useState(isSalesActive);
   const basePath = "/" + activePage.split("/")[1];
   const pageInfo = pageTitles[basePath] || pageTitles[activePage] || { title: "外贸 CRM", subtitle: "" };
@@ -87,13 +98,13 @@ export function Shell() {
         </div>
 
         <nav className="flex-1 space-y-1 p-2">
-          {mainNavItems.map((item) => (
+          {visibleMainItems.map((item) => (
             <NavButton key={item.id} {...item} />
           ))}
 
           {/* Sales submenu group */}
           {isCollapsed ? (
-            salesNavItems.map((item) => <NavButton key={item.id} {...item} />)
+            visibleSalesItems.map((item) => <NavButton key={item.id} {...item} />)
           ) : (
             <div>
               <Button
@@ -106,7 +117,7 @@ export function Shell() {
               </Button>
               {salesOpen && (
                 <div className="ml-2 space-y-0.5 border-l pl-2">
-                  {salesNavItems.map((item) => (
+                  {visibleSalesItems.map((item) => (
                     <NavButton key={item.id} {...item} />
                   ))}
                 </div>
@@ -114,7 +125,7 @@ export function Shell() {
             </div>
           )}
 
-          {bottomNavItems.map((item) => (
+          {visibleBottomItems.map((item) => (
             <NavButton key={item.id} {...item} />
           ))}
         </nav>
@@ -129,7 +140,10 @@ export function Shell() {
             {!isCollapsed && (
               <div className="flex flex-col min-w-0">
                 <span className="text-sm font-medium truncate">{displayName || username}</span>
-                <span className="text-xs text-muted-foreground">{username !== displayName && displayName ? username : ""}</span>
+                <span className="text-xs text-muted-foreground">
+                  {role === "admin" ? "管理员" : role === "sales" ? "销售" : "只读查看"}
+                  {username !== displayName && displayName ? ` · ${username}` : ""}
+                </span>
               </div>
             )}
           </div>

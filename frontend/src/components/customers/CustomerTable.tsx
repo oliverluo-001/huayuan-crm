@@ -4,34 +4,28 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   Search,
   Plus,
-  MoreHorizontal,
   Eye,
   Edit,
   Trash2,
   Tag,
-  Filter,
   X,
   Upload,
-  Download,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
@@ -57,6 +51,8 @@ import {
   type CustomerView,
 } from "@/api/client";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { canManageCrmData } from "@/auth/permissions";
 
 const CUSTOMER_PAGE_SIZE = 50;
 
@@ -81,7 +77,9 @@ interface CustomerTableProps {
   onPageChange?: (page: string) => void;
 }
 
-export function CustomerTable({ onPageChange }: CustomerTableProps) {
+export function CustomerTable(_props: CustomerTableProps) {
+  const { role } = useAuth();
+  const canManage = canManageCrmData(role);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -491,14 +489,14 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
                       <option key={view.id} value={view.id}>{view.name}</option>
                     ))}
                   </select>
-                  <Button variant="ghost" size="sm" onClick={handleDeleteView}>
+                  {canManage && <Button variant="ghost" size="sm" onClick={handleDeleteView}>
                     <X className="h-4 w-4" />
-                  </Button>
+                  </Button>}
                 </div>
               )}
-              <Button variant="outline" size="sm" onClick={handleSaveView}>
+              {canManage && <Button variant="outline" size="sm" onClick={handleSaveView}>
                 保存筛选器
-              </Button>
+              </Button>}
             </div>
             </div>
           </form>
@@ -508,7 +506,7 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
       <p className="text-xs text-muted-foreground px-1">客户状态根据待办、近期互动和邮件结果自动提示；当地时间用于安排邮件发送。</p>
 
       {/* Toolbar */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      {canManage ? <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground whitespace-nowrap">批量标签</span>
@@ -612,19 +610,19 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
             新增客户
           </Button>
         </div>
-      </div>
+      </div> : <Badge variant="outline">只读查看：当前角色不能导入、创建、编辑或删除客户</Badge>}
 
       {/* Table */}
       <Card>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-10">
+              {canManage && <TableHead className="w-10">
                 <Checkbox
                   checked={customers.length > 0 && selectedIds.size === customers.length}
                   onCheckedChange={handleSelectAll}
                 />
-              </TableHead>
+              </TableHead>}
               <TableHead className="w-8"></TableHead>
               <TableHead>公司</TableHead>
               <TableHead>阶段</TableHead>
@@ -639,7 +637,7 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
             {isLoading ? (
               [...Array(5)].map((_, i) => (
                 <TableRow key={i}>
-                  <TableCell><Skeleton className="h-4 w-4" /></TableCell>
+                  {canManage && <TableCell><Skeleton className="h-4 w-4" /></TableCell>}
                   <TableCell><Skeleton className="h-4 w-4" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
@@ -652,19 +650,19 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
               ))
             ) : customers.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={canManage ? 9 : 8} className="text-center py-8 text-muted-foreground">
                   暂无客户数据
                 </TableCell>
               </TableRow>
             ) : (
               customers.map((customer) => (
                 <TableRow key={customer.id}>
-                  <TableCell>
+                  {canManage && <TableCell>
                     <Checkbox
                       checked={selectedIds.has(customer.id)}
                       onCheckedChange={(checked) => handleSelectOne(customer.id, !!checked)}
                     />
-                  </TableCell>
+                  </TableCell>}
                   <TableCell>
                     <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => toggleExpanded(customer.id)}>
                       {expandedIds.has(customer.id) ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
@@ -753,11 +751,11 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
                         title="详情">
                         <Eye className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditCustomer(customer)}
+                      {canManage && <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditCustomer(customer)}
                         title="编辑">
                         <Edit className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
+                      </Button>}
+                      {canManage && <Button
                         variant="ghost"
                         size="sm"
                         className="h-7 w-7 p-0 text-destructive"
@@ -770,7 +768,7 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
                         title="删除"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      </Button>}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -780,8 +778,8 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
             {customers.map((customer) =>
               expandedIds.has(customer.id) ? (
                 <TableRow key={`exp-${customer.id}`} className="bg-muted/30">
-                  <TableCell></TableCell>
-                  <TableCell colSpan={8} className="py-3">
+                  {canManage && <TableCell></TableCell>}
+                  <TableCell colSpan={canManage ? 8 : 7} className="py-3">
                     {customerSummary(customer)}
                   </TableCell>
                 </TableRow>
@@ -820,17 +818,17 @@ export function CustomerTable({ onPageChange }: CustomerTableProps) {
       )}
 
       {/* Create Dialog */}
-      <CustomerCreateDialog
+      {canManage && <CustomerCreateDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
         onSuccess={() => {
           setCreateOpen(false);
           fetchCustomers();
         }}
-      />
+      />}
 
       {/* Edit Dialog */}
-      {editCustomer && (
+      {canManage && editCustomer && (
         <CustomerEditDialog
           customer={editCustomer}
           open={!!editCustomer}
@@ -1266,9 +1264,9 @@ function CustomerDetailDialog({
                       {data.opportunities.map((opp) => (
                         <div key={opp.id} className="flex items-center justify-between p-2 rounded-lg border">
                           <div>
-                            <p className="font-medium">{opp.title}</p>
+                            <p className="font-medium">{opp.name}</p>
                             <p className="text-sm text-muted-foreground">
-                              {opp.stage} · {opp.value ? `${opp.currency || "USD"} ${opp.value}` : "-"}
+                              {opp.stage} · {opp.amount ? `USD ${opp.amount}` : "-"}
                             </p>
                           </div>
                           <Badge variant="outline">{opp.stage}</Badge>

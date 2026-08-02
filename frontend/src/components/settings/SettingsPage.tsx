@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Save, KeyRound, Plus, Trash2, TestTube, RefreshCw, Loader2, Download, Database, Users, Ban, Shield, Clock, Edit, CheckCircle2, XCircle } from "lucide-react";
+import { Save, KeyRound, Plus, Trash2, TestTube, RefreshCw, Loader2, Download, Database, Ban, Clock, Edit, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -34,6 +34,8 @@ import {
   createBackup,
   saveBackupSettings,
   verifyBackup,
+  drillBackup,
+  restoreBackup,
   getEmailPolicy,
   saveEmailPolicy,
   getSuppressions,
@@ -127,6 +129,7 @@ export function SettingsPage() {
   const [backupSettings, setBackupSettings] = useState<BackupSettings>({ enabled: true, intervalHours: 24, retentionDays: 30 });
   const [backups, setBackups] = useState<Backup[]>([]);
   const [creatingBackup, setCreatingBackup] = useState(false);
+  const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
 
   // Team users
   const [users, setUsers] = useState<User[]>([]);
@@ -199,7 +202,7 @@ export function SettingsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
 
   const handleSaveSmtp = async (e: React.FormEvent) => {
@@ -216,7 +219,7 @@ export function SettingsPage() {
       } as any);
       toast.success("SMTP 配置已保存");
       fetchData();
-    } catch (error) {
+    } catch {
       // Error handled by API client
     }
   };
@@ -236,7 +239,7 @@ export function SettingsPage() {
       });
       toast.success("IMAP 配置已保存");
       fetchData();
-    } catch (error) {
+    } catch {
       // Error handled by API client
     }
   };
@@ -255,7 +258,7 @@ export function SettingsPage() {
       await changePassword(passwordForm.currentPassword, passwordForm.newPassword);
       toast.success("密码修改成功");
       setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-    } catch (error) {
+    } catch {
       // Error handled by API client
     }
   };
@@ -419,7 +422,7 @@ export function SettingsPage() {
         email: account.email || "",
       });
     } catch {}
-  }, [isAdmin]);
+  }, []);
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -445,6 +448,22 @@ export function SettingsPage() {
   const handleVerifyBackup = async (id: string) => {
     const result = await verifyBackup(id);
     toast.success(`备份校验通过：${result.tableCount} 个数据表，${result.rowCount} 条记录`);
+  };
+  const handleDrillBackup = async (id: string) => {
+    const result = await drillBackup(id);
+    toast.success(`恢复演练通过：临时恢复 ${result.restoredRows} 条记录，生产数据未修改`);
+  };
+  const handleRestoreBackup = async (id: string) => {
+    const confirmation = prompt("恢复会用备份覆盖当前业务数据。系统将先自动创建回滚备份。请输入 RESTORE 继续：");
+    if (confirmation !== "RESTORE") return;
+    setRestoringBackupId(id);
+    try {
+      const result = await restoreBackup(id);
+      toast.success(`数据库恢复完成；回滚备份：${result.rollbackBackupId}`);
+      fetchBackups();
+    } finally {
+      setRestoringBackupId(null);
+    }
   };
 
   const handleApproveUser = async (userId: string) => {
@@ -500,7 +519,7 @@ export function SettingsPage() {
   };
 
   useEffect(() => {
-    fetchAccount();
+    const accountRequest = fetchAccount();
     if (isAdmin) {
       fetchData();
       fetchEmailPolicy();
@@ -509,6 +528,8 @@ export function SettingsPage() {
       fetchUsers();
       fetchAuditLogs();
       fetchTrash();
+    } else {
+      void accountRequest.finally(() => setIsLoading(false));
     }
   }, [isAdmin, fetchData, fetchEmailPolicy, fetchSuppressions, fetchBackups, fetchAccount, fetchUsers, fetchAuditLogs, fetchTrash]);
 
@@ -516,7 +537,7 @@ export function SettingsPage() {
     <div className="space-y-8">
 
       {/* ===== 数据与接口 ===== */}
-      <div>
+      <div hidden={!isAdmin}>
         <div className="flex items-center gap-3 mb-6">
           <h2 className="text-lg font-semibold">数据与接口</h2>
           <div className="flex-1 h-px bg-border" />
@@ -835,7 +856,7 @@ export function SettingsPage() {
           </Card>
 
           {/* SMTP Settings */}
-          <Card>
+          <Card hidden={!isAdmin}>
             <CardHeader>
               <CardTitle>SMTP 发信配置</CardTitle>
               <CardDescription>
@@ -919,7 +940,7 @@ export function SettingsPage() {
           </Card>
 
           {/* IMAP Settings */}
-          <Card>
+          <Card hidden={!isAdmin}>
             <CardHeader>
               <CardTitle>IMAP 收信配置</CardTitle>
               <CardDescription>
@@ -1064,7 +1085,7 @@ export function SettingsPage() {
           </Card>
 
           {/* Email Policy */}
-          <Card>
+          <Card hidden={!isAdmin}>
             <CardHeader>
               <CardTitle>邮件发送策略</CardTitle>
               <CardDescription>配置邮件发送频率限制和工作时间，避免触发反垃圾策略</CardDescription>
@@ -1151,7 +1172,7 @@ export function SettingsPage() {
           </Card>
 
           {/* Suppression List */}
-          <Card>
+          <Card hidden={!isAdmin}>
             <CardHeader>
               <CardTitle>禁止名单</CardTitle>
               <CardDescription>管理不接收邮件的邮箱地址</CardDescription>
@@ -1208,7 +1229,7 @@ export function SettingsPage() {
           </Card>
 
           {/* Backup & Restore */}
-          <Card>
+          <Card hidden={!isAdmin}>
             <CardHeader>
               <CardTitle>数据备份</CardTitle>
               <CardDescription>配置自动备份策略或手动创建备份</CardDescription>
@@ -1283,8 +1304,21 @@ export function SettingsPage() {
                         <Button size="sm" variant="outline" onClick={() => handleVerifyBackup(b.id)} title="校验备份完整性">
                           <CheckCircle2 className="h-4 w-4" />
                         </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleDrillBackup(b.id)} title="在临时表中执行恢复演练">
+                          <TestTube className="h-4 w-4" />
+                        </Button>
                         <Button size="sm" variant="outline" onClick={() => { window.location.href = `/api/backup/${encodeURIComponent(b.id)}/download`; }} title="下载备份">
                           <Download className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-destructive"
+                          disabled={restoringBackupId !== null}
+                          onClick={() => handleRestoreBackup(b.id)}
+                          title="用此备份恢复数据库"
+                        >
+                          {restoringBackupId === b.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                         </Button>
                       </div>
                     </div>
@@ -1465,7 +1499,7 @@ export function SettingsPage() {
           </Card>}
 
           {/* Recycle Bin & Audit Logs */}
-          <Card>
+          <Card hidden={!isAdmin}>
             <CardHeader>
               <CardTitle>回收站</CardTitle>
               <CardDescription>查看和恢复已删除的数据</CardDescription>
@@ -1501,7 +1535,7 @@ export function SettingsPage() {
           </Card>
 
           {/* Audit Logs */}
-          <Card>
+          <Card hidden={!isAdmin}>
             <CardHeader>
               <CardTitle>审计日志</CardTitle>
               <CardDescription>系统操作记录</CardDescription>

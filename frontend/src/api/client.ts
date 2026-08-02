@@ -631,6 +631,17 @@ export async function verifyBackup(id: string): Promise<{ valid: boolean; tableC
   return api(`/api/backup/${encodeURIComponent(id)}/verify`, { method: "POST" });
 }
 
+export async function drillBackup(id: string): Promise<{ valid: boolean; restorable: boolean; tableCount: number; rowCount: number; restoredRows: number }> {
+  return api(`/api/backup/${encodeURIComponent(id)}/drill`, { method: "POST" });
+}
+
+export async function restoreBackup(id: string): Promise<{ restored: boolean; backupId: string; rollbackBackupId: string; tableCount: number; rowCount: number }> {
+  return api(`/api/backup/${encodeURIComponent(id)}/restore`, {
+    method: "POST",
+    body: { confirmation: "RESTORE" },
+  });
+}
+
 // Email Policy API
 export async function getEmailPolicy(): Promise<EmailPolicy> {
   return api("/api/settings/email-policy");

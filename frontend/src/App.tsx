@@ -1,18 +1,25 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { useAuth, AuthProvider } from "@/contexts/AuthContext";
-import { Shell } from "@/components/layout/Shell";
-import { LoginScreen, SetupScreen } from "@/components/auth/AuthScreens";
-import { Dashboard } from "@/components/dashboard/Dashboard";
-import { CustomerTable } from "@/components/customers/CustomerTable";
-import { OpportunitiesPage } from "@/components/opportunities/OpportunitiesPage";
-import { ProductsPage } from "@/components/products/ProductsPage";
-import { QuotesPage } from "@/components/quotes/QuotesPage";
-import { SamplesPage } from "@/components/samples/SamplesPage";
-import { MarketingPage } from "@/components/marketing/MarketingPage";
-import { LeadsPage } from "@/components/leads/LeadsPage";
-import { SettingsPage } from "@/components/settings/SettingsPage";
 import { Toaster } from "@/components/ui/sonner";
+
+const Shell = lazy(() => import("@/components/layout/Shell").then((module) => ({ default: module.Shell })));
+const LoginScreen = lazy(() => import("@/components/auth/AuthScreens").then((module) => ({ default: module.LoginScreen })));
+const SetupScreen = lazy(() => import("@/components/auth/AuthScreens").then((module) => ({ default: module.SetupScreen })));
+const Dashboard = lazy(() => import("@/components/dashboard/Dashboard").then((module) => ({ default: module.Dashboard })));
+const CustomerTable = lazy(() => import("@/components/customers/CustomerTable").then((module) => ({ default: module.CustomerTable })));
+const OpportunitiesPage = lazy(() => import("@/components/opportunities/OpportunitiesPage").then((module) => ({ default: module.OpportunitiesPage })));
+const ProductsPage = lazy(() => import("@/components/products/ProductsPage").then((module) => ({ default: module.ProductsPage })));
+const QuotesPage = lazy(() => import("@/components/quotes/QuotesPage").then((module) => ({ default: module.QuotesPage })));
+const SamplesPage = lazy(() => import("@/components/samples/SamplesPage").then((module) => ({ default: module.SamplesPage })));
+const MarketingPage = lazy(() => import("@/components/marketing/MarketingPage").then((module) => ({ default: module.MarketingPage })));
+const LeadsPage = lazy(() => import("@/components/leads/LeadsPage").then((module) => ({ default: module.LeadsPage })));
+const SettingsPage = lazy(() => import("@/components/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })));
+
+function RouteLoading() {
+  return <div className="flex min-h-48 items-center justify-center text-muted-foreground">页面加载中...</div>;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, needsSetup, isLoading } = useAuth();
@@ -61,7 +68,8 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 
 function AppRoutes() {
   return (
-    <Routes>
+    <Suspense fallback={<RouteLoading />}>
+      <Routes>
       <Route
         path="/login"
         element={
@@ -97,7 +105,8 @@ function AppRoutes() {
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }
 

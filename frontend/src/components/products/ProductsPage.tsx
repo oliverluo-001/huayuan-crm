@@ -6,12 +6,15 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Edit, Trash2, Save, X } from "lucide-react";
+import { Edit, Trash2, Save, X } from "lucide-react";
 import { getProducts, createProduct, updateProduct, deleteProduct, type Product } from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { canManageCrmData } from "@/auth/permissions";
 
 export function ProductsPage() {
+  const { role } = useAuth();
+  const canManage = canManageCrmData(role);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -90,7 +93,7 @@ export function ProductsPage() {
   return (
     <div className="space-y-6">
       {/* Form */}
-      <Card>
+      {canManage && <Card>
         <CardHeader>
           <CardTitle>{editingId ? "编辑产品" : "新增产品"}</CardTitle>
         </CardHeader>
@@ -171,7 +174,7 @@ export function ProductsPage() {
             </div>
           </form>
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* Table */}
       <Card>
@@ -189,7 +192,7 @@ export function ProductsPage() {
               <TableHead>分类</TableHead>
               <TableHead>单位</TableHead>
               <TableHead>参考价</TableHead>
-              <TableHead className="w-24">操作</TableHead>
+              {canManage && <TableHead className="w-24">操作</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -201,12 +204,12 @@ export function ProductsPage() {
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-12" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-16" /></TableCell>
+                  {canManage && <TableCell><Skeleton className="h-4 w-16" /></TableCell>}
                 </TableRow>
               ))
             ) : products.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={canManage ? 6 : 5} className="text-center py-8 text-muted-foreground">
                   暂无产品数据
                 </TableCell>
               </TableRow>
@@ -222,7 +225,7 @@ export function ProductsPage() {
                       ? `${product.currency || "USD"} ${product.referencePrice.toFixed(2)}`
                       : "-"}
                   </TableCell>
-                  <TableCell>
+                  {canManage && <TableCell>
                     <div className="flex gap-1">
                       <Button variant="ghost" size="sm" onClick={() => handleEdit(product)}>
                         <Edit className="h-4 w-4" />
@@ -236,7 +239,7 @@ export function ProductsPage() {
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
-                  </TableCell>
+                  </TableCell>}
                 </TableRow>
               ))
             )}

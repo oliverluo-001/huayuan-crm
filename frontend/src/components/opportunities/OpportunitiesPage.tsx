@@ -1,20 +1,24 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getOpportunities, updateOpportunity, type Opportunity } from "@/api/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { canManageCrmData } from "@/auth/permissions";
 
 const STAGES = [
-  { value: "inquiry", label: "询盘", color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" },
-  { value: "quoting", label: "报价中", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" },
-  { value: "negotiating", label: "谈判中", color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200" },
-  { value: "closed-won", label: "已成交", color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" },
-  { value: "closed-lost", label: "已流失", color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200" },
+  { value: "prospecting", label: "初步接洽", color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" },
+  { value: "qualification", label: "需求确认", color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200" },
+  { value: "proposal", label: "方案报价", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" },
+  { value: "negotiation", label: "商务谈判", color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200" },
+  { value: "won", label: "已成交", color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" },
+  { value: "lost", label: "已流失", color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200" },
 ];
 
 export function OpportunitiesPage() {
+  const { role } = useAuth();
+  const canManage = canManageCrmData(role);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -90,15 +94,15 @@ export function OpportunitiesPage() {
                   className="rounded-lg border p-3 space-y-2 bg-card hover:border-primary/50 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <p className="font-medium text-sm line-clamp-2">{opp.title}</p>
+                    <p className="font-medium text-sm line-clamp-2">{opp.name}</p>
                   </div>
                   <p className="text-xs text-muted-foreground line-clamp-1">
-                    {opp.customerName || "未知客户"}
+                    {opp.customer?.company || opp.customerName || "未知客户"}
                   </p>
-                  {opp.value && (
+                  {opp.amount && (
                     <p className="text-sm font-medium">
                       {(opp as any).product ? `${(opp as any).product} · ` : ""}
-                      {opp.currency || "USD"} {opp.value?.toLocaleString()}
+                      USD {Number(opp.amount).toLocaleString()}
                     </p>
                   )}
                   <div className="flex items-center justify-between">
@@ -110,21 +114,23 @@ export function OpportunitiesPage() {
                         ? ` · 概率 ${opp.probability}%`
                         : ""}
                     </span>
-                    <Select
-                      value={opp.stage}
-                      onValueChange={(v) => { if (v) handleStageChange(opp.id, v) }}
-                    >
-                      <SelectTrigger className="h-6 w-6 p-0 border-0">
-                        <span className="sr-only">切换阶段</span>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {STAGES.map((s) => (
-                          <SelectItem key={s.value} value={s.value}>
-                            {s.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {canManage && (
+                      <Select
+                        value={opp.stage}
+                        onValueChange={(v) => { if (v) handleStageChange(opp.id, v) }}
+                      >
+                        <SelectTrigger className="h-6 w-6 p-0 border-0">
+                          <span className="sr-only">切换阶段</span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STAGES.map((s) => (
+                            <SelectItem key={s.value} value={s.value}>
+                              {s.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 </div>
               ))}

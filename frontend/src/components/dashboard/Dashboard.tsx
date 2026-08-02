@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertCircle, CheckSquare, Mail, RefreshCw, Target, TrendingUp, Users } from "lucide-react";
+import { AlertCircle, BarChart3, CheckSquare, DollarSign, Mail, RefreshCw, Target, TrendingUp, Users } from "lucide-react";
 import { getDashboard, type DashboardSnapshot } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,6 +73,46 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       </Card>)}
     </div>
 
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base"><BarChart3 className="h-4 w-4" />近 30 天业务趋势</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <TrendChart days={data.trends.days30} />
+      </CardContent>
+    </Card>
+
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><DollarSign className="h-4 w-4" />销售漏斗</CardTitle></CardHeader><CardContent className="space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          <SummaryValue label="开放商机" value={formatMoney(data.salesFunnel.openValue)} />
+          <SummaryValue label="加权金额" value={formatMoney(data.salesFunnel.weightedValue)} />
+          <SummaryValue label="赢单率" value={`${data.salesFunnel.winRate}%`} />
+        </div>
+        <div className="space-y-2">
+          {data.salesFunnel.stages.map((item) => {
+            const labels: Record<string, string> = { prospecting: "初步接洽", qualification: "需求确认", proposal: "方案报价", negotiation: "商务谈判", won: "已成交", lost: "已流失" };
+            const maxValue = Math.max(1, ...data.salesFunnel.stages.map((stage) => stage.value));
+            return <div key={item.stage}>
+              <div className="mb-1 flex justify-between text-xs"><span>{labels[item.stage] || item.stage} · {item.count} 个</span><strong>{formatMoney(item.value)}</strong></div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.max(item.value ? 4 : 0, item.value / maxValue * 100)}%` }} /></div>
+            </div>;
+          })}
+        </div>
+      </CardContent></Card>
+
+      <Card><CardHeader><CardTitle className="text-base">邮件效果分析（近 30 天）</CardTitle></CardHeader><CardContent className="space-y-5">
+        <div className="grid grid-cols-4 gap-2">
+          <SummaryValue label="总计" value={String(data.emailPerformance.total)} />
+          <SummaryValue label="送达" value={String(data.emailPerformance.sent)} />
+          <SummaryValue label="失败" value={String(data.emailPerformance.failed)} />
+          <SummaryValue label="退信" value={String(data.emailPerformance.bounced)} />
+        </div>
+        <RateBar label="送达率" value={data.emailPerformance.deliveryRate} className="bg-primary" />
+        <RateBar label="退信率" value={data.emailPerformance.bounceRate} className="bg-destructive" />
+      </CardContent></Card>
+    </div>
+
     <div className="grid gap-4 lg:grid-cols-3">
       <Card><CardHeader><CardTitle className="text-base">获客转化漏斗</CardTitle></CardHeader><CardContent className="space-y-4">
         {funnel.map(([label, value]) => <div key={label}>
@@ -124,6 +164,46 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
 function ActivityBox({ title, data }: { title: string; data: { total: number; sent: number; failed: number; rate: number } }) {
   return <div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">{title}</p><p className="text-xl font-semibold">{data.sent}/{data.total}</p><p className="text-xs text-muted-foreground">成功率 {data.rate}% · 失败 {data.failed}</p></div>;
+}
+
+function TrendChart({ days }: { days: DashboardSnapshot["trends"]["days30"] }) {
+  const max = Math.max(1, ...days.flatMap((day) => [day.customers, day.sent, day.failed + day.bounced]));
+  return <div>
+    <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
+      <Legend color="bg-blue-500" label="新增客户" />
+      <Legend color="bg-emerald-500" label="成功邮件" />
+      <Legend color="bg-red-500" label="失败/退信" />
+    </div>
+    <div className="flex h-44 items-end gap-1 border-b border-l px-2 pt-3">
+      {days.map((day, index) => <div key={day.date} className="group relative flex h-full min-w-0 flex-1 items-end justify-center gap-px" title={`${day.date}：新增客户 ${day.customers}，成功邮件 ${day.sent}，失败/退信 ${day.failed + day.bounced}`}>
+        <TrendBar value={day.customers} max={max} className="bg-blue-500" />
+        <TrendBar value={day.sent} max={max} className="bg-emerald-500" />
+        <TrendBar value={day.failed + day.bounced} max={max} className="bg-red-500" />
+        {(index === 0 || index === 14 || index === days.length - 1) && <span className="absolute -bottom-5 whitespace-nowrap text-[10px] text-muted-foreground">{day.date.slice(5)}</span>}
+      </div>)}
+    </div>
+    <div className="h-5" />
+  </div>;
+}
+
+function TrendBar({ value, max, className }: { value: number; max: number; className: string }) {
+  return <div className={`w-1/3 max-w-2 rounded-t-sm ${className}`} style={{ height: `${Math.max(value ? 3 : 0, value / max * 100)}%` }} />;
+}
+
+function Legend({ color, label }: { color: string; label: string }) {
+  return <span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-sm ${color}`} />{label}</span>;
+}
+
+function SummaryValue({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-md border p-3 text-center"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 font-semibold">{value}</p></div>;
+}
+
+function RateBar({ label, value, className }: { label: string; value: number; className: string }) {
+  return <div><div className="mb-1 flex justify-between text-sm"><span>{label}</span><strong>{value}%</strong></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className={`h-full rounded-full ${className}`} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} /></div></div>;
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 }
 
 function Empty({ text }: { text: string }) { return <p className="py-4 text-center text-sm text-muted-foreground">{text}</p> }
