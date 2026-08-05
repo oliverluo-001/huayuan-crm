@@ -38,8 +38,7 @@ async function main() {
 
     await connection.beginTransaction();
     try {
-      await connection.query("UPDATE users SET email = NULL WHERE TRIM(COALESCE(email, '')) = ''");
-      await connection.query('ALTER TABLE users MODIFY COLUMN email VARCHAR(255) NULL DEFAULT NULL');
+      await normalizeLegacyUserEmails(connection);
       await addColumn(connection, 'status', "VARCHAR(20) NOT NULL DEFAULT 'active'");
       await addColumn(connection, 'active', 'TINYINT(1) NOT NULL DEFAULT 1');
       await addColumn(connection, 'registration_source', "VARCHAR(20) NOT NULL DEFAULT 'admin'");
@@ -83,6 +82,11 @@ async function migrateAuditMetadata(connection: Connection) {
   await addColumnToTable(connection, 'audit_logs', 'status', "VARCHAR(20) NOT NULL DEFAULT 'success'");
   await addColumnToTable(connection, 'audit_logs', 'duration_ms', 'INT NOT NULL DEFAULT 0');
   await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
+}
+
+export async function normalizeLegacyUserEmails(connection: Pick<Connection, 'query'>) {
+  await connection.query('ALTER TABLE users MODIFY COLUMN email VARCHAR(255) NULL DEFAULT NULL');
+  await connection.query("UPDATE users SET email = NULL WHERE TRIM(COALESCE(email, '')) = ''");
 }
 
 async function migrateEmailExecution(connection: Connection) {
@@ -211,7 +215,9 @@ async function addIndexIfMissing(connection: Connection, table: string, indexNam
   if (!rows.length) await connection.query(`ALTER TABLE \`${table}\` ADD INDEX \`${indexName}\` (\`${column}\`)`);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
