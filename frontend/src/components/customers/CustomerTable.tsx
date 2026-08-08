@@ -258,9 +258,9 @@ export function CustomerTable(_props: CustomerTableProps) {
 
   const customerHealthBadge = (customer: Customer) => {
     if (customer.emailStatus === "invalid") return <Badge variant="destructive">邮箱异常</Badge>;
-    const health = customer.health || "healthy";
-    if (health === "overdue") return <Badge variant="destructive">待办逾期</Badge>;
-    if (health === "attention") return <Badge variant="secondary">需跟进</Badge>;
+    const health = customer.health || "good";
+    if (health === "critical") return <Badge variant="destructive">待办逾期</Badge>;
+    if (health === "warning") return <Badge variant="secondary">需跟进</Badge>;
     return <Badge variant="outline">正常</Badge>;
   };
 
@@ -324,7 +324,7 @@ export function CustomerTable(_props: CustomerTableProps) {
         setFilters({ ...baseFilters, ownerId: "me" });
         break;
       case "followup":
-        setFilters({ ...baseFilters, health: "attention" });
+        setFilters({ ...baseFilters, health: "warning" });
         break;
       case "email_invalid":
         setFilters({ ...baseFilters, emailStatus: "invalid" });
@@ -449,7 +449,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">全部邮箱</SelectItem>
-                    <SelectItem value="deliverable">未标记异常</SelectItem>
+                    <SelectItem value="valid">邮箱有效</SelectItem>
                     <SelectItem value="invalid">邮箱异常（退信）</SelectItem>
                     <SelectItem value="unknown">待验证</SelectItem>
                   </SelectContent>
@@ -463,10 +463,9 @@ export function CustomerTable(_props: CustomerTableProps) {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">全部状态</SelectItem>
-                    <SelectItem value="overdue">待办逾期</SelectItem>
-                    <SelectItem value="attention">需跟进</SelectItem>
-                    <SelectItem value="email_invalid">邮箱异常</SelectItem>
-                    <SelectItem value="healthy">正常</SelectItem>
+                    <SelectItem value="critical">待办逾期</SelectItem>
+                    <SelectItem value="warning">需跟进</SelectItem>
+                    <SelectItem value="good">正常</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -713,7 +712,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                     {customer.nextTodoTitle ? (
                       <div>
                         <p className="font-medium text-xs">{customer.nextTodoTitle}</p>
-                        <p className={`text-xs ${customer.health === "overdue" ? "text-red-500" : "text-muted-foreground"}`}>
+                        <p className={`text-xs ${customer.health === "critical" ? "text-red-500" : "text-muted-foreground"}`}>
                           {customer.nextTodoAt ? new Date(customer.nextTodoAt).toLocaleDateString() : "未设截止时间"}
                         </p>
                       </div>
@@ -1295,9 +1294,9 @@ function CustomerDetailDialog({
                       {data.activities.slice(0, 5).map((activity) => (
                         <div key={activity.id} className="p-2 rounded-lg border">
                           <div className="flex items-center justify-between">
-                            <p className="font-medium">{activity.summary}</p>
+                            <p className="font-medium">{activity.subject}</p>
                             <span className="text-xs text-muted-foreground">
-                              {new Date(activity.occurredAt).toLocaleDateString()}
+                              {new Date(activity.createdAt).toLocaleDateString()}
                             </span>
                           </div>
                           {activity.content && (
@@ -1326,8 +1325,8 @@ function CustomerDetailDialog({
                               {todo.dueAt ? new Date(todo.dueAt).toLocaleDateString() : "无截止日期"}
                             </p>
                           </div>
-                          <Badge variant={todo.status === "completed" ? "default" : "secondary"}>
-                            {todo.status === "completed" ? "已完成" : "待处理"}
+                          <Badge variant={todo.status === "done" ? "default" : "secondary"}>
+                            {todo.status === "done" ? "已完成" : "待处理"}
                           </Badge>
                         </div>
                       ))}

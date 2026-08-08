@@ -1,4 +1,18 @@
-import { IsString, IsOptional, IsEnum, IsEmail, IsArray, IsNumber, IsDateString } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsDateString,
+  IsEmail,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 
 export class CreateCustomerDto {
   @IsString()
@@ -194,10 +208,31 @@ export class CreateContactDto {
   phone?: string;
 
   @IsOptional()
+  @IsBoolean()
   isPrimary?: boolean;
 }
 
-export class UpdateContactDto extends CreateContactDto {}
+export class UpdateContactDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  title?: string;
+
+  @IsEmail()
+  @IsOptional()
+  email?: string;
+
+  @IsString()
+  @IsOptional()
+  phone?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isPrimary?: boolean;
+}
 
 export class CreateActivityDto {
   @IsEnum(['email', 'call', 'meeting', 'note', 'other'])
@@ -255,6 +290,7 @@ export class CreateOpportunityDto {
   name: string;
 
   @IsNumber()
+  @Min(0)
   @IsOptional()
   amount?: number;
 
@@ -263,6 +299,8 @@ export class CreateOpportunityDto {
   stage?: 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost';
 
   @IsNumber()
+  @Min(0)
+  @Max(100)
   @IsOptional()
   probability?: number;
 
@@ -275,7 +313,38 @@ export class CreateOpportunityDto {
   description?: string;
 }
 
-export class UpdateOpportunityDto extends CreateOpportunityDto {}
+export class UpdateOpportunityDto {
+  @IsNumber()
+  @IsOptional()
+  customerId?: number;
+
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  amount?: number;
+
+  @IsEnum(['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'])
+  @IsOptional()
+  stage?: 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost';
+
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  probability?: number;
+
+  @IsDateString()
+  @IsOptional()
+  expectedCloseDate?: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
+}
 
 export class QuoteItemDto {
   @IsString()
@@ -294,6 +363,7 @@ export class QuoteItemDto {
   description?: string;
 
   @IsNumber()
+  @Min(0.01)
   @IsOptional()
   quantity?: number;
 
@@ -302,14 +372,18 @@ export class QuoteItemDto {
   unit?: string;
 
   @IsNumber()
+  @Min(0)
   @IsOptional()
   unitPrice?: number;
 
   @IsNumber()
+  @Min(0)
+  @Max(100)
   @IsOptional()
   discount?: number;
 
   @IsNumber()
+  @Min(0)
   @IsOptional()
   subtotal?: number;
 }
@@ -335,18 +409,27 @@ export class CreateQuoteDto {
   currency?: string;
 
   @IsNumber()
+  @Min(0)
   @IsOptional()
   subtotal?: number;
 
   @IsNumber()
+  @Min(0)
+  @IsOptional()
+  freight?: number;
+
+  @IsNumber()
+  @Min(0)
   @IsOptional()
   taxRate?: number;
 
   @IsNumber()
+  @Min(0)
   @IsOptional()
   taxAmount?: number;
 
   @IsNumber()
+  @Min(0)
   @IsOptional()
   total?: number;
 
@@ -363,10 +446,62 @@ export class CreateQuoteDto {
   terms?: string;
 
   @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => QuoteItemDto)
   items: QuoteItemDto[];
 }
 
-export class UpdateQuoteDto extends CreateQuoteDto {}
+export class UpdateQuoteDto {
+  @IsNumber()
+  @IsOptional()
+  customerId?: number;
+
+  @IsString()
+  @IsOptional()
+  quoteNo?: string;
+
+  @IsString()
+  @IsOptional()
+  opportunityId?: string;
+
+  @IsEnum(['draft', 'sent', 'accepted', 'rejected', 'expired'])
+  @IsOptional()
+  status?: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+
+  @IsString()
+  @IsOptional()
+  currency?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  freight?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  taxRate?: number;
+
+  @IsDateString()
+  @IsOptional()
+  validUntil?: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+
+  @IsString()
+  @IsOptional()
+  terms?: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => QuoteItemDto)
+  @IsOptional()
+  items?: QuoteItemDto[];
+}
 
 export class CreateSampleDto {
   @IsNumber()
@@ -384,6 +519,7 @@ export class CreateSampleDto {
   productId?: string;
 
   @IsNumber()
+  @Min(0.01)
   @IsOptional()
   quantity?: number;
 
@@ -402,6 +538,59 @@ export class CreateSampleDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsDateString()
+  @IsOptional()
+  sentAt?: string;
+
+  @IsDateString()
+  @IsOptional()
+  deliveredAt?: string;
 }
 
-export class UpdateSampleDto extends CreateSampleDto {}
+export class UpdateSampleDto {
+  @IsNumber()
+  @IsOptional()
+  customerId?: number;
+
+  @IsString()
+  @IsOptional()
+  opportunityId?: string;
+
+  @IsString()
+  @IsOptional()
+  productName?: string;
+
+  @IsString()
+  @IsOptional()
+  productId?: string;
+
+  @IsNumber()
+  @Min(0.01)
+  @IsOptional()
+  quantity?: number;
+
+  @IsString()
+  @IsOptional()
+  unit?: string;
+
+  @IsEnum(['pending', 'sent', 'delivered', 'returned'])
+  @IsOptional()
+  status?: 'pending' | 'sent' | 'delivered' | 'returned';
+
+  @IsString()
+  @IsOptional()
+  trackingNo?: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+
+  @IsDateString()
+  @IsOptional()
+  sentAt?: string;
+
+  @IsDateString()
+  @IsOptional()
+  deliveredAt?: string;
+}

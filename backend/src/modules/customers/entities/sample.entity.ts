@@ -8,6 +8,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Customer } from './customer.entity';
+import { decimalNumberTransformer } from '../../../common/database/decimal-number.transformer';
 
 export type SampleStatus = 'pending' | 'sent' | 'delivered' | 'returned';
 
@@ -31,7 +32,7 @@ export class Sample {
   @Column({ name: 'product_id', type: 'varchar', length: 32, default: '' })
   productId: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 1 })
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 1, transformer: decimalNumberTransformer })
   quantity: number;
 
   @Column({ type: 'varchar', length: 20, default: '' })

@@ -8,6 +8,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Customer } from './customer.entity';
+import { decimalNumberTransformer } from '../../../common/database/decimal-number.transformer';
 
 export type OpportunityStage = 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost';
 
@@ -25,7 +26,7 @@ export class Opportunity {
   @Column({ type: 'varchar', length: 255 })
   name: string;
 
-  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   amount: number;
 
   @Column({ type: 'enum', enum: ['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'], default: 'prospecting' })

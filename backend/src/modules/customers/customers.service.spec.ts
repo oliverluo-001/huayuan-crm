@@ -106,3 +106,58 @@ describe('CustomersService imports', () => {
     expect(customerRepository.save).not.toHaveBeenCalled();
   });
 });
+
+describe('CustomersService quote contracts', () => {
+  const customerRepository = {
+    findOne: jest.fn(),
+  };
+  const quoteRepository = {
+    count: jest.fn(),
+    create: jest.fn((value) => value),
+    save: jest.fn(async (value) => value),
+  };
+  const service = new CustomersService(
+    customerRepository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    quoteRepository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    customerRepository.findOne.mockResolvedValue({ id: 1, company: 'Buyer Co' });
+    quoteRepository.count.mockResolvedValue(0);
+  });
+
+  it('calculates line totals, tax, freight and grand total on the server', async () => {
+    const quote = await service.createQuote({
+      customerId: 1,
+      currency: 'USD',
+      subtotal: 999999,
+      taxAmount: 999999,
+      total: 999999,
+      freight: 20,
+      taxRate: 10,
+      items: [{
+        productName: 'Weld Neck Flange',
+        quantity: 2,
+        unitPrice: 100,
+        discount: 10,
+      }],
+    });
+
+    expect(quote).toMatchObject({
+      subtotal: 180,
+      freight: 20,
+      taxRate: 10,
+      taxAmount: 18,
+      total: 218,
+      items: [{ quantity: 2, unitPrice: 100, discount: 10, subtotal: 180 }],
+    });
+  });
+});

@@ -9,6 +9,7 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 import { Tag } from './tag.entity';
+import { decimalNumberTransformer } from '../../../common/database/decimal-number.transformer';
 
 export type CustomerTier = 'A' | 'B' | 'C' | 'D' | '';
 export type JourneyStage =
@@ -111,7 +112,7 @@ export class Customer {
   @Column({ name: 'open_opportunity_count', type: 'int', default: 0 })
   openOpportunityCount: number;
 
-  @Column({ name: 'open_opportunity_value', type: 'decimal', precision: 15, scale: 2, default: 0 })
+  @Column({ name: 'open_opportunity_value', type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   openOpportunityValue: number;
 
   @ManyToMany(() => Tag, { cascade: true, eager: true })
@@ -130,4 +131,11 @@ export class Customer {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
+
+  toJSON() {
+    return {
+      ...this,
+      tags: (this.tags || []).map((tag) => tag.name),
+    };
+  }
 }

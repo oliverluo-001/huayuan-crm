@@ -309,6 +309,9 @@ export class OpportunitiesController {
   @Roles('admin', 'sales')
   async update(@Param('id') id: string, @Body() updateOpportunityDto: UpdateOpportunityDto, @CurrentUser() user: RequestUser) {
     await this.customersService.assertOpportunityOwner(+id, requestOwnerId(user));
+    if (updateOpportunityDto.customerId) {
+      await this.customersService.assertCustomerOwner(updateOpportunityDto.customerId, requestOwnerId(user));
+    }
     return this.customersService.updateOpportunity(+id, updateOpportunityDto);
   }
 
@@ -347,6 +350,9 @@ export class QuotesController {
   @Roles('admin', 'sales')
   async update(@Param('id') id: string, @Body() updateQuoteDto: UpdateQuoteDto, @CurrentUser() user: RequestUser) {
     await this.customersService.assertQuoteOwner(+id, requestOwnerId(user));
+    if (updateQuoteDto.customerId) {
+      await this.customersService.assertCustomerOwner(updateQuoteDto.customerId, requestOwnerId(user));
+    }
     return this.customersService.updateQuote(+id, updateQuoteDto);
   }
 
@@ -393,6 +399,9 @@ export class SamplesController {
   @Roles('admin', 'sales')
   async update(@Param('id') id: string, @Body() updateSampleDto: UpdateSampleDto, @CurrentUser() user: RequestUser) {
     await this.customersService.assertSampleOwner(+id, requestOwnerId(user));
+    if (updateSampleDto.customerId) {
+      await this.customersService.assertCustomerOwner(updateSampleDto.customerId, requestOwnerId(user));
+    }
     return this.customersService.updateSample(+id, updateSampleDto);
   }
 
@@ -573,7 +582,7 @@ function renderQuoteExport(quote: any, customer: any): string {
 <header><div><h1>报价单 / QUOTATION</h1><h2>外贸 CRM 本地报价文件</h2></div><div class="quote-no"><span>报价编号</span><strong>${escapeHtml(quote.quoteNo)}</strong></div></header>
 <section class="meta"><div><strong>客户 / Customer</strong><span>${escapeHtml(customer?.company || '-')}</span></div><div><strong>客户地区 / Region</strong><span>${escapeHtml(customer?.region || '-')}</span></div><div><strong>联系人 / Contact</strong><span>${escapeHtml(customer?.contact || '-')}</span></div><div><strong>联系邮箱 / Email</strong><span>${escapeHtml(customer?.email || '-')}</span></div><div><strong>报价日期 / Date</strong><span>${date(quote.createdAt)}</span></div><div><strong>有效期至 / Valid Until</strong><span>${date(quote.validUntil)}</span></div></section>
 <table><thead><tr><th>#</th><th>产品 / Description</th><th>单位</th><th class="number">数量</th><th class="number">单价</th><th class="number">金额</th></tr></thead><tbody>${rows}</tbody></table>
-<section class="totals"><div><span>商品小计</span><strong>${amt(quote.subtotal)}</strong></div><div><span>增值税 (${Number(quote.taxRate || 0).toLocaleString('en-US')}%)</span><strong>${amt(quote.taxAmount)}</strong></div><div class="grand"><span>报价总额</span><strong>${amt(quote.total)}</strong></div></section>
+<section class="totals"><div><span>商品小计</span><strong>${amt(quote.subtotal)}</strong></div><div><span>运费</span><strong>${amt(quote.freight)}</strong></div><div><span>增值税 (${Number(quote.taxRate || 0).toLocaleString('en-US')}%)</span><strong>${amt(quote.taxAmount)}</strong></div><div class="grand"><span>报价总额</span><strong>${amt(quote.total)}</strong></div></section>
 <section class="notes"><strong>备注 / Notes</strong><br>${escapeHtml(quote.notes || '-')}</section><footer>本报价单由外贸 CRM 自动生成。打开文件后可使用浏览器"打印"保存为 PDF。</footer>
 </main></body></html>`;
 }

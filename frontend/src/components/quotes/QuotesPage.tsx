@@ -25,6 +25,14 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
 
+const QUOTE_STATUSES = [
+  { value: "draft", label: "草稿" },
+  { value: "sent", label: "已发送" },
+  { value: "accepted", label: "已接受" },
+  { value: "rejected", label: "已拒绝" },
+  { value: "expired", label: "已过期" },
+] as const;
+
 export function QuotesPage() {
   const { role } = useAuth();
   const canManage = canManageCrmData(role);
@@ -42,6 +50,7 @@ export function QuotesPage() {
     quantity: "1",
     unitPrice: "",
     currency: "USD",
+    status: "draft" as Quote["status"],
     discount: "0",
     freight: "0",
     taxRate: "13",
@@ -73,19 +82,29 @@ export function QuotesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const product = products.find((item) => String(item.id) === form.productId);
+    if (!product) return;
+    const opportunity = opportunities.find((item) => String(item.id) === form.opportunityId);
     const data = {
-      customerId: form.customerId,
-      opportunityId: form.opportunityId || undefined,
+      customerId: Number(form.customerId),
+      opportunityId: opportunity?.opportunityId || (opportunity ? String(opportunity.id) : undefined),
       quoteNo: form.quoteNo || undefined,
-      productId: form.productId,
-      quantity: parseFloat(form.quantity),
-      unitPrice: parseFloat(form.unitPrice),
       currency: form.currency,
-      discount: parseFloat(form.discount),
+      status: form.status,
       freight: parseFloat(form.freight),
       taxRate: parseFloat(form.taxRate),
       validUntil: form.validUntil || undefined,
       notes: form.notes || undefined,
+      items: [{
+        productId: product.productId || String(product.id),
+        productName: product.name,
+        productCode: product.code,
+        description: product.description,
+        quantity: parseFloat(form.quantity),
+        unit: product.unit || "pcs",
+        unitPrice: parseFloat(form.unitPrice),
+        discount: parseFloat(form.discount),
+      }],
     };
     if (editingId) {
       await updateQuote(editingId, data);
@@ -101,6 +120,7 @@ export function QuotesPage() {
       quantity: "1",
       unitPrice: "",
       currency: "USD",
+      status: "draft",
       discount: "0",
       freight: "0",
       taxRate: "13",
@@ -111,17 +131,25 @@ export function QuotesPage() {
   };
 
   const handleEdit = (quote: Quote) => {
+    const item = quote.items[0];
+    const product = products.find((candidate) =>
+      candidate.productId === item?.productId || String(candidate.id) === item?.productId
+    );
+    const opportunity = opportunities.find((candidate) =>
+      candidate.opportunityId === quote.opportunityId || String(candidate.id) === quote.opportunityId
+    );
     setForm({
-      customerId: quote.customerId || "",
-      opportunityId: "",
+      customerId: String(quote.customerId || ""),
+      opportunityId: opportunity ? String(opportunity.id) : "",
       quoteNo: quote.quoteNo || "",
-      productId: "",
-      quantity: String(quote.quantity || 1),
-      unitPrice: String(quote.total || ""),
+      productId: product ? String(product.id) : "",
+      quantity: String(item?.quantity || 1),
+      unitPrice: String(item?.unitPrice ?? ""),
       currency: quote.currency || "USD",
-      discount: "0",
-      freight: "0",
-      taxRate: "13",
+      status: quote.status,
+      discount: String(item?.discount || 0),
+      freight: String(quote.freight || 0),
+      taxRate: String(quote.taxRate || 0),
       validUntil: quote.validUntil ? quote.validUntil.split("T")[0] : "",
       notes: quote.notes || "",
     });
@@ -136,10 +164,10 @@ export function QuotesPage() {
 
   // Filter opportunities for selected customer
   const filteredOpportunities = form.customerId
-    ? opportunities.filter((o) => o.customerId === form.customerId)
+    ? opportunities.filter((o) => String(o.customerId) === form.customerId)
     : opportunities;
 
-  const selectedProduct = products.find((p) => p.id === form.productId);
+  const selectedProduct = products.find((p) => String(p.id) === form.productId);
 
   return (
     <div className="space-y-6">
@@ -163,7 +191,7 @@ export function QuotesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {customers.map((customer) => (
-                      <SelectItem key={customer.id} value={customer.id}>
+                      <SelectItem key={customer.id} value={String(customer.id)}>
                         {customer.company}
                       </SelectItem>
                     ))}
@@ -173,16 +201,16 @@ export function QuotesPage() {
               <div className="space-y-2">
                 <Label>关联商机</Label>
                 <Select
-                  value={form.opportunityId}
-                  onValueChange={(v) => { if (v !== null) setForm({ ...form, opportunityId: v }) }}
+                  value={form.opportunityId || "none"}
+                  onValueChange={(v) => { if (v) setForm({ ...form, opportunityId: v === "none" ? "" : v }) }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="不关联商机" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">不关联商机</SelectItem>
+                    <SelectItem value="none">不关联商机</SelectItem>
                     {filteredOpportunities.map((opp) => (
-                      <SelectItem key={opp.id} value={opp.id}>
+                      <SelectItem key={opp.id} value={String(opp.id)}>
                         {opp.name}
                       </SelectItem>
                     ))}
@@ -209,7 +237,7 @@ export function QuotesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {products.map((product) => (
-                      <SelectItem key={product.id} value={product.id}>
+                      <SelectItem key={product.id} value={String(product.id)}>
                         {product.name} {product.code ? `(${product.code})` : ""}
                       </SelectItem>
                     ))}
@@ -231,7 +259,7 @@ export function QuotesPage() {
                 <Input
                   type="number"
                   step="0.01"
-                  placeholder={selectedProduct?.referencePrice?.toString() || "0.00"}
+                  placeholder={selectedProduct?.price?.toString() || "0.00"}
                   value={form.unitPrice}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, unitPrice: e.target.value })}
                   required
@@ -244,6 +272,20 @@ export function QuotesPage() {
                   onChange={(e) => setForm({ ...form, currency: e.target.value })}
                   maxLength={8}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>状态</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(value) => { if (value) setForm({ ...form, status: value as Quote["status"] }) }}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {QUOTE_STATUSES.map((status) => (
+                      <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>折扣</Label>
@@ -296,7 +338,7 @@ export function QuotesPage() {
                 {editingId ? "更新报价" : "创建报价"}
               </Button>
               {editingId && (
-                <Button type="button" variant="outline" onClick={() => { setEditingId(null); setForm({ customerId: "", opportunityId: "", quoteNo: "", productId: "", quantity: "1", unitPrice: "", currency: "USD", discount: "0", freight: "0", taxRate: "13", validUntil: "", notes: "" }); }}>
+                <Button type="button" variant="outline" onClick={() => { setEditingId(null); setForm({ customerId: "", opportunityId: "", quoteNo: "", productId: "", quantity: "1", unitPrice: "", currency: "USD", status: "draft", discount: "0", freight: "0", taxRate: "13", validUntil: "", notes: "" }); }}>
                   取消编辑
                 </Button>
               )}
@@ -344,15 +386,15 @@ export function QuotesPage() {
               quotes.map((quote) => (
                 <TableRow key={quote.id}>
                   <TableCell className="font-mono text-sm">{quote.quoteNo || "-"}</TableCell>
-                  <TableCell>{quote.customerName || "-"}</TableCell>
-                  <TableCell>{quote.productName || "-"}</TableCell>
-                  <TableCell>{quote.quantity} {quote.unit}</TableCell>
+                  <TableCell>{quote.customer?.company || "-"}</TableCell>
+                  <TableCell>{quote.items.map((item) => item.productName).join("、") || "-"}</TableCell>
+                  <TableCell>{quote.items[0] ? `${quote.items[0].quantity} ${quote.items[0].unit || ""}` : "-"}</TableCell>
                   <TableCell>
-                    {quote.currency} {quote.total.toFixed(2)}
+                    {quote.currency} {Number(quote.total).toFixed(2)}
                   </TableCell>
                   <TableCell>
                     <Badge variant={quote.status === "accepted" ? "default" : "secondary"}>
-                      {quote.status}
+                      {QUOTE_STATUSES.find((status) => status.value === quote.status)?.label || quote.status}
                     </Badge>
                   </TableCell>
                   <TableCell>

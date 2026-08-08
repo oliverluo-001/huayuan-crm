@@ -23,7 +23,7 @@ export function ProductsPage() {
     name: "",
     category: "",
     unit: "pcs",
-    referencePrice: "",
+    price: "",
     currency: "USD",
     description: "",
   });
@@ -48,7 +48,7 @@ export function ProductsPage() {
       name: "",
       category: "",
       unit: "pcs",
-      referencePrice: "",
+      price: "",
       currency: "USD",
       description: "",
     });
@@ -57,10 +57,7 @@ export function ProductsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const productData = {
-      ...form,
-      referencePrice: form.referencePrice ? parseFloat(form.referencePrice) : undefined,
-    };
+    const productData = { ...form, price: form.price ? parseFloat(form.price) : undefined };
 
     if (editingId) {
       await updateProduct(editingId, productData);
@@ -77,7 +74,7 @@ export function ProductsPage() {
       name: product.name,
       category: product.category || "",
       unit: product.unit || "pcs",
-      referencePrice: product.referencePrice?.toString() || "",
+      price: product.price?.toString() || "",
       currency: product.currency || "USD",
       description: product.description || "",
     });
@@ -138,8 +135,8 @@ export function ProductsPage() {
                   type="number"
                   step="0.01"
                   placeholder="0.00"
-                  value={form.referencePrice}
-                  onChange={(e) => setForm({ ...form, referencePrice: e.target.value })}
+                  value={form.price}
+                  onChange={(e) => setForm({ ...form, price: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
@@ -221,8 +218,8 @@ export function ProductsPage() {
                   <TableCell>{product.category || "-"}</TableCell>
                   <TableCell>{product.unit || "pcs"}</TableCell>
                   <TableCell>
-                    {product.referencePrice
-                      ? `${product.currency || "USD"} ${product.referencePrice.toFixed(2)}`
+                    {product.price
+                      ? `${product.currency || "USD"} ${Number(product.price).toFixed(2)}`
                       : "-"}
                   </TableCell>
                   {canManage && <TableCell>

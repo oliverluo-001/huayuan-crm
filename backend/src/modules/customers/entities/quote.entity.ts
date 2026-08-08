@@ -9,6 +9,7 @@ import {
   OneToMany,
 } from 'typeorm';
 import { Customer } from '../../customers/entities/customer.entity';
+import { decimalNumberTransformer } from '../../../common/database/decimal-number.transformer';
 
 export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
 
@@ -35,16 +36,19 @@ export class Quote {
   @Column({ type: 'varchar', length: 10, default: 'USD' })
   currency: string;
 
-  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   subtotal: number;
 
-  @Column({ name: 'tax_rate', type: 'decimal', precision: 5, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
+  freight: number;
+
+  @Column({ name: 'tax_rate', type: 'decimal', precision: 5, scale: 2, default: 0, transformer: decimalNumberTransformer })
   taxRate: number;
 
-  @Column({ name: 'tax_amount', type: 'decimal', precision: 15, scale: 2, default: 0 })
+  @Column({ name: 'tax_amount', type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   taxAmount: number;
 
-  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   total: number;
 
   @Column({ name: 'valid_until', type: 'date', nullable: true })
@@ -90,25 +94,25 @@ export class QuoteItem {
   @Column({ type: 'text', nullable: true })
   description: string;
 
-  @Column({ type: 'decimal', precision: 10, scale: 2, default: 1 })
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 1, transformer: decimalNumberTransformer })
   quantity: number;
 
   @Column({ type: 'varchar', length: 20, default: '' })
   unit: string;
 
-  @Column({ name: 'unit_price', type: 'decimal', precision: 15, scale: 2, default: 0 })
+  @Column({ name: 'unit_price', type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   unitPrice: number;
 
-  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0, transformer: decimalNumberTransformer })
   discount: number;
 
-  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   subtotal: number;
 
   @Column({ name: 'sort_order', type: 'int', default: 0 })
   sortOrder: number;
 
-  @ManyToOne(() => Quote, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Quote, { onDelete: 'CASCADE', orphanedRowAction: 'delete' })
   @JoinColumn({ name: 'quote_id' })
   quote: Quote;
 }

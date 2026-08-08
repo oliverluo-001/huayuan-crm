@@ -53,15 +53,15 @@ export interface Customer {
   country?: string;
   timezone?: string;
   tags?: string[];
-  tier: "A" | "B" | "C" | "D";
-  journeyStage: "new" | "contacted" | "replied" | "qualified" | "opportunity" | "won" | "lost";
+  tier: "A" | "B" | "C" | "D" | "";
+  journeyStage: "new" | "contacted" | "replied" | "qualified" | "opportunity" | "won" | "lost" | "prospect" | "lead" | "proposal" | "negotiation" | "closed" | "";
   customerType?: string;
   product?: string;
   source?: string;
   ownerId?: string;
   ownerName?: string;
   notes?: string;
-  emailStatus?: "verified" | "invalid" | "unknown";
+  emailStatus?: "valid" | "invalid" | "unknown";
   emailFailureReason?: string;
   emailFailedAt?: string;
   createdAt: string;
@@ -69,7 +69,7 @@ export interface Customer {
   // Extended fields from backend
   nextTodoTitle?: string;
   nextTodoAt?: string;
-  health?: "healthy" | "attention" | "overdue";
+  health?: "good" | "warning" | "critical" | "";
   openOpportunityCount?: number;
   openOpportunityValue?: number;
   lastActivityAt?: string;
@@ -87,7 +87,9 @@ export interface Customer360 {
   activities: Activity[];
   todos: Todo[];
   opportunities: Opportunity[];
-  sendLogs: SendLog[];
+  quotes: Quote[];
+  samples: Sample[];
+  sendLogs?: SendLog[];
 }
 
 export interface Contact {
@@ -105,9 +107,8 @@ export interface Activity {
   id: string;
   customerId: string;
   type: "email" | "call" | "meeting" | "note" | "other";
-  summary: string;
+  subject: string;
   content?: string;
-  occurredAt: string;
   createdAt: string;
 }
 
@@ -116,7 +117,7 @@ export interface Todo {
   customerId: string;
   customerName?: string;
   title: string;
-  status: "open" | "completed";
+  status: "open" | "done";
   dueAt?: string;
   createdAt: string;
 }
@@ -140,31 +141,41 @@ export interface Opportunity {
 // Product types
 export interface Product {
   id: string;
+  productId?: string;
   code?: string;
   name: string;
   category?: string;
   unit?: string;
-  referencePrice?: number;
+  price?: number;
   currency?: string;
   description?: string;
   createdAt: string;
   updatedAt: string;
 }
 
-// Quote types
+// Quote types (mirrors the backend Quote + QuoteItem entities)
+export interface QuoteItem {
+  id?: string;
+  productId?: string;
+  productName: string;
+  productCode?: string;
+  description?: string;
+  quantity: number;
+  unit?: string;
+  unitPrice: number;
+  discount: number;
+  subtotal: number;
+}
+
 export interface Quote {
   id: string;
+  quoteId?: string;
   quoteNo?: string;
   customerId: string;
-  customerName?: string;
+  customer?: { id: string; customerId?: string; company: string };
   opportunityId?: string;
-  productId: string;
-  productName?: string;
-  quantity: number;
-  unit: string;
-  unitPrice: number;
+  items: QuoteItem[];
   currency: string;
-  discount: number;
   freight: number;
   taxRate: number;
   subtotal: number;
@@ -172,6 +183,7 @@ export interface Quote {
   total: number;
   validUntil?: string;
   notes?: string;
+  terms?: string;
   status: "draft" | "sent" | "accepted" | "rejected" | "expired";
   createdAt: string;
   updatedAt: string;
@@ -180,21 +192,65 @@ export interface Quote {
 // Sample types
 export interface Sample {
   id: string;
+  sampleId?: string;
   customerId: string;
-  customerName?: string;
+  customer?: { id: string; customerId?: string; company: string };
   opportunityId?: string;
   productId: string;
   productName?: string;
   quantity: number;
   unit: string;
-  status: "requested" | "preparing" | "shipped" | "received" | "approved" | "rejected";
-  requestedAt?: string;
-  shippedAt?: string;
+  status: "pending" | "sent" | "delivered" | "returned";
+  sentAt?: string;
+  deliveredAt?: string;
   trackingNo?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
 }
+
+export interface QuoteItemInput {
+  productId?: string;
+  productName: string;
+  productCode?: string;
+  description?: string;
+  quantity?: number;
+  unit?: string;
+  unitPrice?: number;
+  discount?: number;
+}
+
+export interface CreateQuoteInput {
+  customerId: number;
+  opportunityId?: string;
+  quoteNo?: string;
+  status?: Quote["status"];
+  currency?: string;
+  freight?: number;
+  taxRate?: number;
+  validUntil?: string;
+  notes?: string;
+  terms?: string;
+  items: QuoteItemInput[];
+}
+
+export type UpdateQuoteInput = Partial<CreateQuoteInput>;
+
+export interface CreateSampleInput {
+  customerId: number;
+  opportunityId?: string;
+  productId?: string;
+  productName: string;
+  quantity?: number;
+  unit?: string;
+  status?: Sample["status"];
+  sentAt?: string;
+  deliveredAt?: string;
+  trackingNo?: string;
+  notes?: string;
+}
+
+export type UpdateSampleInput = Partial<CreateSampleInput>;
 
 // Email template types
 export interface EmailTemplate {

@@ -70,6 +70,7 @@ async function main() {
     }
     await migrateEmailExecution(connection);
     await migrateAuditMetadata(connection);
+    await migrateCrmContracts(connection);
     await connection.beginTransaction();
     try {
       await ensureInitialAdmin(connection);
@@ -92,6 +93,13 @@ async function migrateAuditMetadata(connection: Connection) {
   await addColumnToTable(connection, 'audit_logs', 'ip', "VARCHAR(64) NOT NULL DEFAULT ''");
   await addColumnToTable(connection, 'audit_logs', 'status', "VARCHAR(20) NOT NULL DEFAULT 'success'");
   await addColumnToTable(connection, 'audit_logs', 'duration_ms', 'INT NOT NULL DEFAULT 0');
+  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
+}
+
+async function migrateCrmContracts(connection: Connection) {
+  const id = '20260808_crm_contracts';
+  if (!(await tableExists(connection, 'quotes'))) return;
+  await addColumnToTable(connection, 'quotes', 'freight', 'DECIMAL(15,2) NOT NULL DEFAULT 0');
   await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
 }
 

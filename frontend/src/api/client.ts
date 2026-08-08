@@ -11,7 +11,11 @@ import type {
   Opportunity,
   Product,
   Quote,
+  CreateQuoteInput,
+  UpdateQuoteInput,
   Sample,
+  CreateSampleInput,
+  UpdateSampleInput,
   EmailTemplate,
   EmailTask,
   SendLog,
@@ -48,7 +52,11 @@ export type {
   Opportunity,
   Product,
   Quote,
+  CreateQuoteInput,
+  UpdateQuoteInput,
   Sample,
+  CreateSampleInput,
+  UpdateSampleInput,
   EmailTemplate,
   EmailTask,
   EmailRecipient,
@@ -369,11 +377,11 @@ export async function getQuotes(): Promise<Quote[]> {
   return result.quotes || [];
 }
 
-export async function createQuote(data: Partial<Quote>): Promise<Quote> {
+export async function createQuote(data: CreateQuoteInput): Promise<Quote> {
   return api<Quote>("/api/quotes", { method: "POST", body: data });
 }
 
-export async function updateQuote(id: string, data: Partial<Quote>): Promise<Quote> {
+export async function updateQuote(id: string, data: UpdateQuoteInput): Promise<Quote> {
   return api<Quote>(`/api/quotes/${encodeURIComponent(id)}`, { method: "PUT", body: data });
 }
 
@@ -387,11 +395,11 @@ export async function getSamples(): Promise<Sample[]> {
   return result.samples || [];
 }
 
-export async function createSample(data: Partial<Sample>): Promise<Sample> {
+export async function createSample(data: CreateSampleInput): Promise<Sample> {
   return api<Sample>("/api/samples", { method: "POST", body: data });
 }
 
-export async function updateSample(id: string, data: Partial<Sample>): Promise<Sample> {
+export async function updateSample(id: string, data: UpdateSampleInput): Promise<Sample> {
   return api<Sample>(`/api/samples/${encodeURIComponent(id)}`, { method: "PUT", body: data });
 }
 

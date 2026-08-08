@@ -611,7 +611,7 @@ export class CustomersService {
     if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
     return this.quoteRepository.find({
       where,
-      relations: ['items'],
+      relations: ['customer', 'items'],
       order: { updatedAt: 'DESC' },
     });
   }
@@ -619,7 +619,7 @@ export class CustomersService {
   async findQuote(id: number) {
     const quote = await this.quoteRepository.findOne({
       where: { id },
-      relations: ['items'],
+      relations: ['customer', 'items'],
     });
     if (!quote) throw new NotFoundException('报价不存在');
     return quote;
@@ -631,11 +631,14 @@ export class CustomersService {
       throw new BadRequestException('请至少添加一个报价产品');
     }
 
+    const { items, subtotal: _subtotal, taxAmount: _taxAmount, total: _total, ...quoteFields } = createQuoteDto;
+    const calculated = this.calculateQuote(items, quoteFields.freight, quoteFields.taxRate);
     const quote = this.quoteRepository.create({
-      ...createQuoteDto,
+      ...quoteFields,
+      ...calculated,
       quoteId: this.generateId('quote'),
       quoteNo: createQuoteDto.quoteNo || (await this.generateQuoteNo()),
-      items: createQuoteDto.items as any,
+      items: calculated.items as any,
     });
 
     return this.quoteRepository.save(quote);
@@ -646,8 +649,43 @@ export class CustomersService {
     if (updateQuoteDto.items && updateQuoteDto.items.length === 0) {
       throw new BadRequestException('请至少添加一个报价产品');
     }
-    Object.assign(quote, updateQuoteDto);
+    if (updateQuoteDto.customerId && updateQuoteDto.customerId !== quote.customerId) {
+      await this.findOne(updateQuoteDto.customerId);
+    }
+    const { items, ...quoteFields } = updateQuoteDto;
+    Object.assign(quote, quoteFields);
+    const sourceItems = items
+      ? items.map((item, index) => ({ ...quote.items[index], ...item }))
+      : quote.items;
+    const calculated = this.calculateQuote(sourceItems, quote.freight, quote.taxRate);
+    Object.assign(quote, calculated);
     return this.quoteRepository.save(quote);
+  }
+
+  private calculateQuote(items: CreateQuoteDto['items'], freight = 0, taxRate = 0) {
+    const calculatedItems = items.map((item) => {
+      const quantity = Number(item.quantity ?? 1);
+      const unitPrice = Number(item.unitPrice ?? 0);
+      const discount = Number(item.discount ?? 0);
+      const subtotal = this.roundMoney(quantity * unitPrice * (1 - discount / 100));
+      return { ...item, quantity, unitPrice, discount, subtotal };
+    });
+    const subtotal = this.roundMoney(calculatedItems.reduce((sum, item) => sum + item.subtotal, 0));
+    const normalizedFreight = this.roundMoney(Number(freight || 0));
+    const normalizedTaxRate = Number(taxRate || 0);
+    const taxAmount = this.roundMoney(subtotal * normalizedTaxRate / 100);
+    return {
+      items: calculatedItems,
+      subtotal,
+      freight: normalizedFreight,
+      taxRate: normalizedTaxRate,
+      taxAmount,
+      total: this.roundMoney(subtotal + normalizedFreight + taxAmount),
+    };
+  }
+
+  private roundMoney(value: number) {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
   }
 
   async deleteQuote(id: number) {
@@ -674,6 +712,7 @@ export class CustomersService {
     if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
     return this.sampleRepository.find({
       where,
+      relations: ['customer'],
       order: { updatedAt: 'DESC' },
     });
   }

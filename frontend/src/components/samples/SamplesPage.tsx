@@ -27,12 +27,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
 
 const SAMPLE_STATUSES = [
-  { value: "requested", label: "待申请" },
-  { value: "preparing", label: "备样中" },
-  { value: "shipped", label: "已寄送" },
-  { value: "received", label: "已签收" },
-  { value: "approved", label: "样品认可" },
-  { value: "rejected", label: "样品不通过" },
+  { value: "pending", label: "待寄送" },
+  { value: "sent", label: "已寄送" },
+  { value: "delivered", label: "已签收" },
+  { value: "returned", label: "已退回" },
 ] as const;
 
 export function SamplesPage() {
@@ -49,9 +47,9 @@ export function SamplesPage() {
     productId: "",
     quantity: "1",
     unit: "pcs",
-    status: "requested" as Sample["status"],
-    requestedAt: "",
-    shippedAt: "",
+    status: "pending" as Sample["status"],
+    sentAt: "",
+    deliveredAt: "",
     trackingNo: "",
     notes: "",
   });
@@ -81,15 +79,19 @@ export function SamplesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const product = products.find((item) => String(item.id) === form.productId);
+      if (!product) return;
+      const opportunity = opportunities.find((item) => String(item.id) === form.opportunityId);
       await createSample({
-        customerId: form.customerId,
-        opportunityId: form.opportunityId || undefined,
-        productId: form.productId,
+        customerId: Number(form.customerId),
+        opportunityId: opportunity?.opportunityId || (opportunity ? String(opportunity.id) : undefined),
+        productId: product.productId || String(product.id),
+        productName: product.name,
         quantity: parseFloat(form.quantity),
         unit: form.unit,
         status: form.status,
-        requestedAt: form.requestedAt || undefined,
-        shippedAt: form.shippedAt || undefined,
+        sentAt: form.sentAt || undefined,
+        deliveredAt: form.deliveredAt || undefined,
         trackingNo: form.trackingNo || undefined,
         notes: form.notes || undefined,
       });
@@ -100,9 +102,9 @@ export function SamplesPage() {
         productId: "",
         quantity: "1",
         unit: "pcs",
-        status: "requested",
-        requestedAt: "",
-        shippedAt: "",
+        status: "pending",
+        sentAt: "",
+        deliveredAt: "",
         trackingNo: "",
         notes: "",
       });
@@ -135,7 +137,7 @@ export function SamplesPage() {
 
   // Filter opportunities for selected customer
   const filteredOpportunities = form.customerId
-    ? opportunities.filter((o) => o.customerId === form.customerId)
+    ? opportunities.filter((o) => String(o.customerId) === form.customerId)
     : opportunities;
 
   return (
@@ -160,7 +162,7 @@ export function SamplesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {customers.map((customer) => (
-                      <SelectItem key={customer.id} value={customer.id}>
+                      <SelectItem key={customer.id} value={String(customer.id)}>
                         {customer.company}
                       </SelectItem>
                     ))}
@@ -170,16 +172,16 @@ export function SamplesPage() {
               <div className="space-y-2">
                 <Label>关联商机</Label>
                 <Select
-                  value={form.opportunityId}
-                  onValueChange={(v) => { if (v !== null) setForm({ ...form, opportunityId: v }) }}
+                  value={form.opportunityId || "none"}
+                  onValueChange={(v) => { if (v) setForm({ ...form, opportunityId: v === "none" ? "" : v }) }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="不关联商机" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">不关联商机</SelectItem>
+                    <SelectItem value="none">不关联商机</SelectItem>
                     {filteredOpportunities.map((opp) => (
-                      <SelectItem key={opp.id} value={opp.id}>
+                      <SelectItem key={opp.id} value={String(opp.id)}>
                         {opp.name}
                       </SelectItem>
                     ))}
@@ -198,7 +200,7 @@ export function SamplesPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {products.map((product) => (
-                      <SelectItem key={product.id} value={product.id}>
+                      <SelectItem key={product.id} value={String(product.id)}>
                         {product.name} {product.code ? `(${product.code})` : ""}
                       </SelectItem>
                     ))}
@@ -241,19 +243,19 @@ export function SamplesPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>申请时间</Label>
-                <Input
-                  type="date"
-                  value={form.requestedAt}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, requestedAt: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
                 <Label>寄送时间</Label>
                 <Input
                   type="date"
-                  value={form.shippedAt}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, shippedAt: e.target.value })}
+                  value={form.sentAt}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, sentAt: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>签收时间</Label>
+                <Input
+                  type="date"
+                  value={form.deliveredAt}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, deliveredAt: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
@@ -296,7 +298,7 @@ export function SamplesPage() {
               <TableHead>产品</TableHead>
               <TableHead>数量</TableHead>
               <TableHead>状态</TableHead>
-              <TableHead>申请时间</TableHead>
+              <TableHead>寄送时间</TableHead>
               <TableHead>快递单号</TableHead>
               {canManage && <TableHead className="w-16">操作</TableHead>}
             </TableRow>
@@ -319,7 +321,7 @@ export function SamplesPage() {
             ) : (
               samples.map((sample) => (
                 <TableRow key={sample.id}>
-                  <TableCell>{sample.customerName || "-"}</TableCell>
+                  <TableCell>{sample.customer?.company || "-"}</TableCell>
                   <TableCell>{sample.productName || "-"}</TableCell>
                   <TableCell>{sample.quantity} {sample.unit}</TableCell>
                   <TableCell>
@@ -329,8 +331,8 @@ export function SamplesPage() {
                     >
                       <SelectTrigger className="h-7 w-auto">
                         <Badge variant={
-                          sample.status === "approved" ? "default" :
-                          sample.status === "rejected" ? "destructive" : "secondary"
+                          sample.status === "delivered" ? "default" :
+                          sample.status === "returned" ? "destructive" : "secondary"
                         }>
                           {SAMPLE_STATUSES.find((s) => s.value === sample.status)?.label || sample.status}
                         </Badge>
@@ -344,14 +346,14 @@ export function SamplesPage() {
                       </SelectContent>
                     </Select> : (
                       <Badge variant={
-                        sample.status === "approved" ? "default" :
-                        sample.status === "rejected" ? "destructive" : "secondary"
+                        sample.status === "delivered" ? "default" :
+                        sample.status === "returned" ? "destructive" : "secondary"
                       }>
                         {SAMPLE_STATUSES.find((s) => s.value === sample.status)?.label || sample.status}
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell>{sample.requestedAt ? new Date(sample.requestedAt).toLocaleDateString() : "-"}</TableCell>
+                  <TableCell>{sample.sentAt ? new Date(sample.sentAt).toLocaleDateString() : "-"}</TableCell>
                   <TableCell className="font-mono text-sm">{sample.trackingNo || "-"}</TableCell>
                   {canManage && <TableCell>
                     <Button

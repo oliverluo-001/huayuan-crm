@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { decimalNumberTransformer } from '../../../common/database/decimal-number.transformer';
 
 @Entity('products')
 export class Product {
@@ -26,7 +27,7 @@ export class Product {
   @Column({ type: 'varchar', length: 20, default: '' })
   unit: string;
 
-  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   price: number;
 
   @Column({ type: 'varchar', length: 10, default: 'USD' })
