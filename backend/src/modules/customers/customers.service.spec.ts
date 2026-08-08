@@ -161,3 +161,119 @@ describe('CustomersService quote contracts', () => {
     });
   });
 });
+
+describe('CustomersService opportunity lifecycle sync', () => {
+  let customer: any;
+  let opportunities: any[];
+  let nextId: number;
+  let clock: number;
+
+  const customerRepository = {
+    findOne: jest.fn(async () => customer),
+    save: jest.fn(async (value) => value),
+  };
+  const opportunityRepository = {
+    find: jest.fn(async () => [...opportunities].sort((a, b) =>
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || b.id - a.id
+    )),
+    findOne: jest.fn(async ({ where }: any) => opportunities.find((item) => item.id === where.id) || null),
+    create: jest.fn((value) => ({ id: nextId++, amount: 0, ...value, updatedAt: new Date(clock++) })),
+    save: jest.fn(async (value) => {
+      value.updatedAt = new Date(clock++);
+      const index = opportunities.findIndex((item) => item.id === value.id);
+      if (index >= 0) opportunities[index] = value;
+      else opportunities.push(value);
+      return value;
+    }),
+    delete: jest.fn(async (id) => {
+      const before = opportunities.length;
+      opportunities = opportunities.filter((item) => item.id !== id);
+      return { affected: before - opportunities.length };
+    }),
+  };
+  const service = new CustomersService(
+    customerRepository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    opportunityRepository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    nextId = 1;
+    clock = Date.parse('2026-08-08T00:00:00Z');
+    opportunities = [];
+    customer = {
+      id: 1,
+      customerId: 'cus_1',
+      company: 'Buyer Co',
+      journeyStage: 'qualified',
+      openOpportunityCount: 0,
+      openOpportunityValue: 0,
+      tags: [],
+    };
+  });
+
+  it('moves the customer into opportunity stage and refreshes metrics when an opportunity is created', async () => {
+    await service.createOpportunity({ customerId: 1, name: 'First order', amount: 2500 });
+
+    expect(customer).toMatchObject({
+      journeyStage: 'opportunity',
+      openOpportunityCount: 1,
+      openOpportunityValue: 2500,
+    });
+  });
+
+  it('updates customer 360 when the current opportunity stage changes', async () => {
+    const opportunity = await service.createOpportunity({ customerId: 1, name: 'First order', amount: 2500 });
+    await service.updateOpportunity(opportunity.id, { stage: 'negotiation' });
+
+    expect(opportunity).toMatchObject({ stage: 'negotiation', probability: 80 });
+    expect(customer.journeyStage).toBe('negotiation');
+  });
+
+  it('updates the current opportunity when the customer journey stage changes', async () => {
+    const opportunity = await service.createOpportunity({ customerId: 1, name: 'First order' });
+    await service.update(1, { journeyStage: 'proposal' });
+
+    expect(opportunity).toMatchObject({ stage: 'proposal', probability: 60 });
+    expect(customer.journeyStage).toBe('proposal');
+  });
+
+  it('creates a default opportunity when a customer is converted to opportunity stage', async () => {
+    customer.journeyStage = 'replied';
+    await service.update(1, { journeyStage: 'opportunity' });
+
+    expect(opportunities).toHaveLength(1);
+    expect(opportunities[0]).toMatchObject({
+      customerId: 1,
+      name: 'Buyer Co - 商机',
+      stage: 'prospecting',
+      probability: 10,
+    });
+    expect(customer.openOpportunityCount).toBe(1);
+  });
+
+  it('prevents an early customer stage from silently diverging from an existing opportunity', async () => {
+    await service.createOpportunity({ customerId: 1, name: 'First order' });
+    await expect(service.update(1, { journeyStage: 'contacted' })).rejects.toThrow(
+      '该客户已有商机，请在商机看板调整阶段',
+    );
+  });
+
+  it('clears opportunity metrics and returns to qualified when the final opportunity is deleted', async () => {
+    const opportunity = await service.createOpportunity({ customerId: 1, name: 'First order', amount: 2500 });
+    await service.deleteOpportunity(opportunity.id);
+
+    expect(customer).toMatchObject({
+      journeyStage: 'qualified',
+      openOpportunityCount: 0,
+      openOpportunityValue: 0,
+    });
+  });
+});

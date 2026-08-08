@@ -53,6 +53,7 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
+import { CUSTOMER_JOURNEY_STAGES as JOURNEY_STAGES, OPPORTUNITY_STAGES } from "@/contracts/crm-stages";
 
 const CUSTOMER_PAGE_SIZE = 50;
 const emptyCustomerFilters = () => ({
@@ -65,16 +66,6 @@ const emptyCustomerFilters = () => ({
   health: "",
   ownerId: "",
 });
-
-const JOURNEY_STAGES = [
-  { value: "new", label: "新客户" },
-  { value: "contacted", label: "已联系" },
-  { value: "replied", label: "已回复" },
-  { value: "qualified", label: "已确认需求" },
-  { value: "opportunity", label: "商机推进" },
-  { value: "won", label: "已成交" },
-  { value: "lost", label: "已流失" },
-];
 
 const TIERS = [
   { value: "A", label: "A - 战略客户" },
@@ -701,6 +692,8 @@ export function CustomerTable(_props: CustomerTableProps) {
                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                       customer.journeyStage === "won" ? "bg-green-100 text-green-800" :
                       customer.journeyStage === "lost" ? "bg-red-100 text-red-800" :
+                      customer.journeyStage === "negotiation" ? "bg-purple-100 text-purple-800" :
+                      customer.journeyStage === "proposal" ? "bg-yellow-100 text-yellow-800" :
                       customer.journeyStage === "opportunity" ? "bg-purple-100 text-purple-800" :
                       customer.journeyStage === "qualified" ? "bg-blue-100 text-blue-800" :
                       "bg-gray-100 text-gray-800"
@@ -1123,7 +1116,7 @@ function CustomerEditDialog({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>客户阶段</Label>
+              <Label>客户阶段（与当前商机联动）</Label>
               <Select value={form.journeyStage} onValueChange={(v) => setForm({ ...form, journeyStage: v as Customer["journeyStage"] })}>
                 <SelectTrigger>
                   <SelectValue />
@@ -1136,6 +1129,9 @@ function CustomerEditDialog({
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                进入“商机推进”或更后阶段时，会同步当前商机；已有多个商机时只更新最近操作的一条。
+              </p>
             </div>
             <div className="space-y-2 md:col-span-2">
               <Label>客户标签</Label>
@@ -1234,7 +1230,7 @@ function CustomerDetailDialog({
                       <Badge variant="outline">{TIERS.find((t) => t.value === data.customer.tier)?.label}</Badge>
                     </div>
                     <div>
-                      <p className="text-sm text-muted-foreground">客户阶段</p>
+                      <p className="text-sm text-muted-foreground">客户阶段（当前商机汇总）</p>
                       <Badge variant="secondary">
                         {JOURNEY_STAGES.find((s) => s.value === data.customer.journeyStage)?.label}
                       </Badge>
@@ -1267,15 +1263,20 @@ function CustomerDetailDialog({
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      {data.opportunities.map((opp) => (
+                      {data.opportunities.map((opp, index) => (
                         <div key={opp.id} className="flex items-center justify-between p-2 rounded-lg border">
                           <div>
-                            <p className="font-medium">{opp.name}</p>
+                            <p className="font-medium flex items-center gap-2">
+                              {opp.name}
+                              {index === 0 && <Badge variant="secondary">当前</Badge>}
+                            </p>
                             <p className="text-sm text-muted-foreground">
-                              {opp.stage} · {opp.amount ? `USD ${opp.amount}` : "-"}
+                              {OPPORTUNITY_STAGES.find((stage) => stage.value === opp.stage)?.label || opp.stage} · {opp.amount ? `USD ${opp.amount}` : "-"}
                             </p>
                           </div>
-                          <Badge variant="outline">{opp.stage}</Badge>
+                          <Badge variant="outline">
+                            {OPPORTUNITY_STAGES.find((stage) => stage.value === opp.stage)?.label || opp.stage}
+                          </Badge>
                         </div>
                       ))}
                     </div>

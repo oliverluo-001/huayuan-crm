@@ -71,6 +71,7 @@ async function main() {
     await migrateEmailExecution(connection);
     await migrateAuditMetadata(connection);
     await migrateCrmContracts(connection);
+    await migrateOpportunityLifecycle(connection);
     await connection.beginTransaction();
     try {
       await ensureInitialAdmin(connection);
@@ -100,6 +101,50 @@ async function migrateCrmContracts(connection: Connection) {
   const id = '20260808_crm_contracts';
   if (!(await tableExists(connection, 'quotes'))) return;
   await addColumnToTable(connection, 'quotes', 'freight', 'DECIMAL(15,2) NOT NULL DEFAULT 0');
+  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
+}
+
+async function migrateOpportunityLifecycle(connection: Connection) {
+  const id = '20260808_opportunity_lifecycle_sync';
+  if (!(await tableExists(connection, 'customers')) || !(await tableExists(connection, 'opportunities'))) return;
+
+  await connection.query(`
+    UPDATE customers c
+    LEFT JOIN (
+      SELECT customer_id,
+             SUM(CASE WHEN stage NOT IN ('won', 'lost') THEN 1 ELSE 0 END) AS open_count,
+             SUM(CASE WHEN stage NOT IN ('won', 'lost') THEN amount ELSE 0 END) AS open_value
+      FROM opportunities
+      GROUP BY customer_id
+    ) summary ON summary.customer_id = c.id
+    SET c.open_opportunity_count = COALESCE(summary.open_count, 0),
+        c.open_opportunity_value = COALESCE(summary.open_value, 0)
+  `);
+
+  await connection.query(`
+    UPDATE customers c
+    JOIN opportunities current_opportunity ON current_opportunity.customer_id = c.id
+    LEFT JOIN opportunities newer_opportunity
+      ON newer_opportunity.customer_id = current_opportunity.customer_id
+     AND (
+       newer_opportunity.updated_at > current_opportunity.updated_at
+       OR (
+         newer_opportunity.updated_at = current_opportunity.updated_at
+         AND newer_opportunity.id > current_opportunity.id
+       )
+     )
+    SET c.journey_stage = CASE current_opportunity.stage
+      WHEN 'prospecting' THEN 'opportunity'
+      WHEN 'qualification' THEN 'qualified'
+      WHEN 'proposal' THEN 'proposal'
+      WHEN 'negotiation' THEN 'negotiation'
+      WHEN 'won' THEN 'won'
+      WHEN 'lost' THEN 'lost'
+      ELSE c.journey_stage
+    END
+    WHERE newer_opportunity.id IS NULL
+  `);
+
   await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
 }
 

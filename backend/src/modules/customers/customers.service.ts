@@ -180,7 +180,7 @@ export class CustomersService {
 
   async markEmailSent(customerId: number, subject: string, recipientEmail: string) {
     const customer = await this.findOne(customerId);
-    if (!['replied', 'opportunity', 'won', 'lost', 'closed'].includes(customer.journeyStage)) {
+    if (!['qualified', 'opportunity', 'proposal', 'negotiation', 'won', 'lost', 'closed'].includes(customer.journeyStage)) {
       customer.journeyStage = 'contacted';
     }
     customer.lastActivityAt = new Date();
@@ -235,6 +235,10 @@ export class CustomersService {
       rest.emailStatus = 'unknown';
       (rest as any).emailFailureReason = '';
       (rest as any).emailFailedAt = null;
+    }
+
+    if (rest.journeyStage !== undefined && rest.journeyStage !== customer.journeyStage) {
+      await this.syncCurrentOpportunityFromCustomer(customer, rest.journeyStage);
     }
 
     Object.assign(customer, rest);
@@ -582,24 +586,137 @@ export class CustomersService {
 
   async createOpportunity(createOpportunityDto: CreateOpportunityDto) {
     await this.findOne(createOpportunityDto.customerId);
+    const stage = createOpportunityDto.stage || 'prospecting';
     const opportunity = this.opportunityRepository.create({
       ...createOpportunityDto,
+      stage,
+      probability: createOpportunityDto.probability ?? this.defaultProbability(stage),
       opportunityId: this.generateId('opp'),
     });
-    return this.opportunityRepository.save(opportunity);
+    const saved = await this.opportunityRepository.save(opportunity);
+    await this.refreshCustomerOpportunityState(saved.customerId, saved);
+    return saved;
   }
 
   async updateOpportunity(id: number, updateOpportunityDto: UpdateOpportunityDto) {
     const opportunity = await this.opportunityRepository.findOne({ where: { id } });
     if (!opportunity) throw new NotFoundException('商机不存在');
+    const previousCustomerId = opportunity.customerId;
     Object.assign(opportunity, updateOpportunityDto);
-    return this.opportunityRepository.save(opportunity);
+    if (updateOpportunityDto.stage && updateOpportunityDto.probability === undefined) {
+      opportunity.probability = this.defaultProbability(updateOpportunityDto.stage);
+    }
+    const saved = await this.opportunityRepository.save(opportunity);
+    await this.refreshCustomerOpportunityState(saved.customerId, saved);
+    if (previousCustomerId !== saved.customerId) {
+      await this.refreshCustomerOpportunityState(previousCustomerId);
+    }
+    return saved;
   }
 
   async deleteOpportunity(id: number) {
+    const opportunity = await this.opportunityRepository.findOne({ where: { id } });
+    if (!opportunity) throw new NotFoundException('商机不存在');
     const result = await this.opportunityRepository.delete(id);
     if (result.affected === 0) throw new NotFoundException('商机不存在');
+    await this.refreshCustomerOpportunityState(opportunity.customerId);
     return { deleted: true };
+  }
+
+  private async syncCurrentOpportunityFromCustomer(customer: Customer, journeyStage: Customer['journeyStage']) {
+    const targetStage = this.opportunityStageFromJourney(journeyStage);
+    const opportunities = await this.listCustomerOpportunities(customer.id);
+    const current = opportunities[0];
+
+    if (!targetStage) {
+      if (current) {
+        throw new BadRequestException('该客户已有商机，请在商机看板调整阶段，或先删除不再需要的商机');
+      }
+      customer.openOpportunityCount = 0;
+      customer.openOpportunityValue = 0;
+      return;
+    }
+
+    if (!current) {
+      // Qualified customers do not become opportunities until the user explicitly
+      // selects "opportunity" or a later sales stage.
+      if (journeyStage === 'qualified') {
+        customer.openOpportunityCount = 0;
+        customer.openOpportunityValue = 0;
+        return;
+      }
+      const opportunity = this.opportunityRepository.create({
+        customerId: customer.id,
+        opportunityId: this.generateId('opp'),
+        name: `${customer.company || customer.contact || '客户'} - 商机`,
+        stage: targetStage,
+        probability: this.defaultProbability(targetStage),
+      });
+      opportunities.unshift(await this.opportunityRepository.save(opportunity));
+    } else {
+      current.stage = targetStage;
+      current.probability = this.defaultProbability(targetStage);
+      await this.opportunityRepository.save(current);
+    }
+
+    this.assignOpportunityMetrics(customer, opportunities);
+  }
+
+  private async refreshCustomerOpportunityState(customerId: number, preferred?: Opportunity) {
+    const customer = await this.customerRepository.findOne({ where: { id: customerId } });
+    if (!customer) return;
+    const opportunities = await this.listCustomerOpportunities(customerId);
+    const current = preferred
+      ? opportunities.find((item) => item.id === preferred.id) || preferred
+      : opportunities[0];
+    this.assignOpportunityMetrics(customer, opportunities);
+    if (current) {
+      customer.journeyStage = this.journeyStageFromOpportunity(current.stage);
+    } else if (this.opportunityStageFromJourney(customer.journeyStage)) {
+      customer.journeyStage = 'qualified';
+    }
+    await this.customerRepository.save(customer);
+  }
+
+  private listCustomerOpportunities(customerId: number) {
+    return this.opportunityRepository.find({
+      where: { customerId },
+      order: { updatedAt: 'DESC', id: 'DESC' },
+    });
+  }
+
+  private assignOpportunityMetrics(customer: Customer, opportunities: Opportunity[]) {
+    const open = opportunities.filter((item) => !['won', 'lost'].includes(item.stage));
+    customer.openOpportunityCount = open.length;
+    customer.openOpportunityValue = open.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  }
+
+  private journeyStageFromOpportunity(stage: Opportunity['stage']): Customer['journeyStage'] {
+    const stages: Record<Opportunity['stage'], Customer['journeyStage']> = {
+      prospecting: 'opportunity',
+      qualification: 'qualified',
+      proposal: 'proposal',
+      negotiation: 'negotiation',
+      won: 'won',
+      lost: 'lost',
+    };
+    return stages[stage];
+  }
+
+  private opportunityStageFromJourney(stage: Customer['journeyStage']): Opportunity['stage'] | undefined {
+    const stages: Partial<Record<Customer['journeyStage'], Opportunity['stage']>> = {
+      qualified: 'qualification',
+      opportunity: 'prospecting',
+      proposal: 'proposal',
+      negotiation: 'negotiation',
+      won: 'won',
+      lost: 'lost',
+    };
+    return stages[stage];
+  }
+
+  private defaultProbability(stage: Opportunity['stage']) {
+    return { prospecting: 10, qualification: 30, proposal: 60, negotiation: 80, won: 100, lost: 0 }[stage];
   }
 
   // ==================== Quotes ====================

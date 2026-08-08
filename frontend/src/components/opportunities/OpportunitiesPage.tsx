@@ -6,15 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { getOpportunities, updateOpportunity, type Opportunity } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
-
-const STAGES = [
-  { value: "prospecting", label: "初步接洽", color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200" },
-  { value: "qualification", label: "需求确认", color: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200" },
-  { value: "proposal", label: "方案报价", color: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" },
-  { value: "negotiation", label: "商务谈判", color: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200" },
-  { value: "won", label: "已成交", color: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" },
-  { value: "lost", label: "已流失", color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200" },
-];
+import { OPPORTUNITY_STAGES as STAGES } from "@/contracts/crm-stages";
 
 export function OpportunitiesPage() {
   const { role } = useAuth();
@@ -50,7 +42,7 @@ export function OpportunitiesPage() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
           {[...Array(5)].map((_, i) => (
             <Card key={i}>
               <CardHeader>
@@ -78,7 +70,7 @@ export function OpportunitiesPage() {
       </div>
 
       {/* Pipeline Board */}
-      <div className="grid gap-4 md:grid-cols-5 overflow-x-auto">
+      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6 overflow-x-auto">
         {opportunitiesByStage.map((stage) => (
           <Card key={stage.value} className="min-w-[200px]">
             <CardHeader className="pb-3">
