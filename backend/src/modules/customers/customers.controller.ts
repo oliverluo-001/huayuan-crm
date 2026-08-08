@@ -58,14 +58,6 @@ export class CustomersController {
     return this.customersService.findAll(scoped);
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string, @CurrentUser() user: RequestUser) {
-    return this.customersService.assertCustomerOwner(
-      +id,
-      user.role === 'sales' ? String(user.sub) : undefined,
-    );
-  }
-
   @Post()
   @Roles('admin', 'sales')
   create(@Body() createCustomerDto: CreateCustomerDto, @CurrentUser() user: RequestUser) {
@@ -160,6 +152,14 @@ export class CustomersController {
   @Get('ids')
   findAllIds(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
     return this.customersService.findAllIds({ ...query, ownerId: this.salesOwnerId(user) });
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.customersService.assertCustomerOwner(
+      +id,
+      user.role === 'sales' ? String(user.sub) : undefined,
+    );
   }
 
   @Post('delete-all')

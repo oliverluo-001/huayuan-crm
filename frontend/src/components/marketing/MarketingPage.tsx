@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -367,6 +367,14 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
     successfulSendCount: "0",
   });
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
+  const [recipientFilters, setRecipientFilters] = useState({
+    q: "",
+    region: "",
+    tier: "",
+    journeyStage: "",
+    business: "",
+    emailState: "sendable",
+  });
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -374,7 +382,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
       const [tasksData, templatesData, customersData] = await Promise.all([
         getEmailTasks(),
         getTemplates(),
-        getCustomers(0, 200, {}),
+        getCustomers(0, 1000, {}),
       ]);
       setTasks(tasksData);
       setTemplates(templatesData);
@@ -453,6 +461,49 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
     setSelectedCustomerIds(newSet);
   };
 
+  const recipientRegions = useMemo(() => (
+    [...new Set(customers
+      .map((customer) => customer.region || customer.country)
+      .filter((region): region is string => Boolean(region)))]
+      .sort((a, b) => a.localeCompare(b))
+  ), [customers]);
+
+  const filteredCustomers = useMemo(() => {
+    const q = recipientFilters.q.trim().toLowerCase();
+    const business = recipientFilters.business.trim().toLowerCase();
+    return customers.filter((customer) => {
+      const searchText = [
+        customer.company,
+        customer.contact,
+        customer.email,
+        customer.business,
+        customer.product,
+        customer.region,
+        customer.country,
+        ...(customer.tags || []),
+      ].join(" ").toLowerCase();
+      if (q && !searchText.includes(q)) return false;
+      if (recipientFilters.region && (customer.region || customer.country) !== recipientFilters.region) return false;
+      if (recipientFilters.tier && customer.tier !== recipientFilters.tier) return false;
+      if (recipientFilters.journeyStage && customer.journeyStage !== recipientFilters.journeyStage) return false;
+      if (business && !`${customer.business || ""} ${customer.product || ""}`.toLowerCase().includes(business)) return false;
+      if (recipientFilters.emailState === "sendable" && (!customer.email || customer.emailStatus === "invalid")) return false;
+      if (recipientFilters.emailState === "invalid" && customer.emailStatus !== "invalid") return false;
+      if (recipientFilters.emailState === "missing" && customer.email) return false;
+      return true;
+    });
+  }, [customers, recipientFilters]);
+
+  const selectFilteredCustomers = () => {
+    setSelectedCustomerIds((current) => {
+      const next = new Set(current);
+      for (const customer of filteredCustomers) {
+        if (customer.email && customer.emailStatus !== "invalid") next.add(customer.id);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="space-y-6">
       {canManage && <Card>
@@ -518,14 +569,93 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
 
             {/* Recipient selection */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>收件客户（已选择 {selectedCustomerIds.size} 个）</Label>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <Label>收件客户（筛选结果 {filteredCustomers.length} / {customers.length}，已选择 {selectedCustomerIds.size} 个）</Label>
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={selectFilteredCustomers} disabled={filteredCustomers.length === 0}>
+                    选择筛选结果
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedCustomerIds(new Set())} disabled={selectedCustomerIds.size === 0}>
+                    清空已选
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 md:grid-cols-3 lg:grid-cols-6">
+                <Input
+                  placeholder="搜索公司、联系人、邮箱、标签"
+                  value={recipientFilters.q}
+                  onChange={(e) => setRecipientFilters({ ...recipientFilters, q: e.target.value })}
+                  className="lg:col-span-2"
+                />
+                <select
+                  aria-label="按地区筛选收件客户"
+                  className="flex h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                  value={recipientFilters.region}
+                  onChange={(e) => setRecipientFilters({ ...recipientFilters, region: e.target.value })}
+                >
+                  <option value="">全部地区</option>
+                  {recipientRegions.map((region) => <option key={region} value={region}>{region}</option>)}
+                </select>
+                <select
+                  aria-label="按客户分层筛选收件客户"
+                  className="flex h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                  value={recipientFilters.tier}
+                  onChange={(e) => setRecipientFilters({ ...recipientFilters, tier: e.target.value })}
+                >
+                  <option value="">全部分层</option>
+                  <option value="A">A - 战略客户</option>
+                  <option value="B">B - 重点客户</option>
+                  <option value="C">C - 培育客户</option>
+                  <option value="D">D - 低优先级</option>
+                </select>
+                <select
+                  aria-label="按客户阶段筛选收件客户"
+                  className="flex h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                  value={recipientFilters.journeyStage}
+                  onChange={(e) => setRecipientFilters({ ...recipientFilters, journeyStage: e.target.value })}
+                >
+                  <option value="">全部阶段</option>
+                  <option value="new">新客户</option>
+                  <option value="contacted">已联系</option>
+                  <option value="replied">已回复</option>
+                  <option value="qualified">已确认需求</option>
+                  <option value="opportunity">商机推进</option>
+                  <option value="won">已成交</option>
+                  <option value="lost">已流失</option>
+                </select>
+                <select
+                  aria-label="按邮箱状态筛选收件客户"
+                  className="flex h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                  value={recipientFilters.emailState}
+                  onChange={(e) => setRecipientFilters({ ...recipientFilters, emailState: e.target.value })}
+                >
+                  <option value="sendable">仅可发送邮箱</option>
+                  <option value="all">全部邮箱状态</option>
+                  <option value="invalid">邮箱异常</option>
+                  <option value="missing">缺少邮箱</option>
+                </select>
+                <Input
+                  placeholder="主营业务或产品"
+                  value={recipientFilters.business}
+                  onChange={(e) => setRecipientFilters({ ...recipientFilters, business: e.target.value })}
+                  className="lg:col-span-2"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setRecipientFilters({ q: "", region: "", tier: "", journeyStage: "", business: "", emailState: "sendable" })}
+                >
+                  清除筛选
+                </Button>
               </div>
               <div className="border rounded-lg max-h-60 overflow-y-auto">
-                {customers.length === 0 ? (
-                  <p className="text-center py-4 text-muted-foreground text-sm">暂无客户</p>
+                {filteredCustomers.length === 0 ? (
+                  <p className="text-center py-4 text-muted-foreground text-sm">没有符合筛选条件的客户</p>
                 ) : (
-                  customers.map((customer) => (
+                  filteredCustomers.map((customer) => {
+                    const sendable = Boolean(customer.email) && customer.emailStatus !== "invalid";
+                    return (
                     <div
                       key={customer.id}
                       className="flex items-center gap-3 p-2 hover:bg-muted/50"
@@ -534,14 +664,19 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                         type="checkbox"
                         checked={selectedCustomerIds.has(customer.id)}
                         onChange={(e) => toggleCustomer(customer.id, e.target.checked)}
+                        disabled={!sendable}
                         className="h-4 w-4"
                       />
                       <div className="flex-1 text-sm">
                         <span className="font-medium">{customer.company}</span>
                         <span className="text-muted-foreground ml-2">{customer.email}</span>
+                        {(customer.region || customer.country) && <Badge variant="outline" className="ml-2">{customer.region || customer.country}</Badge>}
+                        {customer.tier && <Badge variant="secondary" className="ml-1">{customer.tier}</Badge>}
+                        {!sendable && <Badge variant="destructive" className="ml-1">{customer.email ? "邮箱异常" : "缺少邮箱"}</Badge>}
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

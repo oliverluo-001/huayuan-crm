@@ -501,7 +501,11 @@ export async function cleanB2BLeads(taskId: string): Promise<{ summary: Record<s
 }
 
 export async function getLeadAssociation(productName: string): Promise<LeadAssociation> {
-  return api<LeadAssociation>("/api/lead-associations", { method: "POST", body: { productName } });
+  const result = await api<LeadAssociation | { association: LeadAssociation }>("/api/lead-associations", {
+    method: "POST",
+    body: { productName },
+  });
+  return "association" in result ? result.association : result;
 }
 
 export async function saveLeadQueries(taskId: string, regenerate?: boolean, queries?: string[]): Promise<{ task: B2BLeadTask }> {

@@ -55,6 +55,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
 
 const CUSTOMER_PAGE_SIZE = 50;
+const emptyCustomerFilters = () => ({
+  q: "",
+  tag: "",
+  tier: "",
+  journeyStage: "",
+  region: "",
+  emailStatus: "",
+  health: "",
+  ownerId: "",
+});
 
 const JOURNEY_STAGES = [
   { value: "new", label: "新客户" },
@@ -88,16 +98,7 @@ export function CustomerTable(_props: CustomerTableProps) {
   const [tags, setTags] = useState<string[]>([]);
 
   // Filters
-  const [filters, setFilters] = useState({
-    q: "",
-    tag: "",
-    tier: "",
-    journeyStage: "",
-    region: "",
-    emailStatus: "",
-    health: "",
-    ownerId: "",
-  });
+  const [filters, setFilters] = useState(emptyCustomerFilters);
 
   // Dialogs
   const [createOpen, setCreateOpen] = useState(false);
@@ -139,26 +140,32 @@ export function CustomerTable(_props: CustomerTableProps) {
       }
       const result = await importCustomers(file);
       toast.success(`导入完成：新增 ${result.created} 条，合并 ${result.updated} 条，跳过 ${result.skipped} 条。`);
-      await fetchCustomers();
+      const resetFilters = emptyCustomerFilters();
+      setCustomerPreset("all");
+      setPage(1);
+      setFilters(resetFilters);
+      setSelectedIds(new Set());
+      await fetchCustomers(1, resetFilters);
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  const fetchCustomers = useCallback(async () => {
+  const fetchCustomers = useCallback(async (targetPage = page, targetFilters = filters) => {
     setIsLoading(true);
     try {
-      const offset = (page - 1) * CUSTOMER_PAGE_SIZE;
-      const [result, availableTags, views] = await Promise.all([
-        getCustomers(offset, CUSTOMER_PAGE_SIZE, filters),
+      const offset = (targetPage - 1) * CUSTOMER_PAGE_SIZE;
+      const result = await getCustomers(offset, CUSTOMER_PAGE_SIZE, targetFilters);
+      setCustomers(result.customers);
+      setTotal(result.total);
+
+      const [availableTags, views] = await Promise.allSettled([
         getCustomerTags(),
         getCustomerViews(),
       ]);
-      setCustomers(result.customers);
-      setTotal(result.total);
-      setTags(availableTags);
-      setSavedViews(views);
+      if (availableTags.status === "fulfilled") setTags(availableTags.value);
+      if (views.status === "fulfilled") setSavedViews(views.value);
     } finally {
       setIsLoading(false);
     }
@@ -234,7 +241,7 @@ export function CustomerTable(_props: CustomerTableProps) {
   const handleApplyView = (viewId: string) => {
     const view = savedViews.find((v) => v.id === viewId);
     if (!view) return;
-    setFilters({ q: "", tag: "", tier: "", journeyStage: "", region: "", emailStatus: "", health: "", ...view.filters as any });
+    setFilters({ ...emptyCustomerFilters(), ...view.filters as any });
     setPage(1);
   };
 
@@ -311,7 +318,7 @@ export function CustomerTable(_props: CustomerTableProps) {
 
   const handlePresetChange = (preset: string) => {
     setCustomerPreset(preset);
-    const baseFilters = { q: "", tag: "", tier: "", journeyStage: "", region: "", emailStatus: "", health: "", ownerId: "" };
+    const baseFilters = emptyCustomerFilters();
     switch (preset) {
       case "mine":
         setFilters({ ...baseFilters, ownerId: "me" });
@@ -468,7 +475,7 @@ export function CustomerTable(_props: CustomerTableProps) {
               <Button
                 variant="outline"
                 onClick={() => {
-                  setFilters({ q: "", tag: "", tier: "", journeyStage: "", region: "", emailStatus: "", health: "", ownerId: "" });
+                  setFilters(emptyCustomerFilters());
                   setPage(1);
                 }}
               >

@@ -50,6 +50,7 @@ export interface Customer {
   phone?: string;
   website?: string;
   region?: string;
+  country?: string;
   timezone?: string;
   tags?: string[];
   tier: "A" | "B" | "C" | "D";
