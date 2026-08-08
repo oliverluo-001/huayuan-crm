@@ -5,6 +5,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { OPPORTUNITY_STAGES } from "@/contracts/crm-stages";
+import {
+  B2B_TASK_STATUS_LABELS,
+  EMAIL_SEND_STATUS_LABELS,
+  EMAIL_TASK_STATUS_LABELS,
+  statusLabel,
+} from "@/contracts/crm-terminology";
 
 interface DashboardProps { onNavigate?: (page: string) => void }
 
@@ -42,9 +49,9 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const d = data.metrics;
   const metrics = [
     { label: "客户总数", value: d.customerTotal, note: `近 7 天新增 ${d.newCustomers7d}`, icon: Users },
-    { label: "企业线索", value: d.leadTotal, note: `高可信 ${d.highConfidenceLeads}`, icon: Target },
+    { label: "潜在客户线索", value: d.leadTotal, note: `高可信线索 ${d.highConfidenceLeads}`, icon: Target },
     { label: "可联系线索", value: d.contactableLeads, note: data.scope === "owned" ? "仅显示本人负责客户" : "已通过清洗与评分", icon: Mail },
-    { label: "邮件发送", value: d.sentTotal, note: `失败或退信 ${d.failedTotal}`, icon: TrendingUp },
+    { label: "发送成功", value: d.sentTotal, note: `失败或退信 ${d.failedTotal}`, icon: TrendingUp },
     { label: "待办事项", value: d.openTodoCount, note: `逾期 ${d.overdueTodoCount}`, icon: CheckSquare },
   ];
   const funnel = [
@@ -85,30 +92,29 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     <div className="grid gap-4 lg:grid-cols-2">
       <Card><CardHeader><CardTitle className="flex items-center gap-2 text-base"><DollarSign className="h-4 w-4" />销售漏斗</CardTitle></CardHeader><CardContent className="space-y-4">
         <div className="grid grid-cols-3 gap-3">
-          <SummaryValue label="开放商机" value={formatMoney(data.salesFunnel.openValue)} />
-          <SummaryValue label="加权金额" value={formatMoney(data.salesFunnel.weightedValue)} />
+          <SummaryValue label="未结商机金额" value={formatMoney(data.salesFunnel.openValue)} />
+          <SummaryValue label="加权预计金额" value={formatMoney(data.salesFunnel.weightedValue)} />
           <SummaryValue label="赢单率" value={`${data.salesFunnel.winRate}%`} />
         </div>
         <div className="space-y-2">
           {data.salesFunnel.stages.map((item) => {
-            const labels: Record<string, string> = { prospecting: "初步接洽", qualification: "需求确认", proposal: "方案报价", negotiation: "商务谈判", won: "已成交", lost: "已流失" };
             const maxValue = Math.max(1, ...data.salesFunnel.stages.map((stage) => stage.value));
             return <div key={item.stage}>
-              <div className="mb-1 flex justify-between text-xs"><span>{labels[item.stage] || item.stage} · {item.count} 个</span><strong>{formatMoney(item.value)}</strong></div>
+              <div className="mb-1 flex justify-between text-xs"><span>{OPPORTUNITY_STAGES.find((stage) => stage.value === item.stage)?.label || "未知阶段"} · {item.count} 个</span><strong>{formatMoney(item.value)}</strong></div>
               <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.max(item.value ? 4 : 0, item.value / maxValue * 100)}%` }} /></div>
             </div>;
           })}
         </div>
       </CardContent></Card>
 
-      <Card><CardHeader><CardTitle className="text-base">邮件效果分析（近 30 天）</CardTitle></CardHeader><CardContent className="space-y-5">
+      <Card><CardHeader><CardTitle className="text-base">发信效果（近 30 天）</CardTitle></CardHeader><CardContent className="space-y-5">
         <div className="grid grid-cols-4 gap-2">
           <SummaryValue label="总计" value={String(data.emailPerformance.total)} />
-          <SummaryValue label="送达" value={String(data.emailPerformance.sent)} />
+          <SummaryValue label="发送成功" value={String(data.emailPerformance.sent)} />
           <SummaryValue label="失败" value={String(data.emailPerformance.failed)} />
           <SummaryValue label="退信" value={String(data.emailPerformance.bounced)} />
         </div>
-        <RateBar label="送达率" value={data.emailPerformance.deliveryRate} className="bg-primary" />
+        <RateBar label="发送成功率" value={data.emailPerformance.deliveryRate} className="bg-primary" />
         <RateBar label="退信率" value={data.emailPerformance.bounceRate} className="bg-destructive" />
       </CardContent></Card>
     </div>
@@ -122,9 +128,9 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       </CardContent></Card>
 
       <Card><CardHeader><CardTitle className="text-base">进行中的任务</CardTitle></CardHeader><CardContent className="space-y-3">
-        {[...data.activeTasks.leads.map((task) => ({ ...task, kind: "获客" })), ...data.activeTasks.emails.map((task) => ({ ...task, kind: "邮件" }))].slice(0, 6).map((task) =>
+        {[...data.activeTasks.leads.map((task) => ({ ...task, kind: "获客" as const })), ...data.activeTasks.emails.map((task) => ({ ...task, kind: "发信" as const }))].slice(0, 6).map((task) =>
           <div key={`${task.kind}-${task.id}`} className="flex items-center justify-between border-b pb-2 text-sm last:border-0">
-            <div><p className="font-medium">{task.name}</p><p className="text-xs text-muted-foreground">{task.kind} · {task.status}</p></div>
+            <div><p className="font-medium">{task.name}</p><p className="text-xs text-muted-foreground">{task.kind}任务 · {statusLabel(task.kind === "获客" ? B2B_TASK_STATUS_LABELS : EMAIL_TASK_STATUS_LABELS, task.status)}</p></div>
             <Badge variant="secondary">{task.current}/{task.target}</Badge>
           </div>)}
         {!data.activeTasks.leads.length && !data.activeTasks.emails.length && <Empty text={data.scope === "owned" ? "销售账号不展示全局任务" : "暂无进行中的任务"} />}
@@ -140,7 +146,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     </div>
 
     <div className="grid gap-4 lg:grid-cols-2">
-      <Card><CardHeader><CardTitle className="text-base">邮件活动</CardTitle></CardHeader><CardContent>
+      <Card><CardHeader><CardTitle className="text-base">发信统计</CardTitle></CardHeader><CardContent>
         <div className="grid grid-cols-2 gap-3">
           <ActivityBox title="近 7 天" data={data.emailActivity.days7} />
           <ActivityBox title="近 30 天" data={data.emailActivity.days30} />
@@ -151,12 +157,12 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       </CardContent></Card>
 
-      <Card><CardHeader><CardTitle className="flex items-center justify-between text-base">最近发送<Button variant="link" size="sm" onClick={() => onNavigate?.("marketing")}>邮件营销</Button></CardTitle></CardHeader><CardContent className="space-y-3">
+      <Card><CardHeader><CardTitle className="flex items-center justify-between text-base">最近发信记录<Button variant="link" size="sm" onClick={() => onNavigate?.("marketing")}>邮件发送</Button></CardTitle></CardHeader><CardContent className="space-y-3">
         {data.recentSendLogs.slice(0, 6).map((log) => <div key={log.id} className="flex items-center gap-3 text-sm">
-          <Badge variant={log.status === "sent" ? "default" : "destructive"}>{log.status === "sent" ? "已发送" : log.status === "bounced" ? "退信" : "失败"}</Badge>
+          <Badge variant={log.status === "sent" ? "default" : "destructive"}>{statusLabel(EMAIL_SEND_STATUS_LABELS, log.status)}</Badge>
           <div className="min-w-0"><p className="truncate font-medium">{log.email}</p><p className="text-xs text-muted-foreground">{new Date(log.createdAt).toLocaleString()} · {log.templateName || log.message || "邮件"}</p></div>
         </div>)}
-        {!data.recentSendLogs.length && <Empty text="暂无发送记录" />}
+        {!data.recentSendLogs.length && <Empty text="暂无发信记录" />}
       </CardContent></Card>
     </div>
   </div>;
@@ -171,11 +177,11 @@ function TrendChart({ days }: { days: DashboardSnapshot["trends"]["days30"] }) {
   return <div>
     <div className="mb-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
       <Legend color="bg-blue-500" label="新增客户" />
-      <Legend color="bg-emerald-500" label="成功邮件" />
+      <Legend color="bg-emerald-500" label="发送成功" />
       <Legend color="bg-red-500" label="失败/退信" />
     </div>
     <div className="flex h-44 items-end gap-1 border-b border-l px-2 pt-3">
-      {days.map((day, index) => <div key={day.date} className="group relative flex h-full min-w-0 flex-1 items-end justify-center gap-px" title={`${day.date}：新增客户 ${day.customers}，成功邮件 ${day.sent}，失败/退信 ${day.failed + day.bounced}`}>
+      {days.map((day, index) => <div key={day.date} className="group relative flex h-full min-w-0 flex-1 items-end justify-center gap-px" title={`${day.date}：新增客户 ${day.customers}，发送成功 ${day.sent}，失败/退信 ${day.failed + day.bounced}`}>
         <TrendBar value={day.customers} max={max} className="bg-blue-500" />
         <TrendBar value={day.sent} max={max} className="bg-emerald-500" />
         <TrendBar value={day.failed + day.bounced} max={max} className="bg-red-500" />

@@ -24,14 +24,7 @@ import {
 } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
-
-const QUOTE_STATUSES = [
-  { value: "draft", label: "草稿" },
-  { value: "sent", label: "已发送" },
-  { value: "accepted", label: "已接受" },
-  { value: "rejected", label: "已拒绝" },
-  { value: "expired", label: "已过期" },
-] as const;
+import { QUOTE_STATUS_OPTIONS as QUOTE_STATUSES } from "@/contracts/crm-terminology";
 
 export function QuotesPage() {
   const { role } = useAuth();
@@ -174,7 +167,7 @@ export function QuotesPage() {
       {/* Form */}
       {canManage && <Card>
         <CardHeader>
-          <CardTitle>{editingId ? "编辑报价" : "创建报价"}</CardTitle>
+          <CardTitle>{editingId ? "编辑报价单" : "创建报价单"}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -335,7 +328,7 @@ export function QuotesPage() {
             <div className="flex gap-2">
               <Button type="submit">
                 <Plus className="mr-2 h-4 w-4" />
-                {editingId ? "更新报价" : "创建报价"}
+                {editingId ? "更新报价单" : "创建报价单"}
               </Button>
               {editingId && (
                 <Button type="button" variant="outline" onClick={() => { setEditingId(null); setForm({ customerId: "", opportunityId: "", quoteNo: "", productId: "", quantity: "1", unitPrice: "", currency: "USD", status: "draft", discount: "0", freight: "0", taxRate: "13", validUntil: "", notes: "" }); }}>
@@ -351,7 +344,7 @@ export function QuotesPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            报价列表
+            报价单列表
             <Badge variant="secondary">{quotes.length}</Badge>
           </CardTitle>
         </CardHeader>
@@ -379,7 +372,7 @@ export function QuotesPage() {
             ) : quotes.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                  暂无报价数据
+                  暂无报价单
                 </TableCell>
               </TableRow>
             ) : (
@@ -394,7 +387,7 @@ export function QuotesPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant={quote.status === "accepted" ? "default" : "secondary"}>
-                      {QUOTE_STATUSES.find((status) => status.value === quote.status)?.label || quote.status}
+                      {QUOTE_STATUSES.find((status) => status.value === quote.status)?.label || "未知状态"}
                     </Badge>
                   </TableCell>
                   <TableCell>

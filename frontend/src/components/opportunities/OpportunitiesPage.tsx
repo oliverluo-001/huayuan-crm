@@ -64,7 +64,7 @@ export function OpportunitiesPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          商机从客户 360 详情中创建。可直接切换阶段。
+          商机从客户 360 详情中创建；在此更新商机阶段时，客户跟进阶段会同步更新。
         </p>
         <Badge variant="secondary">共 {opportunities.length} 个商机</Badge>
       </div>

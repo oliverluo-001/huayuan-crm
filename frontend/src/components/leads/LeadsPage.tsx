@@ -6,6 +6,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
+import {
+  B2B_TASK_STATUS_LABELS,
+  LEAD_ACTION_LABELS,
+  LEAD_BUYER_TYPE_OPTIONS,
+  LEAD_CONFIDENCE_LABELS,
+  LEAD_REGION_OPTIONS,
+  LEAD_SOURCE_TYPE_LABELS,
+  optionLabel,
+  statusLabel,
+} from "@/contracts/crm-terminology";
 import "./LeadsPage.css";
 import {
   getB2BLeadTasks,
@@ -27,17 +37,6 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const TASK_STATUS_LABELS: Record<string, string> = {
-  draft: "待启动",
-  ready: "就绪",
-  running: "自动运行中",
-  paused: "已暂停",
-  completed: "本轮完成",
-  exhausted: "已耗尽",
-  cancelled: "已停止",
-  failed: "执行失败",
-};
-
 const AUTOMATION_STAGE_LABELS: Record<string, string> = {
   starting: "连接搜索源",
   searching: "搜索企业",
@@ -48,19 +47,6 @@ const AUTOMATION_STAGE_LABELS: Record<string, string> = {
   cancelled: "已停止",
   failed: "执行失败",
 };
-
-const LEGACY_REGIONS = [
-  "Global", "Middle East", "Southeast Asia", "North America",
-  "Europe", "Oceania", "Africa", "South America", "South Asia", "East Asia"
-];
-
-const LEGACY_SEGMENTS = [
-  "importer", "distributor", "wholesaler", "stockist", "dealer",
-  "supplier", "trading company", "industrial supplier", "OEM manufacturer",
-  "EPC contractor", "project contractor", "maintenance contractor",
-  "shipyard / marine company", "oil & gas company", "power plant / energy company",
-  "pressure vessel / boiler / equipment manufacturer", "construction / infrastructure contractor"
-];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -79,7 +65,7 @@ function automationStageText(task: B2BLeadTask): string {
   if (progress.stage && AUTOMATION_STAGE_LABELS[progress.stage]) {
     return AUTOMATION_STAGE_LABELS[progress.stage];
   }
-  return TASK_STATUS_LABELS[task.status] || task.status || "待启动";
+  return statusLabel(B2B_TASK_STATUS_LABELS, task.status, "待启动");
 }
 
 function isLeadImportable(lead: B2BLead): boolean {
@@ -623,15 +609,15 @@ export function LeadsPage() {
     <fieldset className="full">
       <legend>目标大区域</legend>
       <div className="lead-option-grid">
-        {LEGACY_REGIONS.map((region) => (
-          <label key={region} className="lead-choice-chip">
+        {LEAD_REGION_OPTIONS.map((region) => (
+          <label key={region.value} className="lead-choice-chip">
             <input
               type="checkbox"
               name="targetRegions"
-              checked={selectedRegions.includes(region)}
-              onChange={() => handleRegionToggle(region)}
+              checked={selectedRegions.includes(region.value)}
+              onChange={() => handleRegionToggle(region.value)}
             />
-            <span>{region}</span>
+            <span>{region.label}</span>
           </label>
         ))}
       </div>
@@ -643,15 +629,15 @@ export function LeadsPage() {
       <fieldset className="full">
         <legend>买家类型</legend>
         <div className="lead-option-grid lead-segment-options">
-          {LEGACY_SEGMENTS.map((seg) => (
-            <label key={seg} className="lead-choice-chip">
+          {LEAD_BUYER_TYPE_OPTIONS.map((segment) => (
+            <label key={segment.value} className="lead-choice-chip">
               <input
                 type="checkbox"
                 name="targetSegments"
-                checked={selectedSegments.includes(seg)}
-                onChange={() => handleSegmentToggle(seg)}
+                checked={selectedSegments.includes(segment.value)}
+                onChange={() => handleSegmentToggle(segment.value)}
               />
-              <span>{seg}</span>
+              <span>{segment.label}</span>
             </label>
           ))}
         </div>
@@ -671,11 +657,11 @@ export function LeadsPage() {
         <div className="lead-task-summary-head">
           <strong>{activeTask.productName || "未命名产品"}</strong>
           <span className={`status-pill ${running ? "running" : ""}`}>
-            {TASK_STATUS_LABELS[activeTask.status] || activeTask.status}
+            {statusLabel(B2B_TASK_STATUS_LABELS, activeTask.status)}
           </span>
         </div>
         <span>
-          {(activeTask.targetRegions || []).join("、")} · 目标 {activeTask.targetCount} 条 · 原始 {activeTask.rawLeadCount || 0} · 清洗 {activeTask.cleanedLeadCount || 0} · 重复 {activeTask.duplicateCount || 0} · 已入库 {activeTask.importedCustomerCount || 0}
+          {(activeTask.targetRegions || []).map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join("、")} · 目标 {activeTask.targetCount} 条 · 原始 {activeTask.rawLeadCount || 0} · 清洗后 {activeTask.cleanedLeadCount || 0} · 重复 {activeTask.duplicateCount || 0} · 已转客户 {activeTask.importedCustomerCount || 0}
         </span>
         {(activeTask.buyerIndustries || []).length > 0 && (
           <div className="lead-task-profile">
@@ -715,9 +701,9 @@ export function LeadsPage() {
     const metrics = [
       ["总线索", summary.total || 0],
       ["已去重", summary.duplicatesRemoved || 0],
-      ["Ready to Email", summary.readyToEmail || 0],
-      ["Needs Review", summary.needsReview || 0],
-      ["Remove", (summary.remove || 0) + (summary.hardBounce || 0)],
+      ["可直接联系", summary.readyToEmail || 0],
+      ["待人工核验", summary.needsReview || 0],
+      ["建议剔除", (summary.remove || 0) + (summary.hardBounce || 0)],
     ];
     const byRegion = (summary.byLargeRegion || {}) as Record<string, number>;
     const bySegment = (summary.byTargetSegment || {}) as Record<string, number>;
@@ -738,13 +724,13 @@ export function LeadsPage() {
           <div>
             <h3>大区域分布</h3>
             {regionEntries.length ? regionEntries.map(([name, count]) => (
-              <span key={name}><strong>{name}</strong> {count}</span>
+              <span key={name}><strong>{optionLabel(LEAD_REGION_OPTIONS, name, name)}</strong> {count}</span>
             )) : <span>暂无数据</span>}
           </div>
           <div>
             <h3>客户类型分布</h3>
             {segmentEntries.length ? segmentEntries.map(([name, count]) => (
-              <span key={name}><strong>{name}</strong> {count}</span>
+              <span key={name}><strong>{optionLabel(LEAD_BUYER_TYPE_OPTIONS, name, name)}</strong> {count}</span>
             )) : <span>暂无数据</span>}
           </div>
         </div>
@@ -821,26 +807,26 @@ export function LeadsPage() {
                     </TableCell>
                     <TableCell>
                       {lead.country || "-"}
-                      <div className="meta">{lead.largeRegion || "Unknown"}</div>
+                      <div className="meta">{optionLabel(LEAD_REGION_OPTIONS, lead.largeRegion, "未识别区域")}</div>
                     </TableCell>
                     <TableCell>
-                      {lead.targetSegment || "-"}
+                      {optionLabel(LEAD_BUYER_TYPE_OPTIONS, lead.targetSegment, "-")}
                       <div className="meta clipped">{lead.matchedProductKeyword || lead.business || "-"}</div>
                     </TableCell>
                     <TableCell>
                       <span className={`lead-grade grade-${grade}`}>
-                        {Number(lead.leadScore) || 0} · {lead.confidence}
+                        {Number(lead.leadScore) || 0} · {statusLabel(LEAD_CONFIDENCE_LABELS, lead.confidence, "待评分")}
                       </span>
                     </TableCell>
                     <TableCell>
                       <span className={`lead-action action-${actionCssClass(lead.recommendedAction)}`}>
-                        {lead.recommendedAction}
+                        {statusLabel(LEAD_ACTION_LABELS, lead.recommendedAction, "待评估")}
                       </span>
                     </TableCell>
                     <TableCell>
                       {lead.source ? (
-                        <a href={lead.source} target="_blank" rel="noreferrer">{lead.sourceType}</a>
-                      ) : (lead.sourceType || "Unknown")}
+                        <a href={lead.source} target="_blank" rel="noreferrer">{statusLabel(LEAD_SOURCE_TYPE_LABELS, lead.sourceType, "公开网页")}</a>
+                      ) : statusLabel(LEAD_SOURCE_TYPE_LABELS, lead.sourceType, "来源未标注")}
                       <div className="meta">HTTP {lead.sourceHttpStatus || "-"}</div>
                     </TableCell>
                     <TableCell>
@@ -903,11 +889,8 @@ export function LeadsPage() {
         value={filterRecommendedAction}
         onChange={(e) => setFilterRecommendedAction(e.target.value)}
       >
-        <option value="">全部动作</option>
-        <option value="Ready to Email">Ready to Email</option>
-        <option value="Needs Review">Needs Review</option>
-        <option value="Remove">Remove</option>
-        <option value="Hard Bounce">Hard Bounce</option>
+        <option value="">全部处理建议</option>
+        {Object.entries(LEAD_ACTION_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select>
       <select
         name="confidence"
@@ -915,9 +898,7 @@ export function LeadsPage() {
         onChange={(e) => setFilterConfidence(e.target.value)}
       >
         <option value="">全部置信度</option>
-        <option value="High">High</option>
-        <option value="Medium">Medium</option>
-        <option value="Low">Low</option>
+        {Object.entries(LEAD_CONFIDENCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select>
       <Button type="submit" variant="outline" size="sm">应用筛选</Button>
       <Button
@@ -943,7 +924,7 @@ export function LeadsPage() {
     <div className="leads-page">
       <div className="panel-title">
         <div>
-          <h2>B2B 智能获客</h2>
+          <h2>B2B 客户开发</h2>
           <p className="section-description">从产品需求出发，自动定位潜在买家并沉淀到客户库。</p>
         </div>
         {!canManage && <span className="status-pill">只读权限</span>}
@@ -1029,7 +1010,7 @@ export function LeadsPage() {
                   value={language}
                   onChange={(e) => setLanguage(e.target.value)}
                 >
-                  <option value="en">English</option>
+                  <option value="en">英语</option>
                 </select>
               </div>
               {renderRegionOptions()}
@@ -1062,7 +1043,7 @@ export function LeadsPage() {
               {tasks.length === 0 && <option value="">暂无任务</option>}
               {tasks.map((task) => (
                 <option key={task.id} value={task.id}>
-                  {task.productName || "未命名"} · {task.status}
+                  {task.productName || "未命名"} · {statusLabel(B2B_TASK_STATUS_LABELS, task.status)}
                 </option>
               ))}
             </select>
@@ -1234,10 +1215,10 @@ export function LeadsPage() {
                 onClick={() => handleExport(type)}
                 disabled={!activeTask}
               >
-                {type === "all" ? "全部" :
-                 type === "ready" ? "Ready" :
-                 type === "review" ? "Review" :
-                 type === "removed" ? "Removed" : "重复项"} CSV
+                {type === "all" ? "全部线索" :
+                 type === "ready" ? "可直接联系" :
+                 type === "review" ? "待人工核验" :
+                 type === "removed" ? "建议剔除" : "重复线索"} CSV
               </Button>
             ))}
           </div>

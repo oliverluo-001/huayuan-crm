@@ -31,6 +31,13 @@ import {
 } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
+import { CUSTOMER_JOURNEY_STAGES } from "@/contracts/crm-stages";
+import {
+  CUSTOMER_TIER_OPTIONS,
+  EMAIL_SEND_STATUS_LABELS,
+  EMAIL_TASK_STATUS_LABELS,
+  statusLabel,
+} from "@/contracts/crm-terminology";
 
 export function MarketingPage() {
   const { role } = useAuth();
@@ -41,8 +48,8 @@ export function MarketingPage() {
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col gap-4">
       <TabsList className="w-full">
         <TabsTrigger value="templates" className="flex-1">邮件模板</TabsTrigger>
-        <TabsTrigger value="tasks" className="flex-1">定时邮件任务</TabsTrigger>
-        <TabsTrigger value="logs" className="flex-1">发送记录</TabsTrigger>
+        <TabsTrigger value="tasks" className="flex-1">发信任务</TabsTrigger>
+        <TabsTrigger value="logs" className="flex-1">发信记录</TabsTrigger>
       </TabsList>
 
       <TabsContent value="templates">
@@ -508,7 +515,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
     <div className="space-y-6">
       {canManage && <Card>
         <CardHeader>
-          <CardTitle>创建邮件任务</CardTitle>
+          <CardTitle>创建发信任务</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -570,7 +577,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
             {/* Recipient selection */}
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <Label>收件客户（筛选结果 {filteredCustomers.length} / {customers.length}，已选择 {selectedCustomerIds.size} 个）</Label>
+                <Label>收件客户（符合条件 {filteredCustomers.length} / 共 {customers.length}，已选 {selectedCustomerIds.size} 个）</Label>
                 <div className="flex gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={selectFilteredCustomers} disabled={filteredCustomers.length === 0}>
                     选择筛选结果
@@ -602,26 +609,17 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                   value={recipientFilters.tier}
                   onChange={(e) => setRecipientFilters({ ...recipientFilters, tier: e.target.value })}
                 >
-                  <option value="">全部分层</option>
-                  <option value="A">A - 战略客户</option>
-                  <option value="B">B - 重点客户</option>
-                  <option value="C">C - 培育客户</option>
-                  <option value="D">D - 低优先级</option>
+                  <option value="">全部客户分层</option>
+                  {CUSTOMER_TIER_OPTIONS.map((tier) => <option key={tier.value} value={tier.value}>{tier.label}</option>)}
                 </select>
                 <select
-                  aria-label="按客户阶段筛选收件客户"
+                  aria-label="按客户跟进阶段筛选收件客户"
                   className="flex h-9 rounded-lg border border-input bg-background px-3 text-sm"
                   value={recipientFilters.journeyStage}
                   onChange={(e) => setRecipientFilters({ ...recipientFilters, journeyStage: e.target.value })}
                 >
-                  <option value="">全部阶段</option>
-                  <option value="new">新客户</option>
-                  <option value="contacted">已联系</option>
-                  <option value="replied">已回复</option>
-                  <option value="qualified">已确认需求</option>
-                  <option value="opportunity">商机推进</option>
-                  <option value="won">已成交</option>
-                  <option value="lost">已流失</option>
+                  <option value="">全部跟进阶段</option>
+                  {CUSTOMER_JOURNEY_STAGES.map((stage) => <option key={stage.value} value={stage.value}>{stage.label}</option>)}
                 </select>
                 <select
                   aria-label="按邮箱状态筛选收件客户"
@@ -683,7 +681,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
 
             <Button type="submit">
               <Plus className="mr-2 h-4 w-4" />
-              新增邮件任务
+              创建发信任务
             </Button>
           </form>
         </CardContent>
@@ -692,7 +690,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            邮件任务列表
+            发信任务
             <Badge variant="secondary">{tasks.length}</Badge>
           </CardTitle>
         </CardHeader>
@@ -720,7 +718,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
             ) : tasks.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={canManage ? 7 : 6} className="text-center py-8 text-muted-foreground">
-                  暂无邮件任务
+                  暂无发信任务
                 </TableCell>
               </TableRow>
             ) : (
@@ -748,10 +746,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                         task.status === "completed" ? "secondary" :
                         task.status === "failed" ? "destructive" : "outline"
                       }>
-                        {task.status === "active" ? "运行中" :
-                         task.status === "completed" ? "已完成" :
-                         task.status === "pending" ? "待执行" :
-                         task.status === "failed" ? "失败" : task.status}
+                        {statusLabel(EMAIL_TASK_STATUS_LABELS, task.status)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm">
@@ -823,7 +818,7 @@ function SendLogsTab({ canManage }: { canManage: boolean }) {
     <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            发送记录
+            发信记录
             <Badge variant="secondary">{logs.length}</Badge>
           </CardTitle>
         </CardHeader>
@@ -849,7 +844,7 @@ function SendLogsTab({ canManage }: { canManage: boolean }) {
             ) : logs.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={canManage ? 5 : 4} className="text-center py-8 text-muted-foreground">
-                  暂无发送记录
+                  暂无发信记录
                 </TableCell>
               </TableRow>
             ) : (
@@ -864,8 +859,7 @@ function SendLogsTab({ canManage }: { canManage: boolean }) {
                       log.status === "sent" ? "default" :
                       log.status === "bounced" ? "destructive" : "outline"
                     }>
-                      {log.status === "sent" ? "已发送" :
-                       log.status === "bounced" ? "退信" : "失败"}
+                      {statusLabel(EMAIL_SEND_STATUS_LABELS, log.status)}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">

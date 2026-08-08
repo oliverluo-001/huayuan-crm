@@ -54,6 +54,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
 import { CUSTOMER_JOURNEY_STAGES as JOURNEY_STAGES, OPPORTUNITY_STAGES } from "@/contracts/crm-stages";
+import { ACTIVITY_TYPE_LABELS, CUSTOMER_TIER_OPTIONS as TIERS, statusLabel } from "@/contracts/crm-terminology";
 
 const CUSTOMER_PAGE_SIZE = 50;
 const emptyCustomerFilters = () => ({
@@ -66,13 +67,6 @@ const emptyCustomerFilters = () => ({
   health: "",
   ownerId: "",
 });
-
-const TIERS = [
-  { value: "A", label: "A - 战略客户" },
-  { value: "B", label: "B - 重点客户" },
-  { value: "C", label: "C - 培育客户" },
-  { value: "D", label: "D - 低优先级" },
-];
 
 interface CustomerTableProps {
   onPageChange?: (page: string) => void;
@@ -292,7 +286,7 @@ export function CustomerTable(_props: CustomerTableProps) {
         <p>{TIERS.find((t) => t.value === customer.tier)?.label || customer.tier}</p>
       </div>
       <div>
-        <p className="text-muted-foreground">业务</p>
+        <p className="text-muted-foreground">主营业务</p>
         <p className="truncate">{customer.business || "-"}</p>
       </div>
     </div>
@@ -368,7 +362,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                 <div className="relative">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="公司、邮箱、联系人、业务"
+                    placeholder="公司、邮箱、联系人、主营业务"
                     value={filters.q}
                     onChange={(e) => setFilters({ ...filters, q: e.target.value })}
                     className="pl-8"
@@ -409,7 +403,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>客户阶段</Label>
+                <Label>客户跟进阶段</Label>
                 <Select value={filters.journeyStage} onValueChange={(v) => setFilters({ ...filters, journeyStage: v ?? "" })}>
                   <SelectTrigger>
                     <SelectValue placeholder="全部阶段" />
@@ -698,7 +692,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                       customer.journeyStage === "qualified" ? "bg-blue-100 text-blue-800" :
                       "bg-gray-100 text-gray-800"
                     }`}>
-                      {JOURNEY_STAGES.find((s) => s.value === customer.journeyStage)?.label || customer.journeyStage}
+                      {JOURNEY_STAGES.find((s) => s.value === customer.journeyStage)?.label || "未设置阶段"}
                     </span>
                   </TableCell>
                   <TableCell className="text-sm">
@@ -730,7 +724,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                   <TableCell className="text-sm">
                     {customer.lastActivityAt ? (
                       <div>
-                        <p className="text-xs font-medium">{customer.lastActivityType || "互动"}</p>
+                        <p className="text-xs font-medium">{statusLabel(ACTIVITY_TYPE_LABELS, customer.lastActivityType, "客户互动")}</p>
                         <p className="text-xs text-muted-foreground">
                           {new Date(customer.lastActivityAt).toLocaleDateString()}
                         </p>
@@ -1116,7 +1110,7 @@ function CustomerEditDialog({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>客户阶段（与当前商机联动）</Label>
+              <Label>客户跟进阶段（与当前商机同步）</Label>
               <Select value={form.journeyStage} onValueChange={(v) => setForm({ ...form, journeyStage: v as Customer["journeyStage"] })}>
                 <SelectTrigger>
                   <SelectValue />
@@ -1230,7 +1224,7 @@ function CustomerDetailDialog({
                       <Badge variant="outline">{TIERS.find((t) => t.value === data.customer.tier)?.label}</Badge>
                     </div>
                     <div>
-                      <p className="text-sm text-muted-foreground">客户阶段（当前商机汇总）</p>
+                      <p className="text-sm text-muted-foreground">客户跟进阶段（与商机同步）</p>
                       <Badge variant="secondary">
                         {JOURNEY_STAGES.find((s) => s.value === data.customer.journeyStage)?.label}
                       </Badge>
@@ -1271,11 +1265,11 @@ function CustomerDetailDialog({
                               {index === 0 && <Badge variant="secondary">当前</Badge>}
                             </p>
                             <p className="text-sm text-muted-foreground">
-                              {OPPORTUNITY_STAGES.find((stage) => stage.value === opp.stage)?.label || opp.stage} · {opp.amount ? `USD ${opp.amount}` : "-"}
+                              {OPPORTUNITY_STAGES.find((stage) => stage.value === opp.stage)?.label || "未知阶段"} · {opp.amount ? `USD ${opp.amount}` : "-"}
                             </p>
                           </div>
                           <Badge variant="outline">
-                            {OPPORTUNITY_STAGES.find((stage) => stage.value === opp.stage)?.label || opp.stage}
+                            {OPPORTUNITY_STAGES.find((stage) => stage.value === opp.stage)?.label || "未知阶段"}
                           </Badge>
                         </div>
                       ))}
@@ -1295,7 +1289,10 @@ function CustomerDetailDialog({
                       {data.activities.slice(0, 5).map((activity) => (
                         <div key={activity.id} className="p-2 rounded-lg border">
                           <div className="flex items-center justify-between">
-                            <p className="font-medium">{activity.subject}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium">{activity.subject}</p>
+                              <Badge variant="outline">{statusLabel(ACTIVITY_TYPE_LABELS, activity.type, "客户互动")}</Badge>
+                            </div>
                             <span className="text-xs text-muted-foreground">
                               {new Date(activity.createdAt).toLocaleDateString()}
                             </span>

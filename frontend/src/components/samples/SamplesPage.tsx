@@ -25,13 +25,7 @@ import {
 } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
-
-const SAMPLE_STATUSES = [
-  { value: "pending", label: "待寄送" },
-  { value: "sent", label: "已寄送" },
-  { value: "delivered", label: "已签收" },
-  { value: "returned", label: "已退回" },
-] as const;
+import { SAMPLE_STATUS_OPTIONS as SAMPLE_STATUSES } from "@/contracts/crm-terminology";
 
 export function SamplesPage() {
   const { role } = useAuth();
@@ -145,7 +139,7 @@ export function SamplesPage() {
       {/* Form */}
       {canManage && <Card>
         <CardHeader>
-          <CardTitle>创建样品记录</CardTitle>
+          <CardTitle>登记样品寄送</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -243,7 +237,7 @@ export function SamplesPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>寄送时间</Label>
+                <Label>寄出日期</Label>
                 <Input
                   type="date"
                   value={form.sentAt}
@@ -251,7 +245,7 @@ export function SamplesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>签收时间</Label>
+                <Label>签收日期</Label>
                 <Input
                   type="date"
                   value={form.deliveredAt}
@@ -259,7 +253,7 @@ export function SamplesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>快递单号</Label>
+                <Label>物流单号</Label>
                 <Input
                   value={form.trackingNo}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, trackingNo: e.target.value })}
@@ -277,7 +271,7 @@ export function SamplesPage() {
             </div>
             <Button type="submit">
               <Plus className="mr-2 h-4 w-4" />
-              创建样品记录
+              登记样品寄送
             </Button>
           </form>
         </CardContent>
@@ -287,7 +281,7 @@ export function SamplesPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            样品列表
+            样品跟进记录
             <Badge variant="secondary">{samples.length}</Badge>
           </CardTitle>
         </CardHeader>
@@ -298,8 +292,8 @@ export function SamplesPage() {
               <TableHead>产品</TableHead>
               <TableHead>数量</TableHead>
               <TableHead>状态</TableHead>
-              <TableHead>寄送时间</TableHead>
-              <TableHead>快递单号</TableHead>
+              <TableHead>寄出日期</TableHead>
+              <TableHead>物流单号</TableHead>
               {canManage && <TableHead className="w-16">操作</TableHead>}
             </TableRow>
           </TableHeader>
@@ -315,7 +309,7 @@ export function SamplesPage() {
             ) : samples.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={canManage ? 7 : 6} className="text-center py-8 text-muted-foreground">
-                  暂无样品数据
+                  暂无样品寄送记录
                 </TableCell>
               </TableRow>
             ) : (
@@ -334,7 +328,7 @@ export function SamplesPage() {
                           sample.status === "delivered" ? "default" :
                           sample.status === "returned" ? "destructive" : "secondary"
                         }>
-                          {SAMPLE_STATUSES.find((s) => s.value === sample.status)?.label || sample.status}
+                          {SAMPLE_STATUSES.find((s) => s.value === sample.status)?.label || "未知状态"}
                         </Badge>
                       </SelectTrigger>
                       <SelectContent>
@@ -349,7 +343,7 @@ export function SamplesPage() {
                         sample.status === "delivered" ? "default" :
                         sample.status === "returned" ? "destructive" : "secondary"
                       }>
-                        {SAMPLE_STATUSES.find((s) => s.value === sample.status)?.label || sample.status}
+                        {SAMPLE_STATUSES.find((s) => s.value === sample.status)?.label || "未知状态"}
                       </Badge>
                     )}
                   </TableCell>

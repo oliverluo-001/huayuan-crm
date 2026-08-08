@@ -191,10 +191,10 @@ export function SettingsPage() {
         });
         setAiProfileHint(
           aiProfile.credentialStatus === "reentry_required"
-            ? "历史加密密钥无法由当前 Windows 账户读取，请重新输入密钥并保存。"
+            ? "当前部署环境无法读取原有加密密钥，请重新输入并保存。"
             : aiProfile.credentialStatus === "saved"
-              ? "已保存本机加密密钥。留空保存时会继续使用该密钥。"
-              : "未配置密钥时，获客任务将使用本地 B 端行业与采购角色规则。"
+              ? "密钥已安全保存。留空保存时会继续使用该密钥。"
+              : "未配置密钥时，获客任务将使用内置的行业和买家类型规则。"
         );
       }
       // Search profiles
@@ -273,7 +273,7 @@ export function SettingsPage() {
         apiKey: aiProfileForm.apiKey,
         enabled: aiProfileForm.enabled,
       });
-      toast.success("AI 配置已加密保存到本机");
+      toast.success("AI 辅助获客配置已安全保存");
       setAiProfileForm((prev) => ({ ...prev, apiKey: "" }));
       fetchData();
     } catch {
@@ -313,7 +313,7 @@ export function SettingsPage() {
         apiUrl: searchForm.apiUrl,
         apiKey: searchForm.apiKey,
       });
-      toast.success("搜索数据源已加密保存到本机");
+      toast.success("搜索数据源及密钥已安全保存");
       setSearchForm({
         id: "",
         name: "",
@@ -546,16 +546,16 @@ export function SettingsPage() {
           {/* AI Profile */}
           <Card>
             <CardHeader>
-              <CardTitle>AI 配置</CardTitle>
+              <CardTitle>AI 辅助获客</CardTitle>
               <CardDescription>
-                配置 AI 接口用于产品联想与买家识别。密钥加密保存在本机。
+                配置 AI 接口用于产品联想和买家识别。密钥会加密保存。
               </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSaveAiProfile} className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="space-y-2">
-                    <Label>AI 提供商</Label>
+                    <Label>AI 服务商</Label>
                     <select
                       className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                       value={aiProfileForm.provider}
@@ -611,7 +611,7 @@ export function SettingsPage() {
                 <div className="flex gap-2">
                   <Button type="submit">
                     <Save className="mr-2 h-4 w-4" />
-                    保存 AI 配置
+                    保存 AI 获客配置
                   </Button>
                   <Button type="button" variant="outline" onClick={handleTestAiProfile} disabled={aiTesting}>
                     {aiTesting ? (
@@ -631,7 +631,7 @@ export function SettingsPage() {
             <CardHeader>
               <CardTitle>搜索数据源</CardTitle>
               <CardDescription>
-                配置网络搜索 API，用于获客 Agent 发现企业信息。
+                配置专业搜索接口，供自动获客任务查找潜在客户企业。
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -639,21 +639,21 @@ export function SettingsPage() {
               <div className="rounded-lg border p-4 text-sm space-y-1">
                 {searchProfiles.filter((p) => p.apiKeySet !== false).length > 0 ? (
                   <>
-                    <strong>Agent 搜索模式：稳定 API</strong>
+                    <strong>自动获客搜索：已连接专业搜索接口</strong>
                     <p className="text-muted-foreground">
                       已配置搜索 API。任务优先使用配置的数据源，失败时降级到其他来源。
                     </p>
                   </>
                 ) : searchProfiles.length > 0 ? (
                   <>
-                    <strong>Agent 搜索模式：需重新保存密钥</strong>
+                    <strong>自动获客搜索：请重新保存 API 密钥</strong>
                     <p className="text-muted-foreground">
-                      历史加密密钥无法由当前 Windows 账户读取。请编辑对应数据源，重新输入密钥并保存。
+                      当前部署环境无法读取原有加密密钥。请编辑对应数据源，重新输入并保存。
                     </p>
                   </>
                 ) : (
                   <>
-                    <strong>Agent 搜索模式：公开搜索降级</strong>
+                    <strong>自动获客搜索：当前使用公开搜索</strong>
                     <p className="text-muted-foreground">
                       当前无需填写密钥也能运行，但数量、速度和稳定性不作保证。
                     </p>
@@ -732,7 +732,7 @@ export function SettingsPage() {
               {/* Search profile list */}
               {searchProfiles.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  尚未配置稳定搜索 API。Agent 将使用公开搜索降级模式。
+                  尚未配置专业搜索接口，自动获客任务将使用公开搜索，结果数量和稳定性可能较低。
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -860,7 +860,7 @@ export function SettingsPage() {
             <CardHeader>
               <CardTitle>SMTP 发信配置</CardTitle>
               <CardDescription>
-                配置邮件发送服务。密钥加密保存在本机，页面只显示保存状态。
+                配置邮件发送服务。密码会加密保存，页面只显示是否已配置。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -917,7 +917,7 @@ export function SettingsPage() {
                       <p className="text-xs text-muted-foreground">密码已加密保存。留空保存时继续使用已有密码。</p>
                     )}
                     {smtpForm.credentialStatus === "reentry_required" && (
-                      <p className="text-xs text-amber-500">历史加密密钥无法由当前 Windows 账户读取，请重新输入密钥并保存。</p>
+                      <p className="text-xs text-amber-500">当前部署环境无法读取原有加密密码，请重新输入并保存。</p>
                     )}
                   </div>
                   <div className="space-y-2">
@@ -944,7 +944,7 @@ export function SettingsPage() {
             <CardHeader>
               <CardTitle>IMAP 收信配置</CardTitle>
               <CardDescription>
-                配置邮件接收服务，用于自动收取客户回复。密钥加密保存在本机。
+                配置邮件接收服务，用于自动收取客户回复。密码会加密保存。
               </CardDescription>
             </CardHeader>
             <CardContent>

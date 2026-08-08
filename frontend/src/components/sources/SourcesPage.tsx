@@ -118,7 +118,7 @@ export function SourcesPage() {
     e.preventDefault();
     try {
       await saveAiProfile(aiForm);
-      toast.success("AI 配置已保存");
+      toast.success("AI 辅助获客配置已保存");
       fetchData();
     } catch {
       // Error handled by API client
@@ -155,7 +155,7 @@ export function SourcesPage() {
         <CardHeader>
           <CardTitle>搜索数据源</CardTitle>
           <CardDescription>
-            配置稳定的付费搜索 API。密钥加密保存在本机，页面只显示保存状态。
+            配置稳定的专业搜索接口。密钥会加密保存，页面只显示是否已配置。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -277,7 +277,7 @@ export function SourcesPage() {
       {/* AI Profile */}
       <Card>
         <CardHeader>
-          <CardTitle>AI B 端检索规划</CardTitle>
+          <CardTitle>AI 获客搜索规划</CardTitle>
           <CardDescription>
             用于扩展目标行业与检索词，不直接代替搜索 API。
           </CardDescription>
@@ -319,7 +319,7 @@ export function SourcesPage() {
                 <Label>API 密钥</Label>
                 <Input
                   type="password"
-                  placeholder="留空则沿用本机已保存密钥"
+                  placeholder="留空则继续使用已保存密钥"
                   value={aiForm.apiKey}
                   onChange={(e) => setAiForm({ ...aiForm, apiKey: e.target.value })}
                 />
@@ -333,10 +333,10 @@ export function SourcesPage() {
                 onChange={(e) => setAiForm({ ...aiForm, enabled: e.target.checked })}
                 className="h-4 w-4"
               />
-              <Label htmlFor="aiEnabled" className="cursor-pointer">启用 AI B 端检索规划</Label>
+              <Label htmlFor="aiEnabled" className="cursor-pointer">启用 AI 获客搜索规划</Label>
             </div>
             <div className="flex gap-2">
-              <Button type="submit">保存 AI 配置</Button>
+              <Button type="submit">保存 AI 获客配置</Button>
               <Button
                 type="button"
                 variant="outline"
@@ -348,7 +348,7 @@ export function SourcesPage() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              未配置密钥时，获客任务将使用本地 B 端行业与采购角色规则。
+              未配置密钥时，获客任务将使用内置的行业和买家类型规则。
             </p>
           </form>
         </CardContent>

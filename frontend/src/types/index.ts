@@ -386,7 +386,7 @@ export interface B2BLead {
   sourceName?: string;
   sourcePage?: string;
   sourceHttpStatus?: number;
-  confidence?: number;
+  confidence?: "High" | "Medium" | "Low" | string;
   recommendedAction?: string;
   crmCustomerId?: string;
   cleaningNotes?: string;

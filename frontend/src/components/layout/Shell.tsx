@@ -16,33 +16,33 @@ type NavItem = {
 };
 
 const mainNavItems: NavItem[] = [
-  { id: "", label: "仪表盘", icon: LayoutDashboard, roles: ALL_ROLES },
-  { id: "acquisition", label: "获客线索", icon: Target, roles: ALL_ROLES },
+  { id: "", label: "业务概览", icon: LayoutDashboard, roles: ALL_ROLES },
+  { id: "acquisition", label: "智能获客", icon: Target, roles: ALL_ROLES },
   { id: "customers", label: "客户管理", icon: Users, roles: ALL_ROLES },
 ];
 
 const salesNavItems: NavItem[] = [
-  { id: "opportunities", label: "商机", icon: FileText, roles: ALL_ROLES },
-  { id: "quotes", label: "报价", icon: FileText, roles: ALL_ROLES },
-  { id: "samples", label: "样品", icon: Package, roles: ALL_ROLES },
-  { id: "products", label: "产品", icon: Package, roles: ALL_ROLES },
+  { id: "opportunities", label: "销售商机", icon: FileText, roles: ALL_ROLES },
+  { id: "quotes", label: "报价管理", icon: FileText, roles: ALL_ROLES },
+  { id: "samples", label: "样品跟进", icon: Package, roles: ALL_ROLES },
+  { id: "products", label: "产品资料", icon: Package, roles: ALL_ROLES },
 ];
 
 const bottomNavItems: NavItem[] = [
-  { id: "marketing", label: "邮件营销", icon: Mail, roles: ALL_ROLES },
-  { id: "settings", label: "设置", icon: Settings, roles: ALL_ROLES },
+  { id: "marketing", label: "邮件发送", icon: Mail, roles: ALL_ROLES },
+  { id: "settings", label: "系统设置", icon: Settings, roles: ALL_ROLES },
 ];
 
 const pageTitles: Record<string, { title: string; subtitle: string }> = {
-  "/": { title: "仪表盘", subtitle: "概览业务数据" },
-  "/acquisition": { title: "获客线索", subtitle: "B2B 线索任务管理" },
-  "/customers": { title: "客户管理", subtitle: "客户档案与跟进" },
-  "/opportunities": { title: "商机", subtitle: "销售漏斗管理" },
-  "/quotes": { title: "报价", subtitle: "报价单管理" },
-  "/samples": { title: "样品", subtitle: "样品寄送跟踪" },
-  "/products": { title: "产品", subtitle: "产品目录管理" },
-  "/marketing": { title: "邮件营销", subtitle: "模板与任务管理" },
-  "/settings": { title: "设置", subtitle: "系统配置" },
+  "/": { title: "业务概览", subtitle: "查看获客、客户、商机与发信进展" },
+  "/acquisition": { title: "智能获客", subtitle: "搜索、核验并转入潜在客户" },
+  "/customers": { title: "客户管理", subtitle: "维护客户档案与跟进进度" },
+  "/opportunities": { title: "销售商机", subtitle: "推进客户需求与成交进度" },
+  "/quotes": { title: "报价管理", subtitle: "创建、发送并跟踪报价单" },
+  "/samples": { title: "样品跟进", subtitle: "记录样品寄出与签收情况" },
+  "/products": { title: "产品资料", subtitle: "维护产品与报价基础资料" },
+  "/marketing": { title: "邮件发送", subtitle: "管理邮件模板、发信任务与记录" },
+  "/settings": { title: "系统设置", subtitle: "配置账号、邮件、获客与数据安全" },
 };
 
 export function Shell() {
@@ -91,8 +91,8 @@ export function Shell() {
           </div>
           {!isCollapsed && (
             <div className="flex flex-col">
-              <span className="font-semibold">外贸 CRM</span>
-              <span className="text-xs text-muted-foreground">本地工作台</span>
+              <span className="font-semibold">华远外贸 CRM</span>
+              <span className="text-xs text-muted-foreground">客户开发与销售工作台</span>
             </div>
           )}
         </div>
@@ -141,7 +141,7 @@ export function Shell() {
               <div className="flex flex-col min-w-0">
                 <span className="text-sm font-medium truncate">{displayName || username}</span>
                 <span className="text-xs text-muted-foreground">
-                  {role === "admin" ? "超级管理员" : role === "sales" ? "销售" : "只读查看"}
+                  {role === "admin" ? "超级管理员" : role === "sales" ? "销售人员" : "只读成员"}
                   {username !== displayName && displayName ? ` · ${username}` : ""}
                 </span>
               </div>

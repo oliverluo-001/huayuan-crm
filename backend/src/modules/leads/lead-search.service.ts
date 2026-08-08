@@ -111,7 +111,7 @@ export class LeadSearchService {
       };
     } catch (error) {
       this.logger.warn(`AI association fallback: ${this.errorMessage(error)}`);
-      return { ...fallback, warning: 'AI 联想暂不可用，已使用本地行业规则' };
+      return { ...fallback, warning: 'AI 联想暂不可用，已改用内置行业规则' };
     }
   }
 
@@ -285,7 +285,7 @@ export class LeadSearchService {
   private companyName(title: string, url: string) {
     const cleaned = this.toText(title).split(/\s+[|–—-]\s+/)[0].trim();
     if (cleaned && cleaned.length <= 160) return cleaned;
-    try { return new URL(url).hostname.replace(/^www\./, '').split('.')[0]; } catch { return 'Unknown company'; }
+    try { return new URL(url).hostname.replace(/^www\./, '').split('.')[0]; } catch { return '未识别公司'; }
   }
 
   private origin(url: string) {

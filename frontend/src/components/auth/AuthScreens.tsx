@@ -80,14 +80,14 @@ export function LoginScreen() {
             W
           </div>
           <div className="flex flex-col">
-            <span className="text-2xl font-bold">外贸 CRM</span>
+            <span className="text-2xl font-bold">华远外贸 CRM</span>
           </div>
         </div>
 
         <Card>
           <CardHeader>
-            <CardDescription>团队安全登录</CardDescription>
-            <CardTitle className="text-2xl">外贸 CRM</CardTitle>
+            <CardDescription>外贸客户开发与销售管理</CardDescription>
+            <CardTitle className="text-2xl">登录华远外贸 CRM</CardTitle>
           </CardHeader>
           <CardContent>
             <Tabs value={tab} onValueChange={setTab} className="w-full flex flex-col gap-4">
@@ -130,7 +130,7 @@ export function LoginScreen() {
                     <p className="text-sm text-destructive">{loginError}</p>
                   )}
                   <Button type="submit" className="w-full" disabled={loginLoading}>
-                    {loginLoading ? "登录中..." : "登录"}
+                    {loginLoading ? "登录中…" : "登录"}
                   </Button>
                 </form>
               </TabsContent>
@@ -203,7 +203,7 @@ export function LoginScreen() {
                     <p className="text-sm text-destructive">{regError}</p>
                   )}
                   <Button type="submit" className="w-full" disabled={regLoading}>
-                    {regLoading ? "提交中..." : registrationRequiresApproval ? "提交注册申请" : "创建账号"}
+                    {regLoading ? "提交中…" : registrationRequiresApproval ? "提交注册申请" : "创建账号"}
                   </Button>
                 </form>
               </TabsContent>
@@ -255,7 +255,7 @@ export function SetupScreen() {
             W
           </div>
           <div className="flex flex-col">
-            <span className="text-2xl font-bold">外贸 CRM</span>
+            <span className="text-2xl font-bold">华远外贸 CRM</span>
           </div>
         </div>
 

@@ -92,7 +92,7 @@ export function ProductsPage() {
       {/* Form */}
       {canManage && <Card>
         <CardHeader>
-          <CardTitle>{editingId ? "编辑产品" : "新增产品"}</CardTitle>
+          <CardTitle>{editingId ? "编辑产品资料" : "新增产品资料"}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -177,7 +177,7 @@ export function ProductsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
-            产品目录
+            产品资料
             <Badge variant="secondary">{products.length}</Badge>
           </CardTitle>
         </CardHeader>
@@ -207,7 +207,7 @@ export function ProductsPage() {
             ) : products.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={canManage ? 6 : 5} className="text-center py-8 text-muted-foreground">
-                  暂无产品数据
+                  暂无产品资料
                 </TableCell>
               </TableRow>
             ) : (
