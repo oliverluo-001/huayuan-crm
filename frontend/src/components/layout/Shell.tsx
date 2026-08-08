@@ -141,7 +141,7 @@ export function Shell() {
               <div className="flex flex-col min-w-0">
                 <span className="text-sm font-medium truncate">{displayName || username}</span>
                 <span className="text-xs text-muted-foreground">
-                  {role === "admin" ? "管理员" : role === "sales" ? "销售" : "只读查看"}
+                  {role === "admin" ? "超级管理员" : role === "sales" ? "销售" : "只读查看"}
                   {username !== displayName && displayName ? ` · ${username}` : ""}
                 </span>
               </div>

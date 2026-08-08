@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 export function LoginScreen() {
-  const { login, register, registrationEnabled, registrationRequiresApproval } = useAuth();
+  const { login, register, registrationRequiresApproval } = useAuth();
   const [tab, setTab] = useState("login");
 
   // Login form
@@ -93,7 +93,7 @@ export function LoginScreen() {
             <Tabs value={tab} onValueChange={setTab} className="w-full flex flex-col gap-4">
               <TabsList className="w-full">
                 <TabsTrigger value="login" className="flex-1">登录</TabsTrigger>
-                {registrationEnabled && <TabsTrigger value="register" className="flex-1">注册</TabsTrigger>}
+                <TabsTrigger value="register" className="flex-1">注册</TabsTrigger>
               </TabsList>
               <TabsContent value="login">
                 <form onSubmit={handleLogin} className="space-y-4">

@@ -16,9 +16,9 @@ export class CreateUserDto {
   @MaxLength(255)
   email?: string;
 
-  @IsEnum(['admin', 'sales', 'viewer'])
+  @IsEnum(['sales', 'viewer'])
   @IsOptional()
-  role?: 'admin' | 'sales' | 'viewer';
+  role?: 'sales' | 'viewer';
 
   @IsString()
   @IsNotEmpty({ message: '密码不能为空' })
@@ -38,9 +38,9 @@ export class UpdateUserDto {
   @MaxLength(255)
   email?: string;
 
-  @IsEnum(['admin', 'sales', 'viewer'])
+  @IsEnum(['sales', 'viewer'])
   @IsOptional()
-  role?: 'admin' | 'sales' | 'viewer';
+  role?: 'sales' | 'viewer';
 
   @IsBoolean()
   @IsOptional()

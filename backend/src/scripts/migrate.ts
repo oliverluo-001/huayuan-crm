@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
+import * as bcrypt from 'bcrypt';
 
 const migrationId = '20260730_online_accounts';
 const database = process.env.DB_DATABASE || 'international_trade_crm';
@@ -36,37 +37,47 @@ async function main() {
       throw new Error('users 表不存在。请先完成基础数据库初始化，再执行增量迁移。');
     }
 
+    if (!applied.length) {
+      await connection.beginTransaction();
+      try {
+        await normalizeLegacyUserEmails(connection);
+        await addColumn(connection, 'status', "VARCHAR(20) NOT NULL DEFAULT 'active'");
+        await addColumn(connection, 'active', 'TINYINT(1) NOT NULL DEFAULT 1');
+        await addColumn(connection, 'registration_source', "VARCHAR(20) NOT NULL DEFAULT 'admin'");
+        await addColumn(connection, 'token_version', 'INT UNSIGNED NOT NULL DEFAULT 0');
+        await addColumn(connection, 'failed_login_attempts', 'INT UNSIGNED NOT NULL DEFAULT 0');
+        await addColumn(connection, 'locked_until', 'DATETIME NULL');
+        await addColumn(connection, 'last_login_at', 'DATETIME NULL');
+        await addColumn(connection, 'approved_at', 'DATETIME NULL');
+        await addColumn(connection, 'approved_by', 'INT NULL');
+        await connection.query(`
+          UPDATE users
+          SET status = 'active',
+              active = 1,
+              registration_source = CASE WHEN role = 'admin' THEN 'setup' ELSE 'admin' END,
+              approved_at = COALESCE(approved_at, created_at)
+        `);
+        if (!(await indexExists(connection, 'idx_users_status'))) {
+          await connection.query('ALTER TABLE users ADD KEY idx_users_status (status, active)');
+        }
+        await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [migrationId]);
+        await connection.commit();
+        console.log(`Applied migration: ${migrationId}`);
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      }
+    }
+    await migrateEmailExecution(connection);
+    await migrateAuditMetadata(connection);
     await connection.beginTransaction();
     try {
-      await normalizeLegacyUserEmails(connection);
-      await addColumn(connection, 'status', "VARCHAR(20) NOT NULL DEFAULT 'active'");
-      await addColumn(connection, 'active', 'TINYINT(1) NOT NULL DEFAULT 1');
-      await addColumn(connection, 'registration_source', "VARCHAR(20) NOT NULL DEFAULT 'admin'");
-      await addColumn(connection, 'token_version', 'INT UNSIGNED NOT NULL DEFAULT 0');
-      await addColumn(connection, 'failed_login_attempts', 'INT UNSIGNED NOT NULL DEFAULT 0');
-      await addColumn(connection, 'locked_until', 'DATETIME NULL');
-      await addColumn(connection, 'last_login_at', 'DATETIME NULL');
-      await addColumn(connection, 'approved_at', 'DATETIME NULL');
-      await addColumn(connection, 'approved_by', 'INT NULL');
-      await connection.query(`
-        UPDATE users
-        SET status = 'active',
-            active = 1,
-            registration_source = CASE WHEN role = 'admin' THEN 'setup' ELSE 'admin' END,
-            approved_at = COALESCE(approved_at, created_at)
-      `);
-      if (!(await indexExists(connection, 'idx_users_status'))) {
-        await connection.query('ALTER TABLE users ADD KEY idx_users_status (status, active)');
-      }
-      await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [migrationId]);
+      await ensureInitialAdmin(connection);
       await connection.commit();
-      console.log(`Applied migration: ${migrationId}`);
     } catch (error) {
       await connection.rollback();
       throw error;
     }
-    await migrateEmailExecution(connection);
-    await migrateAuditMetadata(connection);
   } finally {
     await connection.end();
   }
@@ -82,6 +93,59 @@ async function migrateAuditMetadata(connection: Connection) {
   await addColumnToTable(connection, 'audit_logs', 'status', "VARCHAR(20) NOT NULL DEFAULT 'success'");
   await addColumnToTable(connection, 'audit_logs', 'duration_ms', 'INT NOT NULL DEFAULT 0');
   await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
+}
+
+export async function ensureInitialAdmin(
+  connection: Pick<Connection, 'query'>,
+  credentials: { username?: string; password?: string; displayName?: string } = {},
+) {
+  const username = (credentials.username ?? process.env.INITIAL_ADMIN_USERNAME ?? '').trim();
+  const password = credentials.password ?? process.env.INITIAL_ADMIN_PASSWORD ?? '';
+  const displayName = (credentials.displayName ?? process.env.INITIAL_ADMIN_DISPLAY_NAME ?? '超级管理员').trim();
+
+  if (!username && !password) return { configured: false, created: false };
+  if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
+    throw new Error('INITIAL_ADMIN_USERNAME 必须是 3-32 位字母、数字、点、横线或下划线');
+  }
+  if (password.length < 16 || password.length > 128) {
+    throw new Error('INITIAL_ADMIN_PASSWORD 必须是 16-128 位密码');
+  }
+
+  const [rows] = await connection.query<RowDataPacket[]>(
+    'SELECT id, role, status, active FROM users WHERE username = ? LIMIT 1',
+    [username],
+  );
+  const existing = rows[0];
+
+  await connection.query(
+    "UPDATE users SET role = 'sales', token_version = token_version + 1 WHERE role = 'admin' AND username <> ?",
+    [username],
+  );
+
+  if (existing) {
+    if (existing.role !== 'admin' || existing.status !== 'active' || !existing.active) {
+      await connection.query(
+        `UPDATE users
+         SET role = 'admin', status = 'active', active = 1,
+             registration_source = 'setup', approved_at = COALESCE(approved_at, NOW()),
+             token_version = token_version + 1
+         WHERE id = ?`,
+        [existing.id],
+      );
+    }
+    return { configured: true, created: false };
+  }
+
+  const passwordHash = await bcrypt.hash(password, 12);
+  await connection.query(
+    `INSERT INTO users (
+       username, display_name, email, role, status, active, registration_source,
+       password_hash, token_version, failed_login_attempts, locked_until,
+       last_login_at, approved_at, approved_by, created_at, updated_at
+     ) VALUES (?, ?, NULL, 'admin', 'active', 1, 'setup', ?, 0, 0, NULL, NULL, NOW(), NULL, NOW(), NOW())`,
+    [username, displayName || username, passwordHash],
+  );
+  return { configured: true, created: true };
 }
 
 export async function normalizeLegacyUserEmails(connection: Pick<Connection, 'query'>) {

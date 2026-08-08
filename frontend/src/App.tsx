@@ -1,12 +1,11 @@
 import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { useAuth, AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
 
 const Shell = lazy(() => import("@/components/layout/Shell").then((module) => ({ default: module.Shell })));
 const LoginScreen = lazy(() => import("@/components/auth/AuthScreens").then((module) => ({ default: module.LoginScreen })));
-const SetupScreen = lazy(() => import("@/components/auth/AuthScreens").then((module) => ({ default: module.SetupScreen })));
 const Dashboard = lazy(() => import("@/components/dashboard/Dashboard").then((module) => ({ default: module.Dashboard })));
 const CustomerTable = lazy(() => import("@/components/customers/CustomerTable").then((module) => ({ default: module.CustomerTable })));
 const OpportunitiesPage = lazy(() => import("@/components/opportunities/OpportunitiesPage").then((module) => ({ default: module.OpportunitiesPage })));
@@ -22,7 +21,7 @@ function RouteLoading() {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, needsSetup, isLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -30,10 +29,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         <div className="text-muted-foreground">加载中...</div>
       </div>
     );
-  }
-
-  if (needsSetup) {
-    return <Navigate to="/setup" replace />;
   }
 
   if (!isAuthenticated) {
@@ -44,8 +39,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, needsSetup, isLoading } = useAuth();
-  const location = useLocation();
+  const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -53,10 +47,6 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
         <div className="text-muted-foreground">加载中...</div>
       </div>
     );
-  }
-
-  if (needsSetup && location.pathname !== "/setup") {
-    return <Navigate to="/setup" replace />;
   }
 
   if (isAuthenticated) {
@@ -78,14 +68,7 @@ function AppRoutes() {
           </PublicRoute>
         }
       />
-      <Route
-        path="/setup"
-        element={
-          <PublicRoute>
-            <SetupScreen />
-          </PublicRoute>
-        }
-      />
+      <Route path="/setup" element={<Navigate to="/login" replace />} />
       <Route
         path="/"
         element={

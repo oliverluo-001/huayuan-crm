@@ -81,6 +81,9 @@ jobs:
             PUBLIC_BASE_URL=${{ secrets.PUBLIC_BASE_URL || 'https://crm.huayuanflange.com' }}
             BACKUP_DIR=${{ secrets.BACKUP_DIR || '/var/backups/huayuan-crm' }}
             REGISTRATION_MODE=approval
+            INITIAL_ADMIN_USERNAME=${{ secrets.INITIAL_ADMIN_USERNAME }}
+            INITIAL_ADMIN_PASSWORD=${{ secrets.INITIAL_ADMIN_PASSWORD }}
+            INITIAL_ADMIN_DISPLAY_NAME=超级管理员
             LOGIN_MAX_ATTEMPTS=5
             LOGIN_LOCK_MINUTES=15
             DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}

@@ -817,7 +817,7 @@ export function SettingsPage() {
                     <div className="space-y-2">
                       <Label>角色</Label>
                       <Input
-                        value={({ admin: "管理员", sales: "销售", viewer: "只读" } as Record<string, string>)[accountInfo.role] || accountInfo.role}
+                        value={({ admin: "超级管理员", sales: "销售", viewer: "只读" } as Record<string, string>)[accountInfo.role] || accountInfo.role}
                         disabled
                       />
                     </div>
@@ -1371,7 +1371,6 @@ export function SettingsPage() {
                       value={userForm.role}
                       onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
                     >
-                      <option value="admin">管理员</option>
                       <option value="sales">销售</option>
                       <option value="viewer">只读</option>
                     </select>
@@ -1403,7 +1402,7 @@ export function SettingsPage() {
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-sm">{u.displayName || u.username}</span>
                           <Badge variant="outline" className="text-xs">
-                            {({ admin: "管理员", sales: "销售", viewer: "只读" } as Record<string, string>)[u.role] || u.role}
+                            {({ admin: "超级管理员", sales: "销售", viewer: "只读" } as Record<string, string>)[u.role] || u.role}
                           </Badge>
                           <Badge
                             variant="outline"
@@ -1438,7 +1437,6 @@ export function SettingsPage() {
                               value={userEditForm.role}
                               onChange={(e) => setUserEditForm({ ...userEditForm, role: e.target.value })}
                             >
-                              <option value="admin">管理员</option>
                               <option value="sales">销售</option>
                               <option value="viewer">只读</option>
                             </select>
@@ -1480,14 +1478,20 @@ export function SettingsPage() {
                                 </Button>
                               </>
                             )}
-                            <Button size="sm" variant="outline" onClick={() => { setEditingUserId(u.id); setUserEditForm({ displayName: u.displayName || "", email: u.email || "", role: u.role, active: u.active }); }}>
-                              <Edit className="h-3.5 w-3.5 mr-1" />
-                              编辑
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={() => setResetPasswordFor(u.id)}>
-                              <KeyRound className="h-3.5 w-3.5 mr-1" />
-                              重置密码
-                            </Button>
+                            {u.role === "admin" ? (
+                              <Badge variant="outline">唯一超级管理员 · 受保护</Badge>
+                            ) : (
+                              <>
+                                <Button size="sm" variant="outline" onClick={() => { setEditingUserId(u.id); setUserEditForm({ displayName: u.displayName || "", email: u.email || "", role: u.role, active: u.active }); }}>
+                                  <Edit className="h-3.5 w-3.5 mr-1" />
+                                  编辑
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => setResetPasswordFor(u.id)}>
+                                  <KeyRound className="h-3.5 w-3.5 mr-1" />
+                                  重置密码
+                                </Button>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>

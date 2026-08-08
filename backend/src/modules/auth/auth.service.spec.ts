@@ -68,6 +68,22 @@ describe('AuthService online accounts', () => {
     expect(users[0].registrationSource).toBe('self');
   });
 
+  it('keeps public registration available without redirecting to setup', async () => {
+    repository.exists.mockResolvedValue(false);
+
+    const status = await service.getStatus();
+    const result = await service.register({
+      username: 'new.member',
+      displayName: 'New Member',
+      email: 'member@example.com',
+      password: 'StrongPass123!',
+    });
+
+    expect(status.initialized).toBe(false);
+    expect(status.registrationEnabled).toBe(true);
+    expect(result.requiresApproval).toBe(true);
+  });
+
   it('does not allow a pending account to log in', async () => {
     const pending = {
       id: 8,

@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from './entities/user.entity';
@@ -15,6 +16,7 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly configService: ConfigService,
   ) {}
 
   async findAll() {
@@ -53,6 +55,7 @@ export class UsersService {
     const user = await this.requireUser(id);
     const nextRole = dto.role || user.role;
     const nextActive = dto.active ?? user.active;
+    this.assertInitialAdminProtected(user, nextRole, nextActive);
     await this.assertLastAdmin(user, nextRole, nextActive);
     if (dto.email !== undefined) {
       const email = dto.email.trim().toLowerCase();
@@ -79,6 +82,7 @@ export class UsersService {
 
   async reject(id: number, approverId: number) {
     const user = await this.requireUser(id);
+    this.assertInitialAdminProtected(user, user.role, false);
     await this.assertLastAdmin(user, user.role, false);
     user.status = 'rejected';
     user.active = false;
@@ -111,6 +115,14 @@ export class UsersService {
       where: { role: 'admin', status: 'active', active: true },
     });
     if (count <= 1) throw new BadRequestException('至少需要保留一个有效管理员');
+  }
+
+  private assertInitialAdminProtected(user: User, nextRole: User['role'], nextActive: boolean) {
+    const username = this.configService.get<string>('INITIAL_ADMIN_USERNAME', '').trim();
+    if (!username || user.username !== username) return;
+    if (nextRole !== 'admin' || !nextActive) {
+      throw new BadRequestException('唯一超级管理员不能降级或停用');
+    }
   }
 
   private async assertUniqueIdentity(username: string, email: string, excludeId?: number) {

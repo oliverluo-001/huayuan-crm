@@ -52,7 +52,7 @@ export class AuthService {
       userId: user ? String(user.id) : '',
       role: user?.role || '',
       registrationMode: this.registrationMode,
-      registrationEnabled: initialized && this.registrationMode !== 'disabled',
+      registrationEnabled: this.registrationMode !== 'disabled',
       registrationRequiresApproval: this.registrationMode === 'approval',
     };
   }
@@ -82,9 +82,6 @@ export class AuthService {
   }
 
   async register(registerDto: RegisterDto) {
-    if (!(await this.hasActiveAdmin())) {
-      throw new BadRequestException('请先创建系统管理员账号');
-    }
     if (this.registrationMode === 'disabled') {
       throw new ForbiddenException('当前系统未开放在线注册，请联系管理员');
     }
