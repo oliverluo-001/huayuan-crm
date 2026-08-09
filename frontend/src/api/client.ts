@@ -5,6 +5,7 @@ import type {
   Customer,
   CustomerListResult,
   Customer360,
+  CustomerAttachment,
   Contact,
   Activity,
   Todo,
@@ -48,6 +49,7 @@ export type {
   Customer,
   CustomerListResult,
   Customer360,
+  CustomerAttachment,
   Contact,
   Activity,
   Todo,
@@ -113,7 +115,10 @@ function toast(message: string) {
   }
 }
 
-async function api<T = unknown>(url: string, options: ApiOptions = {}): Promise<T> {
+async function api<T = unknown>(
+  url: string,
+  options: ApiOptions = {},
+): Promise<T> {
   const fetchOptions: RequestInit = { method: options.method || "GET" };
 
   if (options.rawBody) {
@@ -123,7 +128,10 @@ async function api<T = unknown>(url: string, options: ApiOptions = {}): Promise<
     fetchOptions.body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(url, { ...fetchOptions, credentials: "include" });
+  const response = await fetch(url, {
+    ...fetchOptions,
+    credentials: "include",
+  });
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
@@ -134,7 +142,8 @@ async function api<T = unknown>(url: string, options: ApiOptions = {}): Promise<
       setupCallback();
     }
     // Handle wrapped error responses: { statusCode, message, data }
-    const errorMsg = data?.data?.error || data?.message || data?.error || "请求失败";
+    const errorMsg =
+      data?.data?.error || data?.message || data?.error || "请求失败";
     if (!options.silent) {
       toast(errorMsg);
     }
@@ -142,7 +151,13 @@ async function api<T = unknown>(url: string, options: ApiOptions = {}): Promise<
   }
 
   // Unwrap TransformInterceptor wrapper: { statusCode, message, data, timestamp }
-  if (data && typeof data === "object" && "statusCode" in data && "data" in data && "message" in data) {
+  if (
+    data &&
+    typeof data === "object" &&
+    "statusCode" in data &&
+    "data" in data &&
+    "message" in data
+  ) {
     return data.data as T;
   }
 
@@ -151,7 +166,9 @@ async function api<T = unknown>(url: string, options: ApiOptions = {}): Promise<
 
 // Auth API
 export async function getAuthStatus(): Promise<AuthStatus> {
-  const result = await api<Partial<AuthStatus>>("/api/auth/status", { silent: true });
+  const result = await api<Partial<AuthStatus>>("/api/auth/status", {
+    silent: true,
+  });
   return {
     initialized: result.initialized ?? false,
     authenticated: result.authenticated ?? false,
@@ -165,11 +182,17 @@ export async function getAuthStatus(): Promise<AuthStatus> {
   };
 }
 
-export async function setup(username: string, password: string): Promise<LoginResult> {
-  const result = await api<LoginResult & { user?: Partial<LoginResult> }>("/api/auth/setup", {
-    method: "POST",
-    body: { username, password },
-  });
+export async function setup(
+  username: string,
+  password: string,
+): Promise<LoginResult> {
+  const result = await api<LoginResult & { user?: Partial<LoginResult> }>(
+    "/api/auth/setup",
+    {
+      method: "POST",
+      body: { username, password },
+    },
+  );
   return {
     ok: result.ok ?? true,
     username: result.username ?? result.user?.username ?? "",
@@ -179,11 +202,17 @@ export async function setup(username: string, password: string): Promise<LoginRe
   };
 }
 
-export async function login(username: string, password: string): Promise<LoginResult> {
-  const result = await api<LoginResult & { user?: Partial<LoginResult> }>("/api/auth/login", {
-    method: "POST",
-    body: { username, password },
-  });
+export async function login(
+  username: string,
+  password: string,
+): Promise<LoginResult> {
+  const result = await api<LoginResult & { user?: Partial<LoginResult> }>(
+    "/api/auth/login",
+    {
+      method: "POST",
+      body: { username, password },
+    },
+  );
   return {
     ok: result.ok ?? true,
     username: result.username ?? result.user?.username ?? "",
@@ -193,11 +222,19 @@ export async function login(username: string, password: string): Promise<LoginRe
   };
 }
 
-export async function register(username: string, password: string, displayName: string, email: string): Promise<RegisterResult> {
-  const result = await api<RegisterResult & { user?: Partial<LoginResult> }>("/api/auth/register", {
-    method: "POST",
-    body: { username, password, displayName, email },
-  });
+export async function register(
+  username: string,
+  password: string,
+  displayName: string,
+  email: string,
+): Promise<RegisterResult> {
+  const result = await api<RegisterResult & { user?: Partial<LoginResult> }>(
+    "/api/auth/register",
+    {
+      method: "POST",
+      body: { username, password, displayName, email },
+    },
+  );
   return {
     ok: result.ok ?? true,
     username: result.username ?? result.user?.username ?? "",
@@ -213,7 +250,10 @@ export async function logout(): Promise<void> {
   await api("/api/auth/logout", { method: "POST" });
 }
 
-export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
   await api("/api/auth/change-password", {
     method: "POST",
     body: { oldPassword: currentPassword, newPassword },
@@ -228,7 +268,7 @@ export async function getDashboard(): Promise<DashboardSnapshot> {
 export async function getCustomers(
   offset: number,
   limit: number,
-  filters: Record<string, string>
+  filters: Record<string, string>,
 ): Promise<CustomerListResult> {
   const query = new URLSearchParams({
     offset: String(offset),
@@ -242,12 +282,20 @@ export async function getCustomer360(id: string): Promise<Customer360> {
   return api<Customer360>(`/api/customers/${encodeURIComponent(id)}/360`);
 }
 
-export async function createCustomer(data: Partial<Customer>): Promise<Customer> {
+export async function createCustomer(
+  data: Partial<Customer>,
+): Promise<Customer> {
   return api<Customer>("/api/customers", { method: "POST", body: data });
 }
 
-export async function updateCustomer(id: string, data: Partial<Customer>): Promise<Customer> {
-  return api<Customer>(`/api/customers/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+export async function updateCustomer(
+  id: string,
+  data: Partial<Customer>,
+): Promise<Customer> {
+  return api<Customer>(`/api/customers/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: data,
+  });
 }
 
 export async function deleteCustomer(id: string): Promise<void> {
@@ -258,12 +306,25 @@ export async function bulkDeleteCustomers(ids: string[]): Promise<void> {
   await api("/api/customers/bulk-delete", { method: "POST", body: { ids } });
 }
 
-export async function bulkUpdateCustomerTags(ids: string[], tag: string, action: "add" | "remove"): Promise<void> {
-  await api("/api/customers/bulk-tags", { method: "POST", body: { ids, tag, action } });
+export async function bulkUpdateCustomerTags(
+  ids: string[],
+  tag: string,
+  action: "add" | "remove",
+): Promise<void> {
+  await api("/api/customers/bulk-tags", {
+    method: "POST",
+    body: { ids, tag, action },
+  });
 }
 
-export async function bulkUpdateCustomerTier(ids: string[], tier: string): Promise<void> {
-  await api("/api/customers/bulk-tier", { method: "POST", body: { ids, tier } });
+export async function bulkUpdateCustomerTier(
+  ids: string[],
+  tier: string,
+): Promise<void> {
+  await api("/api/customers/bulk-tier", {
+    method: "POST",
+    body: { ids, tier },
+  });
 }
 
 // Customer Tags API
@@ -276,7 +337,9 @@ export async function createCustomerTag(name: string): Promise<void> {
 }
 
 export async function deleteCustomerTag(name: string): Promise<void> {
-  await api(`/api/customer-tags/${encodeURIComponent(name)}`, { method: "DELETE" });
+  await api(`/api/customer-tags/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
 }
 
 // Customer Views API
@@ -285,54 +348,162 @@ export async function getCustomerViews(): Promise<CustomerView[]> {
   return result.views || [];
 }
 
-export async function createCustomerView(name: string, filters: Record<string, string>): Promise<CustomerView> {
-  return api<CustomerView>("/api/customer-views", { method: "POST", body: { name, filters, columns: [] } });
+export async function createCustomerView(
+  name: string,
+  filters: Record<string, string>,
+): Promise<CustomerView> {
+  return api<CustomerView>("/api/customer-views", {
+    method: "POST",
+    body: { name, filters, columns: [] },
+  });
 }
 
 export async function deleteCustomerView(id: string): Promise<void> {
-  await api(`/api/customer-views/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await api(`/api/customer-views/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 // Contacts API
-export async function getCustomerContacts(customerId: string): Promise<Contact[]> {
-  const result = await api<{ contacts: Contact[] } | Contact[]>(`/api/customers/${encodeURIComponent(customerId)}/contacts`);
+export async function getCustomerContacts(
+  customerId: string,
+): Promise<Contact[]> {
+  const result = await api<{ contacts: Contact[] } | Contact[]>(
+    `/api/customers/${encodeURIComponent(customerId)}/contacts`,
+  );
   return Array.isArray(result) ? result : result.contacts || [];
 }
 
-export async function createCustomerContact(customerId: string, data: Partial<Contact>): Promise<Contact> {
-  return api<Contact>(`/api/customers/${encodeURIComponent(customerId)}/contacts`, { method: "POST", body: data });
+export async function createCustomerContact(
+  customerId: string,
+  data: Partial<Contact>,
+): Promise<Contact> {
+  return api<Contact>(
+    `/api/customers/${encodeURIComponent(customerId)}/contacts`,
+    { method: "POST", body: data },
+  );
 }
 
-export async function updateContact(id: string, data: Partial<Contact>): Promise<Contact> {
-  return api<Contact>(`/api/contacts/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+export async function updateContact(
+  id: string,
+  data: Partial<Contact>,
+): Promise<Contact> {
+  return api<Contact>(`/api/contacts/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: data,
+  });
 }
 
 export async function deleteContact(id: string): Promise<void> {
   await api(`/api/contacts/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+// Customer attachments API
+export async function getCustomerAttachments(
+  customerId: string,
+): Promise<CustomerAttachment[]> {
+  return api<CustomerAttachment[]>(
+    `/api/customers/${encodeURIComponent(customerId)}/attachments`,
+  );
+}
+
+export async function uploadCustomerAttachment(
+  customerId: string,
+  file: File,
+  data: { category?: CustomerAttachment["category"]; note?: string },
+): Promise<CustomerAttachment> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (data.category) formData.append("category", data.category);
+  if (data.note) formData.append("note", data.note);
+  return api<CustomerAttachment>(
+    `/api/customers/${encodeURIComponent(customerId)}/attachments`,
+    {
+      method: "POST",
+      rawBody: formData,
+    },
+  );
+}
+
+export async function deleteCustomerAttachment(id: string): Promise<void> {
+  await api(`/api/attachments/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function downloadCustomerAttachment(
+  attachment: CustomerAttachment,
+): Promise<void> {
+  const response = await fetch(
+    `/api/attachments/${encodeURIComponent(attachment.id)}/download`,
+    {
+      credentials: "include",
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    const message =
+      payload?.data?.error ||
+      payload?.message ||
+      payload?.error ||
+      "附件下载失败";
+    toast(message);
+    throw new Error(message);
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = attachment.originalName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 // Activities API
-export async function getCustomerActivities(customerId: string): Promise<Activity[]> {
-  const result = await api<{ activities: Activity[] } | Activity[]>(`/api/customers/${encodeURIComponent(customerId)}/activities`);
+export async function getCustomerActivities(
+  customerId: string,
+): Promise<Activity[]> {
+  const result = await api<{ activities: Activity[] } | Activity[]>(
+    `/api/customers/${encodeURIComponent(customerId)}/activities`,
+  );
   return Array.isArray(result) ? result : result.activities || [];
 }
 
-export async function createCustomerActivity(customerId: string, data: Partial<Activity>): Promise<Activity> {
-  return api<Activity>(`/api/customers/${encodeURIComponent(customerId)}/activities`, { method: "POST", body: data });
+export async function createCustomerActivity(
+  customerId: string,
+  data: Partial<Activity>,
+): Promise<Activity> {
+  return api<Activity>(
+    `/api/customers/${encodeURIComponent(customerId)}/activities`,
+    { method: "POST", body: data },
+  );
 }
 
 // Todos API
 export async function getCustomerTodos(customerId: string): Promise<Todo[]> {
-  const result = await api<{ todos: Todo[] } | Todo[]>(`/api/customers/${encodeURIComponent(customerId)}/todos`);
+  const result = await api<{ todos: Todo[] } | Todo[]>(
+    `/api/customers/${encodeURIComponent(customerId)}/todos`,
+  );
   return Array.isArray(result) ? result : result.todos || [];
 }
 
-export async function createCustomerTodo(customerId: string, data: Partial<Todo>): Promise<Todo> {
-  return api<Todo>(`/api/customers/${encodeURIComponent(customerId)}/todos`, { method: "POST", body: data });
+export async function createCustomerTodo(
+  customerId: string,
+  data: Partial<Todo>,
+): Promise<Todo> {
+  return api<Todo>(`/api/customers/${encodeURIComponent(customerId)}/todos`, {
+    method: "POST",
+    body: data,
+  });
 }
 
-export async function updateTodo(id: string, data: Partial<Todo>): Promise<Todo> {
-  return api<Todo>(`/api/todos/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+export async function updateTodo(
+  id: string,
+  data: Partial<Todo>,
+): Promise<Todo> {
+  return api<Todo>(`/api/todos/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: data,
+  });
 }
 
 export async function deleteTodo(id: string): Promise<void> {
@@ -341,20 +512,36 @@ export async function deleteTodo(id: string): Promise<void> {
 
 // Opportunities API
 export async function getOpportunities(): Promise<Opportunity[]> {
-  const result = await api<{ opportunities: Opportunity[] }>("/api/opportunities");
+  const result = await api<{ opportunities: Opportunity[] }>(
+    "/api/opportunities",
+  );
   return result.opportunities || [];
 }
 
-export async function createCustomerOpportunity(customerId: string, data: CreateOpportunityInput): Promise<Opportunity> {
-  return api<Opportunity>(`/api/customers/${encodeURIComponent(customerId)}/opportunities`, { method: "POST", body: data });
+export async function createCustomerOpportunity(
+  customerId: string,
+  data: CreateOpportunityInput,
+): Promise<Opportunity> {
+  return api<Opportunity>(
+    `/api/customers/${encodeURIComponent(customerId)}/opportunities`,
+    { method: "POST", body: data },
+  );
 }
 
-export async function updateOpportunity(id: string, data: UpdateOpportunityInput): Promise<Opportunity> {
-  return api<Opportunity>(`/api/opportunities/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+export async function updateOpportunity(
+  id: string,
+  data: UpdateOpportunityInput,
+): Promise<Opportunity> {
+  return api<Opportunity>(`/api/opportunities/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: data,
+  });
 }
 
 export async function deleteOpportunity(id: string): Promise<void> {
-  await api(`/api/opportunities/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await api(`/api/opportunities/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 // Products API
@@ -367,8 +554,14 @@ export async function createProduct(data: Partial<Product>): Promise<Product> {
   return api<Product>("/api/products", { method: "POST", body: data });
 }
 
-export async function updateProduct(id: string, data: Partial<Product>): Promise<Product> {
-  return api<Product>(`/api/products/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+export async function updateProduct(
+  id: string,
+  data: Partial<Product>,
+): Promise<Product> {
+  return api<Product>(`/api/products/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: data,
+  });
 }
 
 export async function deleteProduct(id: string): Promise<void> {
@@ -385,8 +578,14 @@ export async function createQuote(data: CreateQuoteInput): Promise<Quote> {
   return api<Quote>("/api/quotes", { method: "POST", body: data });
 }
 
-export async function updateQuote(id: string, data: UpdateQuoteInput): Promise<Quote> {
-  return api<Quote>(`/api/quotes/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+export async function updateQuote(
+  id: string,
+  data: UpdateQuoteInput,
+): Promise<Quote> {
+  return api<Quote>(`/api/quotes/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: data,
+  });
 }
 
 export async function deleteQuote(id: string): Promise<void> {
@@ -403,8 +602,14 @@ export async function createSample(data: CreateSampleInput): Promise<Sample> {
   return api<Sample>("/api/samples", { method: "POST", body: data });
 }
 
-export async function updateSample(id: string, data: UpdateSampleInput): Promise<Sample> {
-  return api<Sample>(`/api/samples/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+export async function updateSample(
+  id: string,
+  data: UpdateSampleInput,
+): Promise<Sample> {
+  return api<Sample>(`/api/samples/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: data,
+  });
 }
 
 export async function deleteSample(id: string): Promise<void> {
@@ -417,12 +622,20 @@ export async function getTemplates(): Promise<EmailTemplate[]> {
   return result.templates || [];
 }
 
-export async function createTemplate(data: Partial<EmailTemplate>): Promise<EmailTemplate> {
+export async function createTemplate(
+  data: Partial<EmailTemplate>,
+): Promise<EmailTemplate> {
   return api<EmailTemplate>("/api/templates", { method: "POST", body: data });
 }
 
-export async function updateTemplate(id: string, data: Partial<EmailTemplate>): Promise<EmailTemplate> {
-  return api<EmailTemplate>(`/api/templates/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+export async function updateTemplate(
+  id: string,
+  data: Partial<EmailTemplate>,
+): Promise<EmailTemplate> {
+  return api<EmailTemplate>(`/api/templates/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: data,
+  });
 }
 
 export async function deleteTemplate(id: string): Promise<void> {
@@ -435,36 +648,48 @@ export async function getEmailTasks(): Promise<EmailTask[]> {
   return result.tasks || [];
 }
 
-export async function createEmailTask(data: Partial<EmailTask>): Promise<EmailTask> {
+export async function createEmailTask(
+  data: Partial<EmailTask>,
+): Promise<EmailTask> {
   return api<EmailTask>("/api/email-tasks", { method: "POST", body: data });
 }
 
 export async function runEmailTask(id: string): Promise<void> {
-  await api(`/api/email-tasks/${encodeURIComponent(id)}/run`, { method: "POST" });
+  await api(`/api/email-tasks/${encodeURIComponent(id)}/run`, {
+    method: "POST",
+  });
 }
 
 export async function cancelEmailTask(id: string): Promise<void> {
-  await api(`/api/email-tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+  await api(`/api/email-tasks/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+  });
 }
 
 export async function deleteEmailTask(id: string): Promise<void> {
   await api(`/api/email-tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export async function getEmailRecipients(params?: Record<string, string>): Promise<{
+export async function getEmailRecipients(
+  params?: Record<string, string>,
+): Promise<{
   recipients: EmailRecipient[];
   total: number;
   offset: number;
   limit: number;
 }> {
-  const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+  const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return api(`/api/email-recipients${qs}`);
 }
 
-export async function getEmailRecipientIds(params?: Record<string, string>): Promise<{
+export async function getEmailRecipientIds(
+  params?: Record<string, string>,
+): Promise<{
   ids: string[];
 }> {
-  const qs = params ? '?' + new URLSearchParams({ ...params, ids: 'true' }).toString() : '?ids=true';
+  const qs = params
+    ? "?" + new URLSearchParams({ ...params, ids: "true" }).toString()
+    : "?ids=true";
   return api(`/api/email-recipients${qs}`);
 }
 
@@ -483,44 +708,72 @@ export async function getB2BLeadTasks(): Promise<B2BLeadTask[]> {
   return result.tasks || [];
 }
 
-export async function createB2BLeadTask(data: Partial<B2BLeadTask>): Promise<{ task: B2BLeadTask; queries?: string[] }> {
+export async function createB2BLeadTask(
+  data: Partial<B2BLeadTask>,
+): Promise<{ task: B2BLeadTask; queries?: string[] }> {
   return api("/api/lead-tasks", { method: "POST", body: data });
 }
 
-export async function getB2BLeads(taskId: string, filters?: Record<string, string>): Promise<{ leads: B2BLead[]; summary: Record<string, unknown> }> {
+export async function getB2BLeads(
+  taskId: string,
+  filters?: Record<string, string>,
+): Promise<{ leads: B2BLead[]; summary: Record<string, unknown> }> {
   const query = filters ? `?${new URLSearchParams(filters).toString()}` : "";
   return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/leads${query}`);
 }
 
 export async function runB2BLeadTask(id: string): Promise<void> {
-  await api(`/api/lead-tasks/${encodeURIComponent(id)}/run`, { method: "POST" });
+  await api(`/api/lead-tasks/${encodeURIComponent(id)}/run`, {
+    method: "POST",
+  });
 }
 
 export async function cancelB2BLeadTask(id: string): Promise<void> {
-  await api(`/api/lead-tasks/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+  await api(`/api/lead-tasks/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+  });
 }
 
 export async function deleteB2BLeadTask(id: string): Promise<void> {
   await api(`/api/lead-tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export async function importB2BLeads(taskId: string, leads: Partial<B2BLead>[]): Promise<{ imported: number }> {
-  return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/import-leads`, { method: "POST", body: { leads } });
-}
-
-export async function cleanB2BLeads(taskId: string): Promise<{ summary: Record<string, unknown> }> {
-  return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/clean`, { method: "POST" });
-}
-
-export async function getLeadAssociation(productName: string): Promise<LeadAssociation> {
-  const result = await api<LeadAssociation | { association: LeadAssociation }>("/api/lead-associations", {
+export async function importB2BLeads(
+  taskId: string,
+  leads: Partial<B2BLead>[],
+): Promise<{ imported: number }> {
+  return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/import-leads`, {
     method: "POST",
-    body: { productName },
+    body: { leads },
   });
+}
+
+export async function cleanB2BLeads(
+  taskId: string,
+): Promise<{ summary: Record<string, unknown> }> {
+  return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/clean`, {
+    method: "POST",
+  });
+}
+
+export async function getLeadAssociation(
+  productName: string,
+): Promise<LeadAssociation> {
+  const result = await api<LeadAssociation | { association: LeadAssociation }>(
+    "/api/lead-associations",
+    {
+      method: "POST",
+      body: { productName },
+    },
+  );
   return "association" in result ? result.association : result;
 }
 
-export async function saveLeadQueries(taskId: string, regenerate?: boolean, queries?: string[]): Promise<{ task: B2BLeadTask }> {
+export async function saveLeadQueries(
+  taskId: string,
+  regenerate?: boolean,
+  queries?: string[],
+): Promise<{ task: B2BLeadTask }> {
   return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/generate-queries`, {
     method: "POST",
     body: { regenerate, queries },
@@ -529,7 +782,7 @@ export async function saveLeadQueries(taskId: string, regenerate?: boolean, quer
 
 export async function importB2BLeadsToCustomers(
   taskId: string,
-  data: { ids?: string[]; importAll?: boolean }
+  data: { ids?: string[]; importAll?: boolean },
 ): Promise<{ imported: number; merged: number; skipped?: number }> {
   return api(`/api/lead-tasks/${encodeURIComponent(taskId)}/import-customers`, {
     method: "POST",
@@ -542,16 +795,27 @@ export async function getSearchProfiles(): Promise<SearchProfile[]> {
   return api<SearchProfile[]>("/api/settings/search-profiles");
 }
 
-export async function createSearchProfile(data: Partial<SearchProfile>): Promise<SearchProfile> {
-  return api<SearchProfile>("/api/settings/search-profiles", { method: "POST", body: data });
+export async function createSearchProfile(
+  data: Partial<SearchProfile>,
+): Promise<SearchProfile> {
+  return api<SearchProfile>("/api/settings/search-profiles", {
+    method: "POST",
+    body: data,
+  });
 }
 
-export async function testSearchProfile(id: string): Promise<{ ok: boolean; message?: string }> {
-  return api(`/api/settings/search-profiles/${encodeURIComponent(id)}/test`, { method: "POST" });
+export async function testSearchProfile(
+  id: string,
+): Promise<{ ok: boolean; message?: string }> {
+  return api(`/api/settings/search-profiles/${encodeURIComponent(id)}/test`, {
+    method: "POST",
+  });
 }
 
 export async function deleteSearchProfile(id: string): Promise<void> {
-  await api(`/api/settings/search-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await api(`/api/settings/search-profiles/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 // AI Profile API
@@ -563,7 +827,10 @@ export async function saveAiProfile(data: Partial<AiProfile>): Promise<void> {
   await api("/api/settings/ai-profile", { method: "POST", body: data });
 }
 
-export async function testAiProfile(): Promise<{ ok: boolean; message?: string }> {
+export async function testAiProfile(): Promise<{
+  ok: boolean;
+  message?: string;
+}> {
   return api("/api/settings/ai-profile/test", { method: "POST" });
 }
 
@@ -572,7 +839,9 @@ export async function getSmtpProfile(): Promise<SmtpProfile> {
   return api<SmtpProfile>("/api/settings/smtp-profile");
 }
 
-export async function saveSmtpProfile(data: Partial<SmtpProfile>): Promise<void> {
+export async function saveSmtpProfile(
+  data: Partial<SmtpProfile>,
+): Promise<void> {
   await api("/api/settings/smtp-profile", { method: "POST", body: data });
 }
 
@@ -581,7 +850,9 @@ export async function getImapProfile(): Promise<ImapProfile> {
   return api<ImapProfile>("/api/settings/imap-profile");
 }
 
-export async function saveImapProfile(data: Partial<ImapProfile>): Promise<void> {
+export async function saveImapProfile(
+  data: Partial<ImapProfile>,
+): Promise<void> {
   await api("/api/settings/imap-profile", { method: "POST", body: data });
 }
 
@@ -590,13 +861,27 @@ export async function checkMailboxBounces(): Promise<void> {
 }
 
 // Import API
-export async function importCustomers(file: File): Promise<{ total: number; created: number; updated: number; skipped: number }> {
+export async function importCustomers(
+  file: File,
+): Promise<{
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+}> {
   const formData = new FormData();
   formData.append("file", file);
   return api("/api/import", { method: "POST", rawBody: formData });
 }
 
-export async function previewImport(file: File): Promise<{ total: number; withEmail: number; duplicateCount: number; duplicateUploadCount: number }> {
+export async function previewImport(
+  file: File,
+): Promise<{
+  total: number;
+  withEmail: number;
+  duplicateCount: number;
+  duplicateUploadCount: number;
+}> {
   const formData = new FormData();
   formData.append("file", file);
   return api("/api/import/preview", { method: "POST", rawBody: formData });
@@ -608,28 +893,53 @@ export async function getUsers(): Promise<User[]> {
   return Array.isArray(result) ? result : result.users || [];
 }
 
-export async function createUser(data: { username: string; displayName: string; email?: string; role: string; password: string }): Promise<User> {
+export async function createUser(data: {
+  username: string;
+  displayName: string;
+  email?: string;
+  role: string;
+  password: string;
+}): Promise<User> {
   return api<User>("/api/users", { method: "POST", body: data });
 }
 
-export async function updateUser(id: string, data: Partial<User>): Promise<User> {
-  return api<User>(`/api/users/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+export async function updateUser(
+  id: string,
+  data: Partial<User>,
+): Promise<User> {
+  return api<User>(`/api/users/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: data,
+  });
 }
 
-export async function resetUserPassword(id: string, password: string): Promise<void> {
-  await api(`/api/users/${encodeURIComponent(id)}/reset-password`, { method: "POST", body: { newPassword: password } });
+export async function resetUserPassword(
+  id: string,
+  password: string,
+): Promise<void> {
+  await api(`/api/users/${encodeURIComponent(id)}/reset-password`, {
+    method: "POST",
+    body: { newPassword: password },
+  });
 }
 
 export async function approveUser(id: string): Promise<User> {
-  return api<User>(`/api/users/${encodeURIComponent(id)}/approve`, { method: "POST" });
+  return api<User>(`/api/users/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+  });
 }
 
 export async function rejectUser(id: string): Promise<User> {
-  return api<User>(`/api/users/${encodeURIComponent(id)}/reject`, { method: "POST" });
+  return api<User>(`/api/users/${encodeURIComponent(id)}/reject`, {
+    method: "POST",
+  });
 }
 
 // Backup API
-export async function getBackupData(): Promise<{ settings: BackupSettings; backups: Backup[] }> {
+export async function getBackupData(): Promise<{
+  settings: BackupSettings;
+  backups: Backup[];
+}> {
   const settings = await api<BackupSettings>("/api/backup/settings");
   const backups = await api<Backup[]>("/api/backup/list");
   return { settings, backups };
@@ -639,19 +949,44 @@ export async function createBackup(): Promise<Backup> {
   return api<Backup>("/api/backup/create", { method: "POST" });
 }
 
-export async function saveBackupSettings(settings: Partial<BackupSettings>): Promise<BackupSettings> {
-  return api<BackupSettings>("/api/backup/settings", { method: "POST", body: settings });
+export async function saveBackupSettings(
+  settings: Partial<BackupSettings>,
+): Promise<BackupSettings> {
+  return api<BackupSettings>("/api/backup/settings", {
+    method: "POST",
+    body: settings,
+  });
 }
 
-export async function verifyBackup(id: string): Promise<{ valid: boolean; tableCount: number; rowCount: number }> {
-  return api(`/api/backup/${encodeURIComponent(id)}/verify`, { method: "POST" });
+export async function verifyBackup(
+  id: string,
+): Promise<{ valid: boolean; tableCount: number; rowCount: number }> {
+  return api(`/api/backup/${encodeURIComponent(id)}/verify`, {
+    method: "POST",
+  });
 }
 
-export async function drillBackup(id: string): Promise<{ valid: boolean; restorable: boolean; tableCount: number; rowCount: number; restoredRows: number }> {
+export async function drillBackup(
+  id: string,
+): Promise<{
+  valid: boolean;
+  restorable: boolean;
+  tableCount: number;
+  rowCount: number;
+  restoredRows: number;
+}> {
   return api(`/api/backup/${encodeURIComponent(id)}/drill`, { method: "POST" });
 }
 
-export async function restoreBackup(id: string): Promise<{ restored: boolean; backupId: string; rollbackBackupId: string; tableCount: number; rowCount: number }> {
+export async function restoreBackup(
+  id: string,
+): Promise<{
+  restored: boolean;
+  backupId: string;
+  rollbackBackupId: string;
+  tableCount: number;
+  rowCount: number;
+}> {
   return api(`/api/backup/${encodeURIComponent(id)}/restore`, {
     method: "POST",
     body: { confirmation: "RESTORE" },
@@ -663,8 +998,13 @@ export async function getEmailPolicy(): Promise<EmailPolicy> {
   return api("/api/settings/email-policy");
 }
 
-export async function saveEmailPolicy(policy: Partial<EmailPolicy>): Promise<EmailPolicy> {
-  return api<EmailPolicy>("/api/settings/email-policy", { method: "POST", body: policy });
+export async function saveEmailPolicy(
+  policy: Partial<EmailPolicy>,
+): Promise<EmailPolicy> {
+  return api<EmailPolicy>("/api/settings/email-policy", {
+    method: "POST",
+    body: policy,
+  });
 }
 
 // Suppression API
@@ -672,22 +1012,46 @@ export async function getSuppressions(): Promise<SuppressionEntry[]> {
   return api<SuppressionEntry[]>("/api/suppressions");
 }
 
-export async function addSuppression(data: { email: string; reason: string }): Promise<void> {
+export async function addSuppression(data: {
+  email: string;
+  reason: string;
+}): Promise<void> {
   await api("/api/suppressions", { method: "POST", body: data });
 }
 
 export async function deleteSuppression(id: string): Promise<void> {
-  await api(`/api/suppressions/${encodeURIComponent(id)}`, { method: "DELETE" });
+  await api(`/api/suppressions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 // Audit API
-export async function getAuditLogs(filters: { page?: number; limit?: number; username?: string; action?: string; status?: string } = {}): Promise<{ items: AuditEntry[]; total: number; page: number; pages: number }> {
-  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== "").map(([key, value]) => [key, String(value)])).toString();
+export async function getAuditLogs(
+  filters: {
+    page?: number;
+    limit?: number;
+    username?: string;
+    action?: string;
+    status?: string;
+  } = {},
+): Promise<{
+  items: AuditEntry[];
+  total: number;
+  page: number;
+  pages: number;
+}> {
+  const query = new URLSearchParams(
+    Object.entries(filters)
+      .filter(([, value]) => value !== undefined && value !== "")
+      .map(([key, value]) => [key, String(value)]),
+  ).toString();
   return api(`/api/audit-logs${query ? `?${query}` : ""}`);
 }
 
 // Trash API
-export async function getTrashItems(): Promise<{ id: string; type: string; name: string; deletedAt: string }[]> {
+export async function getTrashItems(): Promise<
+  { id: string; type: string; name: string; deletedAt: string }[]
+> {
   return api<any[]>("/api/trash");
 }
 
@@ -703,6 +1067,9 @@ export async function getAccount(): Promise<User> {
   return api<User>("/api/auth/account");
 }
 
-export async function updateAccount(data: { displayName: string; email: string }): Promise<User> {
+export async function updateAccount(data: {
+  displayName: string;
+  email: string;
+}): Promise<User> {
   return api<User>("/api/auth/account", { method: "PUT", body: data });
 }

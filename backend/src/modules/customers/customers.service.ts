@@ -1,7 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, FindOptionsWhere, In, Not, IsNull } from 'typeorm';
-import * as xlsx from 'xlsx';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, Like, FindOptionsWhere, In, Not, IsNull } from "typeorm";
+import * as xlsx from "xlsx";
 import {
   Customer,
   Contact,
@@ -12,7 +16,7 @@ import {
   Sample,
   Tag,
   CustomerView,
-} from './entities';
+} from "./entities";
 import {
   CreateCustomerDto,
   UpdateCustomerDto,
@@ -32,8 +36,8 @@ import {
   UpdateSampleDto,
   CreateCustomerViewDto,
   UpdateCustomerViewDto,
-} from './dto';
-import { EmailLog } from '../email/entities/email-log.entity';
+} from "./dto";
+import { EmailLog } from "../email/entities/email-log.entity";
 
 interface UploadedFile {
   fieldname: string;
@@ -83,15 +87,18 @@ export class CustomersService {
 
     if (queryFilters.q) {
       const qb = this.customerRepository
-        .createQueryBuilder('customer')
-        .leftJoinAndSelect('customer.tags', 'tag')
+        .createQueryBuilder("customer")
+        .leftJoinAndSelect("customer.tags", "tag")
         .where(
           `customer.company LIKE :q OR customer.contact LIKE :q OR customer.email LIKE :q OR customer.phone LIKE :q OR customer.notes LIKE :q`,
           { q: `%${queryFilters.q}%` },
         )
-        .orderBy('customer.createdAt', 'DESC');
+        .orderBy("customer.createdAt", "DESC");
 
-      if (queryFilters.ownerId) qb.andWhere('customer.ownerId = :ownerId', { ownerId: queryFilters.ownerId });
+      if (queryFilters.ownerId)
+        qb.andWhere("customer.ownerId = :ownerId", {
+          ownerId: queryFilters.ownerId,
+        });
 
       if (take > 0) qb.skip(skip).take(take);
       const [customers, total] = await qb.getManyAndCount();
@@ -123,7 +130,7 @@ export class CustomersService {
     if (take > 0) {
       const [customers, total] = await this.customerRepository.findAndCount({
         where,
-        order: { createdAt: 'DESC' },
+        order: { createdAt: "DESC" },
         skip,
         take,
       });
@@ -132,7 +139,7 @@ export class CustomersService {
 
     const customers = await this.customerRepository.find({
       where,
-      order: { createdAt: 'DESC' },
+      order: { createdAt: "DESC" },
     });
     return { customers, total: customers.length };
   }
@@ -140,10 +147,10 @@ export class CustomersService {
   async findOne(id: number) {
     const customer = await this.customerRepository.findOne({
       where: { id },
-      relations: ['tags'],
+      relations: ["tags"],
     });
     if (!customer) {
-      throw new NotFoundException('客户不存在');
+      throw new NotFoundException("客户不存在");
     }
     return customer;
   }
@@ -152,48 +159,64 @@ export class CustomersService {
     const customer = await this.findOne(id);
     if (ownerId && customer.ownerId !== ownerId) {
       // Do not disclose whether another salesperson owns the record.
-      throw new NotFoundException('客户不存在');
+      throw new NotFoundException("客户不存在");
     }
     return customer;
   }
 
   async findByIdentifier(identifier: string | number) {
-    const value = String(identifier ?? '').trim();
+    const value = String(identifier ?? "").trim();
     const numericId = Number(value);
     const customer = await this.customerRepository.findOne({
-      where: Number.isInteger(numericId) && numericId > 0
-        ? [{ id: numericId }, { customerId: value }]
-        : { customerId: value },
+      where:
+        Number.isInteger(numericId) && numericId > 0
+          ? [{ id: numericId }, { customerId: value }]
+          : { customerId: value },
     });
-    if (!customer) throw new NotFoundException('客户不存在');
+    if (!customer) throw new NotFoundException("客户不存在");
     return customer;
   }
 
   async findContactByIdentifier(identifier: string | number) {
-    const value = String(identifier ?? '').trim();
+    const value = String(identifier ?? "").trim();
     const numericId = Number(value);
     const contact = await this.contactRepository.findOne({
-      where: Number.isInteger(numericId) && numericId > 0
-        ? [{ id: numericId }, { contactId: value }]
-        : { contactId: value },
+      where:
+        Number.isInteger(numericId) && numericId > 0
+          ? [{ id: numericId }, { contactId: value }]
+          : { contactId: value },
     });
-    if (!contact) throw new NotFoundException('联系人不存在');
+    if (!contact) throw new NotFoundException("联系人不存在");
     return contact;
   }
 
-  async markEmailSent(customerId: number, subject: string, recipientEmail: string) {
+  async markEmailSent(
+    customerId: number,
+    subject: string,
+    recipientEmail: string,
+  ) {
     const customer = await this.findOne(customerId);
-    if (!['qualified', 'opportunity', 'proposal', 'negotiation', 'won', 'lost', 'closed'].includes(customer.journeyStage)) {
-      customer.journeyStage = 'contacted';
+    if (
+      ![
+        "qualified",
+        "opportunity",
+        "proposal",
+        "negotiation",
+        "won",
+        "lost",
+        "closed",
+      ].includes(customer.journeyStage)
+    ) {
+      customer.journeyStage = "contacted";
     }
     customer.lastActivityAt = new Date();
-    customer.lastActivityType = 'email';
-    if (!customer.health) customer.health = 'good';
+    customer.lastActivityType = "email";
+    if (!customer.health) customer.health = "good";
     await this.customerRepository.save(customer);
     const activity = this.activityRepository.create({
       customerId,
-      activityId: this.generateId('activity'),
-      type: 'email',
+      activityId: this.generateId("activity"),
+      type: "email",
       subject,
       content: `邮件已发送至 ${recipientEmail}`,
     });
@@ -207,14 +230,14 @@ export class CustomersService {
         where: { email: createCustomerDto.email },
       });
       if (existing) {
-        throw new BadRequestException('该邮箱已被其他客户使用');
+        throw new BadRequestException("该邮箱已被其他客户使用");
       }
     }
 
     const { tags, ...rest } = createCustomerDto;
     const customer = this.customerRepository.create({
       ...rest,
-      customerId: this.generateId('cus'),
+      customerId: this.generateId("cus"),
     });
 
     if (tags && tags.length > 0) {
@@ -233,15 +256,21 @@ export class CustomersService {
         where: { email: rest.email },
       });
       if (existing && existing.id !== id) {
-        throw new BadRequestException('该邮箱已被其他客户使用');
+        throw new BadRequestException("该邮箱已被其他客户使用");
       }
-      rest.emailStatus = 'unknown';
-      (rest as any).emailFailureReason = '';
+      rest.emailStatus = "unknown";
+      (rest as any).emailFailureReason = "";
       (rest as any).emailFailedAt = null;
     }
 
-    if (rest.journeyStage !== undefined && rest.journeyStage !== customer.journeyStage) {
-      await this.syncCurrentOpportunityFromCustomer(customer, rest.journeyStage);
+    if (
+      rest.journeyStage !== undefined &&
+      rest.journeyStage !== customer.journeyStage
+    ) {
+      await this.syncCurrentOpportunityFromCustomer(
+        customer,
+        rest.journeyStage,
+      );
     }
 
     Object.assign(customer, rest);
@@ -255,7 +284,7 @@ export class CustomersService {
 
   async remove(id: number) {
     const customer = await this.customerRepository.findOne({ where: { id } });
-    if (!customer) throw new NotFoundException('客户不存在');
+    if (!customer) throw new NotFoundException("客户不存在");
     // Soft delete
     await this.customerRepository.softDelete(id);
     return { deleted: true };
@@ -267,14 +296,14 @@ export class CustomersService {
     const customers = await this.customerRepository.find({
       withDeleted: true,
       where: { deletedAt: Not(IsNull()) } as any,
-      order: { deletedAt: 'DESC' },
+      order: { deletedAt: "DESC" },
     });
     return customers.map((c) => ({
       id: c.customerId || String(c.id),
       name: c.company,
       company: c.company,
       email: c.email,
-      type: '客户',
+      type: "客户",
       deletedAt: c.deletedAt,
     }));
   }
@@ -284,8 +313,9 @@ export class CustomersService {
       withDeleted: true,
       where: { id },
     });
-    if (!customer) throw new NotFoundException('客户不存在');
-    if (!customer.deletedAt) throw new BadRequestException('该客户不在回收站中');
+    if (!customer) throw new NotFoundException("客户不存在");
+    if (!customer.deletedAt)
+      throw new BadRequestException("该客户不在回收站中");
     await this.customerRepository.restore(id);
     return { restored: true };
   }
@@ -295,7 +325,7 @@ export class CustomersService {
       withDeleted: true,
       where: { id },
     });
-    if (!customer) throw new NotFoundException('客户不存在');
+    if (!customer) throw new NotFoundException("客户不存在");
     await this.customerRepository.remove(customer);
     return { deleted: true };
   }
@@ -303,7 +333,9 @@ export class CustomersService {
   async findAllIds(filters: Record<string, any> = {}) {
     const result = await this.findAll(filters);
     const customers = (result as any).customers || result;
-    return (Array.isArray(customers) ? customers : []).map((c: any) => c.customerId);
+    return (Array.isArray(customers) ? customers : []).map(
+      (c: any) => c.customerId,
+    );
   }
 
   async deleteAll() {
@@ -314,19 +346,24 @@ export class CustomersService {
 
   async clearEmailException(id: number) {
     const customer = await this.findOne(id);
-    customer.emailStatus = 'unknown' as any;
-    (customer as any).emailFailureReason = '';
+    customer.emailStatus = "unknown" as any;
+    (customer as any).emailFailureReason = "";
     (customer as any).emailFailedAt = null;
     return this.customerRepository.save(customer);
   }
 
-  private async findByTag(tagName: string, skip: number, take: number, ownerId?: string) {
+  private async findByTag(
+    tagName: string,
+    skip: number,
+    take: number,
+    ownerId?: string,
+  ) {
     const qb = this.customerRepository
-      .createQueryBuilder('customer')
-      .leftJoinAndSelect('customer.tags', 'tag')
-      .where('tag.name = :tagName', { tagName })
-      .orderBy('customer.createdAt', 'DESC');
-    if (ownerId) qb.andWhere('customer.ownerId = :ownerId', { ownerId });
+      .createQueryBuilder("customer")
+      .leftJoinAndSelect("customer.tags", "tag")
+      .where("tag.name = :tagName", { tagName })
+      .orderBy("customer.createdAt", "DESC");
+    if (ownerId) qb.andWhere("customer.ownerId = :ownerId", { ownerId });
 
     if (take > 0) qb.skip(skip).take(take);
     const [customers, total] = await qb.getManyAndCount();
@@ -346,17 +383,17 @@ export class CustomersService {
     const tagEntity = await this.getOrCreateTags([tag]);
     const customers = await this.customerRepository.find({
       where: ownerId ? { id: In(ids), ownerId } : { id: In(ids) },
-      relations: ['tags'],
+      relations: ["tags"],
     });
 
     let updated = 0;
     for (const customer of customers) {
-      if (action === 'add') {
+      if (action === "add") {
         if (!customer.tags.some((t) => t.name === tag)) {
           customer.tags.push(tagEntity[0]);
           updated++;
         }
-      } else if (action === 'remove') {
+      } else if (action === "remove") {
         customer.tags = customer.tags.filter((t) => t.name !== tag);
         updated++;
       }
@@ -378,39 +415,46 @@ export class CustomersService {
 
   async getCustomer360(id: number, ownerId?: string) {
     const customer = await this.assertCustomerOwner(id, ownerId);
-    const [contacts, activities, todos, opportunities, quotes, samples, emailLogs] =
-      await Promise.all([
-        this.contactRepository.find({
-          where: { customerId: id },
-          order: { isPrimary: 'DESC', name: 'ASC' },
-        }),
-        this.activityRepository.find({
-          where: { customerId: id },
-          order: { createdAt: 'DESC' },
-        }),
-        this.todoRepository.find({
-          where: { customerId: id },
-          order: { status: 'ASC', dueAt: 'ASC' },
-        }),
-        this.opportunityRepository.find({
-          where: { customerId: id },
-          order: { updatedAt: 'DESC' },
-        }),
-        this.quoteRepository.find({
-          where: { customerId: id },
-          relations: ['items'],
-          order: { updatedAt: 'DESC' },
-        }),
-        this.sampleRepository.find({
-          where: { customerId: id },
-          order: { updatedAt: 'DESC' },
-        }),
-        this.emailLogRepository.find({
-          where: { customerId: customer.customerId },
-          order: { sentAt: 'DESC' },
-          take: 100,
-        }),
-      ]);
+    const [
+      contacts,
+      activities,
+      todos,
+      opportunities,
+      quotes,
+      samples,
+      emailLogs,
+    ] = await Promise.all([
+      this.contactRepository.find({
+        where: { customerId: id },
+        order: { isPrimary: "DESC", name: "ASC" },
+      }),
+      this.activityRepository.find({
+        where: { customerId: id },
+        order: { createdAt: "DESC" },
+      }),
+      this.todoRepository.find({
+        where: { customerId: id },
+        order: { status: "ASC", dueAt: "ASC" },
+      }),
+      this.opportunityRepository.find({
+        where: { customerId: id },
+        order: { updatedAt: "DESC" },
+      }),
+      this.quoteRepository.find({
+        where: { customerId: id },
+        relations: ["items"],
+        order: { updatedAt: "DESC" },
+      }),
+      this.sampleRepository.find({
+        where: { customerId: id },
+        order: { updatedAt: "DESC" },
+      }),
+      this.emailLogRepository.find({
+        where: { customerId: customer.customerId },
+        order: { sentAt: "DESC" },
+        take: 100,
+      }),
+    ]);
 
     return {
       customer,
@@ -425,14 +469,14 @@ export class CustomersService {
         email: log.recipientEmail,
         customerId: log.customerId,
         customerName: log.customerName || customer.company,
-        contactId: log.contactId || '',
-        templateId: log.templateId || '',
-        templateName: log.templateName || '',
-        taskId: log.emailTaskId || '',
-        taskName: log.taskName || '',
-        subject: log.subject || '',
+        contactId: log.contactId || "",
+        templateId: log.templateId || "",
+        templateName: log.templateName || "",
+        taskId: log.emailTaskId || "",
+        taskName: log.taskName || "",
+        subject: log.subject || "",
         status: log.status,
-        message: log.errorMessage || '',
+        message: log.errorMessage || "",
         createdAt: log.sentAt,
       })),
     };
@@ -441,12 +485,12 @@ export class CustomersService {
   // ==================== Tags ====================
 
   async getAllTags() {
-    const tags = await this.tagRepository.find({ order: { name: 'ASC' } });
+    const tags = await this.tagRepository.find({ order: { name: "ASC" } });
     return tags.map((t) => t.name);
   }
 
   async createTag(name: string) {
-    if (!name) throw new BadRequestException('请输入标签名称');
+    if (!name) throw new BadRequestException("请输入标签名称");
     const existing = await this.tagRepository.findOne({
       where: { name },
     });
@@ -458,7 +502,7 @@ export class CustomersService {
   async deleteTag(name: string) {
     const result = await this.tagRepository.delete({ name });
     if (result.affected === 0) {
-      throw new NotFoundException('标签不存在');
+      throw new NotFoundException("标签不存在");
     }
     return { deleted: true };
   }
@@ -482,32 +526,39 @@ export class CustomersService {
     await this.assertCustomerOwner(customerId, ownerId);
     return this.contactRepository.find({
       where: { customerId },
-      order: { isPrimary: 'DESC', name: 'ASC' },
+      order: { isPrimary: "DESC", name: "ASC" },
     });
   }
 
-  async createContact(customerId: number, createContactDto: CreateContactDto, ownerId?: string) {
+  async createContact(
+    customerId: number,
+    createContactDto: CreateContactDto,
+    ownerId?: string,
+  ) {
     await this.assertCustomerOwner(customerId, ownerId);
 
     if (createContactDto.isPrimary) {
-      await this.contactRepository.update(
-        { customerId },
-        { isPrimary: false },
-      );
+      await this.contactRepository.update({ customerId }, { isPrimary: false });
     }
 
     const contact = this.contactRepository.create({
       ...createContactDto,
       customerId,
-      contactId: this.generateId('contact'),
+      contactId: this.generateId("contact"),
     });
 
-    return this.contactRepository.save(contact);
+    const saved = await this.contactRepository.save(contact);
+    await this.refreshCustomerContactSummary(customerId);
+    return saved;
   }
 
-  async updateContact(id: number, updateContactDto: UpdateContactDto, ownerId?: string) {
+  async updateContact(
+    id: number,
+    updateContactDto: UpdateContactDto,
+    ownerId?: string,
+  ) {
     const contact = await this.contactRepository.findOne({ where: { id } });
-    if (!contact) throw new NotFoundException('联系人不存在');
+    if (!contact) throw new NotFoundException("联系人不存在");
 
     await this.assertCustomerOwner(contact.customerId, ownerId);
     if (updateContactDto.isPrimary) {
@@ -518,16 +569,45 @@ export class CustomersService {
     }
 
     Object.assign(contact, updateContactDto);
-    return this.contactRepository.save(contact);
+    const saved = await this.contactRepository.save(contact);
+    await this.refreshCustomerContactSummary(contact.customerId);
+    return saved;
   }
 
   async deleteContact(id: number, ownerId?: string) {
     const contact = await this.contactRepository.findOne({ where: { id } });
-    if (!contact) throw new NotFoundException('联系人不存在');
+    if (!contact) throw new NotFoundException("联系人不存在");
     await this.assertCustomerOwner(contact.customerId, ownerId);
     const result = await this.contactRepository.delete(id);
-    if (result.affected === 0) throw new NotFoundException('联系人不存在');
+    if (result.affected === 0) throw new NotFoundException("联系人不存在");
+    if (contact.isPrimary) {
+      const next = await this.contactRepository.findOne({
+        where: { customerId: contact.customerId },
+        order: { createdAt: "ASC" },
+      });
+      if (next) {
+        next.isPrimary = true;
+        await this.contactRepository.save(next);
+      }
+    }
+    await this.refreshCustomerContactSummary(contact.customerId);
     return { deleted: true };
+  }
+
+  private async refreshCustomerContactSummary(customerId: number) {
+    const customer = await this.findOne(customerId);
+    const primary =
+      (await this.contactRepository.findOne({
+        where: { customerId, isPrimary: true },
+      })) ||
+      (await this.contactRepository.findOne({
+        where: { customerId },
+        order: { createdAt: "ASC" },
+      }));
+    customer.contact = primary?.name || "";
+    customer.email = primary?.email || "";
+    customer.phone = primary?.phone || "";
+    await this.customerRepository.save(customer);
   }
 
   // ==================== Activities ====================
@@ -536,26 +616,30 @@ export class CustomersService {
     await this.assertCustomerOwner(customerId, ownerId);
     return this.activityRepository.find({
       where: { customerId },
-      order: { createdAt: 'DESC' },
+      order: { createdAt: "DESC" },
     });
   }
 
-  async createActivity(customerId: number, createActivityDto: CreateActivityDto, ownerId?: string) {
+  async createActivity(
+    customerId: number,
+    createActivityDto: CreateActivityDto,
+    ownerId?: string,
+  ) {
     const customer = await this.assertCustomerOwner(customerId, ownerId);
     if (!createActivityDto.subject && !createActivityDto.content) {
-      throw new BadRequestException('请填写跟进内容');
+      throw new BadRequestException("请填写跟进内容");
     }
 
     const activity = this.activityRepository.create({
       ...createActivityDto,
       customerId,
-      activityId: this.generateId('activity'),
+      activityId: this.generateId("activity"),
     });
 
     const saved = await this.activityRepository.save(activity);
     customer.lastActivityAt = saved.createdAt || new Date();
-    customer.lastActivityType = saved.type || 'note';
-    if (!customer.health) customer.health = 'good';
+    customer.lastActivityType = saved.type || "note";
+    if (!customer.health) customer.health = "good";
     await this.customerRepository.save(customer);
     return saved;
   }
@@ -566,10 +650,11 @@ export class CustomersService {
     const where: FindOptionsWhere<Todo> = {};
     if (filters.status) where.status = filters.status;
     if (filters.customerId) where.customerId = filters.customerId;
-    if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
+    if (filters.ownerId)
+      where.customer = { ownerId: filters.ownerId } as Customer;
     return this.todoRepository.find({
       where,
-      order: { status: 'ASC', dueAt: 'ASC' },
+      order: { status: "ASC", dueAt: "ASC" },
     });
   }
 
@@ -577,7 +662,7 @@ export class CustomersService {
     await this.findOne(createTodoDto.customerId);
     const todo = this.todoRepository.create({
       ...createTodoDto,
-      todoId: this.generateId('todo'),
+      todoId: this.generateId("todo"),
     });
     const saved = await this.todoRepository.save(todo);
     await this.refreshCustomerTodoSummary(saved.customerId);
@@ -586,12 +671,12 @@ export class CustomersService {
 
   async updateTodo(id: number, updateTodoDto: UpdateTodoDto) {
     const todo = await this.todoRepository.findOne({ where: { id } });
-    if (!todo) throw new NotFoundException('待办不存在');
+    if (!todo) throw new NotFoundException("待办不存在");
 
     Object.assign(todo, updateTodoDto);
-    if (updateTodoDto.status === 'done') {
+    if (updateTodoDto.status === "done") {
       todo.completedAt = new Date();
-    } else if (updateTodoDto.status === 'open') {
+    } else if (updateTodoDto.status === "open") {
       todo.completedAt = null as any;
     }
     const saved = await this.todoRepository.save(todo);
@@ -601,33 +686,40 @@ export class CustomersService {
 
   async deleteTodo(id: number) {
     const todo = await this.todoRepository.findOne({ where: { id } });
-    if (!todo) throw new NotFoundException('待办不存在');
+    if (!todo) throw new NotFoundException("待办不存在");
     const result = await this.todoRepository.delete(id);
-    if (result.affected === 0) throw new NotFoundException('待办不存在');
+    if (result.affected === 0) throw new NotFoundException("待办不存在");
     await this.refreshCustomerTodoSummary(todo.customerId);
     return { deleted: true };
   }
 
   private async refreshCustomerTodoSummary(customerId: number) {
-    const customer = await this.customerRepository.findOne({ where: { id: customerId } });
+    const customer = await this.customerRepository.findOne({
+      where: { id: customerId },
+    });
     if (!customer) return;
 
     const openTodos = await this.todoRepository.find({
-      where: { customerId, status: 'open' },
-      order: { createdAt: 'ASC' },
+      where: { customerId, status: "open" },
+      order: { createdAt: "ASC" },
     });
     const withDueDate = openTodos
       .filter((todo) => Boolean(todo.dueAt))
-      .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime());
+      .sort(
+        (left, right) =>
+          new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime(),
+      );
     const nextTodo = withDueDate[0] || openTodos[0];
 
     customer.nextTodoAt = (nextTodo?.dueAt || null) as any;
-    customer.nextTodoTitle = nextTodo?.title || '';
-    customer.health = withDueDate.some((todo) => new Date(todo.dueAt).getTime() < Date.now())
-      ? 'critical'
+    customer.nextTodoTitle = nextTodo?.title || "";
+    customer.health = withDueDate.some(
+      (todo) => new Date(todo.dueAt).getTime() < Date.now(),
+    )
+      ? "critical"
       : openTodos.length > 0
-        ? 'warning'
-        : 'good';
+        ? "warning"
+        : "good";
     await this.customerRepository.save(customer);
   }
 
@@ -636,35 +728,47 @@ export class CustomersService {
   async findOpportunities(filters: Record<string, any> = {}) {
     const where: FindOptionsWhere<Opportunity> = {};
     if (filters.customerId) where.customerId = filters.customerId;
-    if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
+    if (filters.ownerId)
+      where.customer = { ownerId: filters.ownerId } as Customer;
     return this.opportunityRepository.find({
       where,
-      relations: ['customer'],
-      order: { updatedAt: 'DESC' },
+      relations: ["customer"],
+      order: { updatedAt: "DESC" },
     });
   }
 
   async createOpportunity(createOpportunityDto: CreateOpportunityDto) {
     await this.findOne(createOpportunityDto.customerId);
-    const stage = createOpportunityDto.stage || 'prospecting';
+    const stage = createOpportunityDto.stage || "prospecting";
     const opportunity = this.opportunityRepository.create({
       ...createOpportunityDto,
       stage,
-      probability: createOpportunityDto.probability ?? this.defaultProbability(stage),
-      opportunityId: this.generateId('opp'),
+      probability:
+        createOpportunityDto.probability ?? this.defaultProbability(stage),
+      opportunityId: this.generateId("opp"),
     });
     const saved = await this.opportunityRepository.save(opportunity);
     await this.refreshCustomerOpportunityState(saved.customerId, saved);
     return saved;
   }
 
-  async updateOpportunity(id: number, updateOpportunityDto: UpdateOpportunityDto) {
-    const opportunity = await this.opportunityRepository.findOne({ where: { id } });
-    if (!opportunity) throw new NotFoundException('商机不存在');
+  async updateOpportunity(
+    id: number,
+    updateOpportunityDto: UpdateOpportunityDto,
+  ) {
+    const opportunity = await this.opportunityRepository.findOne({
+      where: { id },
+    });
+    if (!opportunity) throw new NotFoundException("商机不存在");
     const previousCustomerId = opportunity.customerId;
     Object.assign(opportunity, updateOpportunityDto);
-    if (updateOpportunityDto.stage && updateOpportunityDto.probability === undefined) {
-      opportunity.probability = this.defaultProbability(updateOpportunityDto.stage);
+    if (
+      updateOpportunityDto.stage &&
+      updateOpportunityDto.probability === undefined
+    ) {
+      opportunity.probability = this.defaultProbability(
+        updateOpportunityDto.stage,
+      );
     }
     const saved = await this.opportunityRepository.save(opportunity);
     await this.refreshCustomerOpportunityState(saved.customerId, saved);
@@ -675,22 +779,29 @@ export class CustomersService {
   }
 
   async deleteOpportunity(id: number) {
-    const opportunity = await this.opportunityRepository.findOne({ where: { id } });
-    if (!opportunity) throw new NotFoundException('商机不存在');
+    const opportunity = await this.opportunityRepository.findOne({
+      where: { id },
+    });
+    if (!opportunity) throw new NotFoundException("商机不存在");
     const result = await this.opportunityRepository.delete(id);
-    if (result.affected === 0) throw new NotFoundException('商机不存在');
+    if (result.affected === 0) throw new NotFoundException("商机不存在");
     await this.refreshCustomerOpportunityState(opportunity.customerId);
     return { deleted: true };
   }
 
-  private async syncCurrentOpportunityFromCustomer(customer: Customer, journeyStage: Customer['journeyStage']) {
+  private async syncCurrentOpportunityFromCustomer(
+    customer: Customer,
+    journeyStage: Customer["journeyStage"],
+  ) {
     const targetStage = this.opportunityStageFromJourney(journeyStage);
     const opportunities = await this.listCustomerOpportunities(customer.id);
     const current = opportunities[0];
 
     if (!targetStage) {
       if (current) {
-        throw new BadRequestException('该客户已有商机，请在商机看板调整阶段，或先删除不再需要的商机');
+        throw new BadRequestException(
+          "该客户已有商机，请在商机看板调整阶段，或先删除不再需要的商机",
+        );
       }
       customer.openOpportunityCount = 0;
       customer.openOpportunityValue = 0;
@@ -700,15 +811,15 @@ export class CustomersService {
     if (!current) {
       // Qualified customers do not become opportunities until the user explicitly
       // selects "opportunity" or a later sales stage.
-      if (journeyStage === 'qualified') {
+      if (journeyStage === "qualified") {
         customer.openOpportunityCount = 0;
         customer.openOpportunityValue = 0;
         return;
       }
       const opportunity = this.opportunityRepository.create({
         customerId: customer.id,
-        opportunityId: this.generateId('opp'),
-        name: `${customer.company || customer.contact || '客户'} - 商机`,
+        opportunityId: this.generateId("opp"),
+        name: `${customer.company || customer.contact || "客户"} - 商机`,
         stage: targetStage,
         probability: this.defaultProbability(targetStage),
       });
@@ -722,8 +833,13 @@ export class CustomersService {
     this.assignOpportunityMetrics(customer, opportunities);
   }
 
-  private async refreshCustomerOpportunityState(customerId: number, preferred?: Opportunity) {
-    const customer = await this.customerRepository.findOne({ where: { id: customerId } });
+  private async refreshCustomerOpportunityState(
+    customerId: number,
+    preferred?: Opportunity,
+  ) {
+    const customer = await this.customerRepository.findOne({
+      where: { id: customerId },
+    });
     if (!customer) return;
     const opportunities = await this.listCustomerOpportunities(customerId);
     const current = preferred
@@ -733,7 +849,7 @@ export class CustomersService {
     if (current) {
       customer.journeyStage = this.journeyStageFromOpportunity(current.stage);
     } else if (this.opportunityStageFromJourney(customer.journeyStage)) {
-      customer.journeyStage = 'qualified';
+      customer.journeyStage = "qualified";
     }
     await this.customerRepository.save(customer);
   }
@@ -741,42 +857,63 @@ export class CustomersService {
   private listCustomerOpportunities(customerId: number) {
     return this.opportunityRepository.find({
       where: { customerId },
-      order: { updatedAt: 'DESC', id: 'DESC' },
+      order: { updatedAt: "DESC", id: "DESC" },
     });
   }
 
-  private assignOpportunityMetrics(customer: Customer, opportunities: Opportunity[]) {
-    const open = opportunities.filter((item) => !['won', 'lost'].includes(item.stage));
+  private assignOpportunityMetrics(
+    customer: Customer,
+    opportunities: Opportunity[],
+  ) {
+    const open = opportunities.filter(
+      (item) => !["won", "lost"].includes(item.stage),
+    );
     customer.openOpportunityCount = open.length;
-    customer.openOpportunityValue = open.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    customer.openOpportunityValue = open.reduce(
+      (sum, item) => sum + Number(item.amount || 0),
+      0,
+    );
   }
 
-  private journeyStageFromOpportunity(stage: Opportunity['stage']): Customer['journeyStage'] {
-    const stages: Record<Opportunity['stage'], Customer['journeyStage']> = {
-      prospecting: 'opportunity',
-      qualification: 'qualified',
-      proposal: 'proposal',
-      negotiation: 'negotiation',
-      won: 'won',
-      lost: 'lost',
+  private journeyStageFromOpportunity(
+    stage: Opportunity["stage"],
+  ): Customer["journeyStage"] {
+    const stages: Record<Opportunity["stage"], Customer["journeyStage"]> = {
+      prospecting: "opportunity",
+      qualification: "qualified",
+      proposal: "proposal",
+      negotiation: "negotiation",
+      won: "won",
+      lost: "lost",
     };
     return stages[stage];
   }
 
-  private opportunityStageFromJourney(stage: Customer['journeyStage']): Opportunity['stage'] | undefined {
-    const stages: Partial<Record<Customer['journeyStage'], Opportunity['stage']>> = {
-      qualified: 'qualification',
-      opportunity: 'prospecting',
-      proposal: 'proposal',
-      negotiation: 'negotiation',
-      won: 'won',
-      lost: 'lost',
+  private opportunityStageFromJourney(
+    stage: Customer["journeyStage"],
+  ): Opportunity["stage"] | undefined {
+    const stages: Partial<
+      Record<Customer["journeyStage"], Opportunity["stage"]>
+    > = {
+      qualified: "qualification",
+      opportunity: "prospecting",
+      proposal: "proposal",
+      negotiation: "negotiation",
+      won: "won",
+      lost: "lost",
     };
     return stages[stage];
   }
 
-  private defaultProbability(stage: Opportunity['stage']) {
-    return { prospecting: 10, qualification: 30, proposal: 60, negotiation: 80, won: 100, lost: 0 }[stage];
+  private defaultProbability(stage: Opportunity["stage"]) {
+    return {
+      prospecting: 10,
+      qualification: 30,
+      proposal: 60,
+      negotiation: 80,
+      won: 100,
+      lost: 0,
+    }[stage];
   }
 
   // ==================== Quotes ====================
@@ -785,35 +922,46 @@ export class CustomersService {
     const where: FindOptionsWhere<Quote> = {};
     if (filters.customerId) where.customerId = filters.customerId;
     if (filters.status) where.status = filters.status as any;
-    if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
+    if (filters.ownerId)
+      where.customer = { ownerId: filters.ownerId } as Customer;
     return this.quoteRepository.find({
       where,
-      relations: ['customer', 'items'],
-      order: { updatedAt: 'DESC' },
+      relations: ["customer", "items"],
+      order: { updatedAt: "DESC" },
     });
   }
 
   async findQuote(id: number) {
     const quote = await this.quoteRepository.findOne({
       where: { id },
-      relations: ['customer', 'items'],
+      relations: ["customer", "items"],
     });
-    if (!quote) throw new NotFoundException('报价不存在');
+    if (!quote) throw new NotFoundException("报价不存在");
     return quote;
   }
 
   async createQuote(createQuoteDto: CreateQuoteDto) {
     await this.findOne(createQuoteDto.customerId);
     if (!createQuoteDto.items || createQuoteDto.items.length === 0) {
-      throw new BadRequestException('请至少添加一个报价产品');
+      throw new BadRequestException("请至少添加一个报价产品");
     }
 
-    const { items, subtotal: _subtotal, taxAmount: _taxAmount, total: _total, ...quoteFields } = createQuoteDto;
-    const calculated = this.calculateQuote(items, quoteFields.freight, quoteFields.taxRate);
+    const {
+      items,
+      subtotal: _subtotal,
+      taxAmount: _taxAmount,
+      total: _total,
+      ...quoteFields
+    } = createQuoteDto;
+    const calculated = this.calculateQuote(
+      items,
+      quoteFields.freight,
+      quoteFields.taxRate,
+    );
     const quote = this.quoteRepository.create({
       ...quoteFields,
       ...calculated,
-      quoteId: this.generateId('quote'),
+      quoteId: this.generateId("quote"),
       quoteNo: createQuoteDto.quoteNo || (await this.generateQuoteNo()),
       items: calculated.items as any,
     });
@@ -824,9 +972,12 @@ export class CustomersService {
   async updateQuote(id: number, updateQuoteDto: UpdateQuoteDto) {
     const quote = await this.findQuote(id);
     if (updateQuoteDto.items && updateQuoteDto.items.length === 0) {
-      throw new BadRequestException('请至少添加一个报价产品');
+      throw new BadRequestException("请至少添加一个报价产品");
     }
-    if (updateQuoteDto.customerId && updateQuoteDto.customerId !== quote.customerId) {
+    if (
+      updateQuoteDto.customerId &&
+      updateQuoteDto.customerId !== quote.customerId
+    ) {
       await this.findOne(updateQuoteDto.customerId);
     }
     const { items, ...quoteFields } = updateQuoteDto;
@@ -834,23 +985,35 @@ export class CustomersService {
     const sourceItems = items
       ? items.map((item, index) => ({ ...quote.items[index], ...item }))
       : quote.items;
-    const calculated = this.calculateQuote(sourceItems, quote.freight, quote.taxRate);
+    const calculated = this.calculateQuote(
+      sourceItems,
+      quote.freight,
+      quote.taxRate,
+    );
     Object.assign(quote, calculated);
     return this.quoteRepository.save(quote);
   }
 
-  private calculateQuote(items: CreateQuoteDto['items'], freight = 0, taxRate = 0) {
+  private calculateQuote(
+    items: CreateQuoteDto["items"],
+    freight = 0,
+    taxRate = 0,
+  ) {
     const calculatedItems = items.map((item) => {
       const quantity = Number(item.quantity ?? 1);
       const unitPrice = Number(item.unitPrice ?? 0);
       const discount = Number(item.discount ?? 0);
-      const subtotal = this.roundMoney(quantity * unitPrice * (1 - discount / 100));
+      const subtotal = this.roundMoney(
+        quantity * unitPrice * (1 - discount / 100),
+      );
       return { ...item, quantity, unitPrice, discount, subtotal };
     });
-    const subtotal = this.roundMoney(calculatedItems.reduce((sum, item) => sum + item.subtotal, 0));
+    const subtotal = this.roundMoney(
+      calculatedItems.reduce((sum, item) => sum + item.subtotal, 0),
+    );
     const normalizedFreight = this.roundMoney(Number(freight || 0));
     const normalizedTaxRate = Number(taxRate || 0);
-    const taxAmount = this.roundMoney(subtotal * normalizedTaxRate / 100);
+    const taxAmount = this.roundMoney((subtotal * normalizedTaxRate) / 100);
     return {
       items: calculatedItems,
       subtotal,
@@ -867,17 +1030,17 @@ export class CustomersService {
 
   async deleteQuote(id: number) {
     const result = await this.quoteRepository.delete(id);
-    if (result.affected === 0) throw new NotFoundException('报价不存在');
+    if (result.affected === 0) throw new NotFoundException("报价不存在");
     return { deleted: true };
   }
 
   private async generateQuoteNo(): Promise<string> {
     const now = new Date();
-    const prefix = `Q-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const prefix = `Q-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
     const count = await this.quoteRepository.count({
       where: { quoteNo: Like(`${prefix}%`) },
     });
-    return `${prefix}-${String(count + 1).padStart(3, '0')}`;
+    return `${prefix}-${String(count + 1).padStart(3, "0")}`;
   }
 
   // ==================== Samples ====================
@@ -886,11 +1049,12 @@ export class CustomersService {
     const where: FindOptionsWhere<Sample> = {};
     if (filters.customerId) where.customerId = filters.customerId;
     if (filters.status) where.status = filters.status as any;
-    if (filters.ownerId) where.customer = { ownerId: filters.ownerId } as Customer;
+    if (filters.ownerId)
+      where.customer = { ownerId: filters.ownerId } as Customer;
     return this.sampleRepository.find({
       where,
-      relations: ['customer'],
-      order: { updatedAt: 'DESC' },
+      relations: ["customer"],
+      order: { updatedAt: "DESC" },
     });
   }
 
@@ -898,7 +1062,7 @@ export class CustomersService {
     await this.findOne(createSampleDto.customerId);
     const sample = this.sampleRepository.create({
       ...createSampleDto,
-      sampleId: this.generateId('sample'),
+      sampleId: this.generateId("sample"),
     });
     this.applySampleStatusDates(sample);
     return this.sampleRepository.save(sample);
@@ -906,24 +1070,24 @@ export class CustomersService {
 
   async updateSample(id: number, updateSampleDto: UpdateSampleDto) {
     const sample = await this.sampleRepository.findOne({ where: { id } });
-    if (!sample) throw new NotFoundException('样品记录不存在');
+    if (!sample) throw new NotFoundException("样品记录不存在");
     Object.assign(sample, updateSampleDto);
     this.applySampleStatusDates(sample);
     return this.sampleRepository.save(sample);
   }
 
   private applySampleStatusDates(sample: Sample) {
-    if (['sent', 'delivered'].includes(sample.status) && !sample.sentAt) {
+    if (["sent", "delivered"].includes(sample.status) && !sample.sentAt) {
       sample.sentAt = new Date();
     }
-    if (sample.status === 'delivered' && !sample.deliveredAt) {
+    if (sample.status === "delivered" && !sample.deliveredAt) {
       sample.deliveredAt = new Date();
     }
   }
 
   async deleteSample(id: number) {
     const result = await this.sampleRepository.delete(id);
-    if (result.affected === 0) throw new NotFoundException('样品记录不存在');
+    if (result.affected === 0) throw new NotFoundException("样品记录不存在");
     return { deleted: true };
   }
 
@@ -931,34 +1095,34 @@ export class CustomersService {
     if (!customerIds.length) return [];
     return this.contactRepository.find({
       where: { customerId: In(customerIds) },
-      order: { isPrimary: 'DESC', name: 'ASC' },
+      order: { isPrimary: "DESC", name: "ASC" },
     });
   }
 
   async assertTodoOwner(id: number, ownerId?: string) {
     const item = await this.todoRepository.findOne({ where: { id } });
-    if (!item) throw new NotFoundException('待办不存在');
+    if (!item) throw new NotFoundException("待办不存在");
     await this.assertCustomerOwner(item.customerId, ownerId);
     return item;
   }
 
   async assertOpportunityOwner(id: number, ownerId?: string) {
     const item = await this.opportunityRepository.findOne({ where: { id } });
-    if (!item) throw new NotFoundException('商机不存在');
+    if (!item) throw new NotFoundException("商机不存在");
     await this.assertCustomerOwner(item.customerId, ownerId);
     return item;
   }
 
   async assertQuoteOwner(id: number, ownerId?: string) {
     const item = await this.quoteRepository.findOne({ where: { id } });
-    if (!item) throw new NotFoundException('报价不存在');
+    if (!item) throw new NotFoundException("报价不存在");
     await this.assertCustomerOwner(item.customerId, ownerId);
     return item;
   }
 
   async assertSampleOwner(id: number, ownerId?: string) {
     const item = await this.sampleRepository.findOne({ where: { id } });
-    if (!item) throw new NotFoundException('样品不存在');
+    if (!item) throw new NotFoundException("样品不存在");
     await this.assertCustomerOwner(item.customerId, ownerId);
     return item;
   }
@@ -987,7 +1151,9 @@ export class CustomersService {
       if (existingEmails.has(email)) {
         duplicates.push({
           email,
-          existingCompany: customers.find((c) => c.email?.toLowerCase() === email)?.company || '',
+          existingCompany:
+            customers.find((c) => c.email?.toLowerCase() === email)?.company ||
+            "",
           incomingCompany: row.company,
         });
       }
@@ -1003,7 +1169,7 @@ export class CustomersService {
     };
   }
 
-  async parseAndImport(file: UploadedFile, ownerId = '') {
+  async parseAndImport(file: UploadedFile, ownerId = "") {
     const rows = await this.parseExcelFile(file);
     let created = 0;
     let updated = 0;
@@ -1022,7 +1188,9 @@ export class CustomersService {
         skipped++;
         continue;
       }
-      const existing = data.email ? customersByEmail.get(data.email) : undefined;
+      const existing = data.email
+        ? customersByEmail.get(data.email)
+        : undefined;
 
       if (existing) {
         if (ownerId && existing.ownerId !== ownerId) {
@@ -1036,7 +1204,7 @@ export class CustomersService {
         const customer = this.customerRepository.create({
           ...data,
           ownerId,
-          customerId: this.generateId('cus'),
+          customerId: this.generateId("cus"),
         });
         const saved = await this.customerRepository.save(customer);
         if (saved.email) customersByEmail.set(saved.email, saved);
@@ -1047,68 +1215,77 @@ export class CustomersService {
     return { created, updated, skipped, total: rows.length };
   }
 
-  async upsertLeadCustomer(data: Partial<Customer>, ownerId = '') {
-    const email = this.normalizeEmail(data.email || '');
+  async upsertLeadCustomer(data: Partial<Customer>, ownerId = "") {
+    const email = this.normalizeEmail(data.email || "");
     const existing = email
       ? await this.customerRepository.findOne({ where: { email } })
       : null;
     const profile = this.mergeImportedCustomer({
-      company: String(data.company || ''),
-      contact: String(data.contact || ''),
+      company: String(data.company || ""),
+      contact: String(data.contact || ""),
       email,
-      phone: String(data.phone || ''),
-      website: String(data.website || ''),
-      region: String(data.region || ''),
-      country: String(data.country || ''),
-      business: String(data.business || ''),
-      product: String(data.product || ''),
-      customerType: String(data.customerType || ''),
-      timezone: String(data.timezone || ''),
-      notes: String(data.notes || ''),
-      source: String(data.source || 'lead'),
+      phone: String(data.phone || ""),
+      website: String(data.website || ""),
+      region: String(data.region || ""),
+      country: String(data.country || ""),
+      business: String(data.business || ""),
+      product: String(data.product || ""),
+      customerType: String(data.customerType || ""),
+      timezone: String(data.timezone || ""),
+      notes: String(data.notes || ""),
+      source: String(data.source || "lead"),
     });
     if (existing) {
       if (ownerId && existing.ownerId !== ownerId) {
-        throw new BadRequestException('该邮箱已存在于其他负责人客户中，请联系管理员调整归属');
+        throw new BadRequestException(
+          "该邮箱已存在于其他负责人客户中，请联系管理员调整归属",
+        );
       }
       Object.assign(existing, profile);
-      return { customer: await this.customerRepository.save(existing), created: false };
+      return {
+        customer: await this.customerRepository.save(existing),
+        created: false,
+      };
     }
     const customer = this.customerRepository.create({
       ...profile,
       ownerId,
-      journeyStage: 'lead',
-      customerId: this.generateId('cus'),
+      journeyStage: "lead",
+      customerId: this.generateId("cus"),
     });
-    return { customer: await this.customerRepository.save(customer), created: true };
+    return {
+      customer: await this.customerRepository.save(customer),
+      created: true,
+    };
   }
 
   private async parseExcelFile(file: UploadedFile): Promise<any[]> {
     if (!file?.buffer?.length && !file?.path) {
-      throw new BadRequestException('上传文件内容为空');
+      throw new BadRequestException("上传文件内容为空");
     }
     const workbook = file.buffer?.length
-      ? xlsx.read(file.buffer, { type: 'buffer' })
+      ? xlsx.read(file.buffer, { type: "buffer" })
       : xlsx.readFile(file.path!);
     const sheetName = workbook.SheetNames[0];
-    if (!sheetName) throw new BadRequestException('Excel/CSV 文件没有可读取的工作表');
+    if (!sheetName)
+      throw new BadRequestException("Excel/CSV 文件没有可读取的工作表");
     const sheet = workbook.Sheets[sheetName];
-    return xlsx.utils.sheet_to_json(sheet, { defval: '', raw: false });
+    return xlsx.utils.sheet_to_json(sheet, { defval: "", raw: false });
   }
 
   private normalizeImportRow(row: any) {
     return {
-      company: row.company || row.Company || '',
-      contact: row.contact || row.Contact || row['联系人'] || '',
-      email: row.email || row.Email || row['邮箱'] || '',
-      phone: row.phone || row.Phone || row['电话'] || '',
-      website: row.website || row.Website || row['网站'] || '',
-      region: row.region || row.Region || row['地区'] || '',
-      country: row.country || row.Country || row['国家'] || '',
-      business: row.business || row.Business || row['行业'] || '',
-      product: row.product || row.Product || row['产品'] || '',
-      notes: row.notes || row.Notes || row['备注'] || '',
-      source: 'import',
+      company: row.company || row.Company || "",
+      contact: row.contact || row.Contact || row["联系人"] || "",
+      email: row.email || row.Email || row["邮箱"] || "",
+      phone: row.phone || row.Phone || row["电话"] || "",
+      website: row.website || row.Website || row["网站"] || "",
+      region: row.region || row.Region || row["地区"] || "",
+      country: row.country || row.Country || row["国家"] || "",
+      business: row.business || row.Business || row["行业"] || "",
+      product: row.product || row.Product || row["产品"] || "",
+      notes: row.notes || row.Notes || row["备注"] || "",
+      source: "import",
     };
   }
 
@@ -1116,33 +1293,41 @@ export class CustomersService {
     const value = (...keys: string[]) => {
       for (const key of keys) {
         const candidate = row[key];
-        if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+        if (
+          candidate !== undefined &&
+          candidate !== null &&
+          String(candidate).trim()
+        ) {
           return String(candidate).trim();
         }
       }
-      return '';
+      return "";
     };
     return {
-      company: value('company', 'Company', '公司', '公司名称', '客户名称'),
-      contact: value('contact', 'Contact', '联系人', '联系人姓名', '姓名'),
-      email: this.normalizeEmail(value('email', 'Email', '邮箱', '电子邮箱', 'E-mail', 'E-Mail')),
-      phone: value('phone', 'Phone', '电话', '手机号', '联系电话'),
-      website: value('website', 'Website', '官网', '网站', '网址'),
-      region: value('region', 'Region', '地区', '城市', '市场区域'),
-      country: value('country', 'Country', '国家', '国家/地区'),
-      business: value('business', 'Business', '主营业务', '行业', '业务'),
-      product: value('product', 'Product', '产品', '主营产品'),
-      customerType: value('customerType', 'Customer Type', '客户类型'),
-      timezone: value('timezone', 'Timezone', '时区', '客户时区'),
-      notes: value('notes', 'Notes', '备注'),
-      source: 'import',
+      company: value("company", "Company", "公司", "公司名称", "客户名称"),
+      contact: value("contact", "Contact", "联系人", "联系人姓名", "姓名"),
+      email: this.normalizeEmail(
+        value("email", "Email", "邮箱", "电子邮箱", "E-mail", "E-Mail"),
+      ),
+      phone: value("phone", "Phone", "电话", "手机号", "联系电话"),
+      website: value("website", "Website", "官网", "网站", "网址"),
+      region: value("region", "Region", "地区", "城市", "市场区域"),
+      country: value("country", "Country", "国家", "国家/地区"),
+      business: value("business", "Business", "主营业务", "行业", "业务"),
+      product: value("product", "Product", "产品", "主营产品"),
+      customerType: value("customerType", "Customer Type", "客户类型"),
+      timezone: value("timezone", "Timezone", "时区", "客户时区"),
+      notes: value("notes", "Notes", "备注"),
+      source: "import",
     };
   }
 
-  private mergeImportedCustomer(incoming: ReturnType<CustomersService['normalizeImportedRow']>) {
+  private mergeImportedCustomer(
+    incoming: ReturnType<CustomersService["normalizeImportedRow"]>,
+  ) {
     const merged: Record<string, string> = {};
     for (const [key, value] of Object.entries(incoming)) {
-      if (String(value || '').trim()) merged[key] = value;
+      if (String(value || "").trim()) merged[key] = value;
     }
     // Profile fields merge in place, so ownership, lifecycle, email health,
     // tags, activities and historical email logs remain untouched.
@@ -1150,7 +1335,9 @@ export class CustomersService {
   }
 
   private normalizeEmail(value: string) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || "")
+      .trim()
+      .toLowerCase();
   }
 
   // ==================== Customer Views ====================
@@ -1158,32 +1345,38 @@ export class CustomersService {
   async findViews(ownerId?: string) {
     return this.customerViewRepository.find({
       where: ownerId ? { ownerId } : {},
-      order: { createdAt: 'DESC' },
+      order: { createdAt: "DESC" },
     });
   }
 
-  async createView(createDto: CreateCustomerViewDto, ownerId = '') {
+  async createView(createDto: CreateCustomerViewDto, ownerId = "") {
     const view = this.customerViewRepository.create({
       ...createDto,
       ownerId,
-      viewId: this.generateId('view'),
+      viewId: this.generateId("view"),
     });
     return this.customerViewRepository.save(view);
   }
 
-  async updateView(id: number, updateDto: UpdateCustomerViewDto, ownerId?: string) {
+  async updateView(
+    id: number,
+    updateDto: UpdateCustomerViewDto,
+    ownerId?: string,
+  ) {
     const view = await this.customerViewRepository.findOne({ where: { id } });
-    if (!view) throw new NotFoundException('视图不存在');
-    if (ownerId && view.ownerId !== ownerId) throw new NotFoundException('筛选器不存在');
+    if (!view) throw new NotFoundException("视图不存在");
+    if (ownerId && view.ownerId !== ownerId)
+      throw new NotFoundException("筛选器不存在");
     Object.assign(view, updateDto);
     return this.customerViewRepository.save(view);
   }
 
   async deleteView(id: number, ownerId?: string) {
     const view = await this.customerViewRepository.findOne({ where: { id } });
-    if (!view || (ownerId && view.ownerId !== ownerId)) throw new NotFoundException('筛选器不存在');
+    if (!view || (ownerId && view.ownerId !== ownerId))
+      throw new NotFoundException("筛选器不存在");
     const result = await this.customerViewRepository.delete(id);
-    if (result.affected === 0) throw new NotFoundException('视图不存在');
+    if (result.affected === 0) throw new NotFoundException("视图不存在");
     return { deleted: true };
   }
 

@@ -54,7 +54,20 @@ export interface Customer {
   timezone?: string;
   tags?: string[];
   tier: "A" | "B" | "C" | "D" | "";
-  journeyStage: "new" | "contacted" | "replied" | "qualified" | "opportunity" | "won" | "lost" | "prospect" | "lead" | "proposal" | "negotiation" | "closed" | "";
+  journeyStage:
+    | "new"
+    | "contacted"
+    | "replied"
+    | "qualified"
+    | "opportunity"
+    | "won"
+    | "lost"
+    | "prospect"
+    | "lead"
+    | "proposal"
+    | "negotiation"
+    | "closed"
+    | "";
   customerType?: string;
   product?: string;
   source?: string;
@@ -92,6 +105,20 @@ export interface Customer360 {
   sendLogs?: SendLog[];
 }
 
+export interface CustomerAttachment {
+  id: string;
+  attachmentId?: string;
+  customerId: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  category: "inquiry" | "drawing" | "contract" | "other";
+  note?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Contact {
   id: string;
   customerId: string;
@@ -106,7 +133,7 @@ export interface Contact {
 export interface Activity {
   id: string;
   customerId: string;
-  type: "email" | "call" | "meeting" | "note" | "other";
+  type: "email" | "call" | "meeting" | "whatsapp" | "note" | "other";
   subject: string;
   content?: string;
   createdAt: string;
@@ -130,7 +157,13 @@ export interface Opportunity {
   customerName?: string;
   customer?: { id: string; customerId?: string; company: string };
   name: string;
-  stage: "prospecting" | "qualification" | "proposal" | "negotiation" | "won" | "lost";
+  stage:
+    | "prospecting"
+    | "qualification"
+    | "proposal"
+    | "negotiation"
+    | "won"
+    | "lost";
   amount?: number;
   probability?: number;
   expectedCloseDate?: string;
@@ -357,7 +390,15 @@ export interface B2BLeadTask {
   industry?: string;
   buyerType?: string;
   targetCount?: number;
-  status: "draft" | "ready" | "running" | "paused" | "completed" | "exhausted" | "cancelled" | "failed";
+  status:
+    | "draft"
+    | "ready"
+    | "running"
+    | "paused"
+    | "completed"
+    | "exhausted"
+    | "cancelled"
+    | "failed";
   cleanedLeadCount?: number;
   automationCursor?: number;
   automationProgress?: B2BAutomationProgress;
@@ -468,7 +509,12 @@ export interface DashboardData {
   emailActivity?: {
     days7: { total: number; sent: number; failed: number; rate: number };
     days30: { total: number; sent: number; failed: number; rate: number };
-    byTemplate: Array<{ name: string; total: number; sent: number; rate: number }>;
+    byTemplate: Array<{
+      name: string;
+      total: number;
+      sent: number;
+      rate: number;
+    }>;
   };
 }
 
@@ -581,10 +627,21 @@ export interface DashboardSnapshot {
   metrics: DashboardData;
   emailActivity: NonNullable<DashboardData["emailActivity"]>;
   trends: {
-    days30: Array<{ date: string; customers: number; sent: number; failed: number; bounced: number }>;
+    days30: Array<{
+      date: string;
+      customers: number;
+      sent: number;
+      failed: number;
+      bounced: number;
+    }>;
   };
   salesFunnel: {
-    stages: Array<{ stage: string; count: number; value: number; weightedValue: number }>;
+    stages: Array<{
+      stage: string;
+      count: number;
+      value: number;
+      weightedValue: number;
+    }>;
     openValue: number;
     weightedValue: number;
     wonValue: number;
@@ -599,9 +656,33 @@ export interface DashboardSnapshot {
     bounceRate: number;
   };
   activeTasks: {
-    leads: Array<{ id: string; name: string; status: string; current: number; target: number }>;
-    emails: Array<{ id: string; name: string; status: string; current: number; target: number }>;
+    leads: Array<{
+      id: string;
+      name: string;
+      status: string;
+      current: number;
+      target: number;
+    }>;
+    emails: Array<{
+      id: string;
+      name: string;
+      status: string;
+      current: number;
+      target: number;
+    }>;
   };
-  openTodos: Array<{ id: string; title: string; customerName: string; dueAt?: string }>;
-  recentSendLogs: Array<{ id: string; email: string; status: string; templateName?: string; message?: string; createdAt: string }>;
+  openTodos: Array<{
+    id: string;
+    title: string;
+    customerName: string;
+    dueAt?: string;
+  }>;
+  recentSendLogs: Array<{
+    id: string;
+    email: string;
+    status: string;
+    templateName?: string;
+    message?: string;
+    createdAt: string;
+  }>;
 }

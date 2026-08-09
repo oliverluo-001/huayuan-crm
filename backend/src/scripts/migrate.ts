@@ -1,19 +1,19 @@
-import 'dotenv/config';
-import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
-import * as bcrypt from 'bcrypt';
-import { migrateP03DataIntegrity } from './p03-data-integrity';
+import "dotenv/config";
+import mysql, { type Connection, type RowDataPacket } from "mysql2/promise";
+import * as bcrypt from "bcrypt";
+import { migrateP03DataIntegrity } from "./p03-data-integrity";
 
-const migrationId = '20260730_online_accounts';
-const database = process.env.DB_DATABASE || 'international_trade_crm';
+const migrationId = "20260730_online_accounts";
+const database = process.env.DB_DATABASE || "international_trade_crm";
 
 export async function runDatabaseMigrations() {
   const connection = await mysql.createConnection({
-    host: process.env.DB_HOST || '127.0.0.1',
+    host: process.env.DB_HOST || "127.0.0.1",
     port: Number(process.env.DB_PORT || 3306),
-    user: process.env.DB_USERNAME || 'root',
-    password: process.env.DB_PASSWORD || '',
+    user: process.env.DB_USERNAME || "root",
+    password: process.env.DB_PASSWORD || "",
     database,
-    ssl: process.env.DB_SSL === 'true' ? {} : undefined,
+    ssl: process.env.DB_SSL === "true" ? {} : undefined,
   });
   try {
     await connection.query(`
@@ -23,7 +23,7 @@ export async function runDatabaseMigrations() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     const [applied] = await connection.query<RowDataPacket[]>(
-      'SELECT id FROM schema_migrations WHERE id = ? LIMIT 1',
+      "SELECT id FROM schema_migrations WHERE id = ? LIMIT 1",
       [migrationId],
     );
     if (applied.length) {
@@ -35,22 +35,40 @@ export async function runDatabaseMigrations() {
       [database],
     );
     if (!tables.length) {
-      throw new Error('users 表不存在。请先完成基础数据库初始化，再执行增量迁移。');
+      throw new Error(
+        "users 表不存在。请先完成基础数据库初始化，再执行增量迁移。",
+      );
     }
 
     if (!applied.length) {
       await connection.beginTransaction();
       try {
         await normalizeLegacyUserEmails(connection);
-        await addColumn(connection, 'status', "VARCHAR(20) NOT NULL DEFAULT 'active'");
-        await addColumn(connection, 'active', 'TINYINT(1) NOT NULL DEFAULT 1');
-        await addColumn(connection, 'registration_source', "VARCHAR(20) NOT NULL DEFAULT 'admin'");
-        await addColumn(connection, 'token_version', 'INT UNSIGNED NOT NULL DEFAULT 0');
-        await addColumn(connection, 'failed_login_attempts', 'INT UNSIGNED NOT NULL DEFAULT 0');
-        await addColumn(connection, 'locked_until', 'DATETIME NULL');
-        await addColumn(connection, 'last_login_at', 'DATETIME NULL');
-        await addColumn(connection, 'approved_at', 'DATETIME NULL');
-        await addColumn(connection, 'approved_by', 'INT NULL');
+        await addColumn(
+          connection,
+          "status",
+          "VARCHAR(20) NOT NULL DEFAULT 'active'",
+        );
+        await addColumn(connection, "active", "TINYINT(1) NOT NULL DEFAULT 1");
+        await addColumn(
+          connection,
+          "registration_source",
+          "VARCHAR(20) NOT NULL DEFAULT 'admin'",
+        );
+        await addColumn(
+          connection,
+          "token_version",
+          "INT UNSIGNED NOT NULL DEFAULT 0",
+        );
+        await addColumn(
+          connection,
+          "failed_login_attempts",
+          "INT UNSIGNED NOT NULL DEFAULT 0",
+        );
+        await addColumn(connection, "locked_until", "DATETIME NULL");
+        await addColumn(connection, "last_login_at", "DATETIME NULL");
+        await addColumn(connection, "approved_at", "DATETIME NULL");
+        await addColumn(connection, "approved_by", "INT NULL");
         await connection.query(`
           UPDATE users
           SET status = 'active',
@@ -58,10 +76,15 @@ export async function runDatabaseMigrations() {
               registration_source = CASE WHEN role = 'admin' THEN 'setup' ELSE 'admin' END,
               approved_at = COALESCE(approved_at, created_at)
         `);
-        if (!(await indexExists(connection, 'idx_users_status'))) {
-          await connection.query('ALTER TABLE users ADD KEY idx_users_status (status, active)');
+        if (!(await indexExists(connection, "idx_users_status"))) {
+          await connection.query(
+            "ALTER TABLE users ADD KEY idx_users_status (status, active)",
+          );
         }
-        await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [migrationId]);
+        await connection.query(
+          "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+          [migrationId],
+        );
         await connection.commit();
         console.log(`Applied migration: ${migrationId}`);
       } catch (error) {
@@ -72,6 +95,7 @@ export async function runDatabaseMigrations() {
     await migrateEmailExecution(connection);
     await migrateAuditMetadata(connection);
     await migrateCrmContracts(connection);
+    await migrateCustomer360Workspace(connection);
     const p03Report = await migrateP03DataIntegrity(connection, database);
     await migrateOpportunityLifecycle(connection);
     await connection.beginTransaction();
@@ -89,27 +113,110 @@ export async function runDatabaseMigrations() {
 }
 
 async function migrateAuditMetadata(connection: Connection) {
-  const id = '20260801_audit_metadata';
-  if (!(await tableExists(connection, 'audit_logs'))) return;
-  await addColumnToTable(connection, 'audit_logs', 'user_id', "VARCHAR(32) NOT NULL DEFAULT ''");
-  await addColumnToTable(connection, 'audit_logs', 'method', "VARCHAR(10) NOT NULL DEFAULT ''");
-  await addColumnToTable(connection, 'audit_logs', 'path', "VARCHAR(500) NOT NULL DEFAULT ''");
-  await addColumnToTable(connection, 'audit_logs', 'ip', "VARCHAR(64) NOT NULL DEFAULT ''");
-  await addColumnToTable(connection, 'audit_logs', 'status', "VARCHAR(20) NOT NULL DEFAULT 'success'");
-  await addColumnToTable(connection, 'audit_logs', 'duration_ms', 'INT NOT NULL DEFAULT 0');
-  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
+  const id = "20260801_audit_metadata";
+  if (!(await tableExists(connection, "audit_logs"))) return;
+  await addColumnToTable(
+    connection,
+    "audit_logs",
+    "user_id",
+    "VARCHAR(32) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "audit_logs",
+    "method",
+    "VARCHAR(10) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "audit_logs",
+    "path",
+    "VARCHAR(500) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "audit_logs",
+    "ip",
+    "VARCHAR(64) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "audit_logs",
+    "status",
+    "VARCHAR(20) NOT NULL DEFAULT 'success'",
+  );
+  await addColumnToTable(
+    connection,
+    "audit_logs",
+    "duration_ms",
+    "INT NOT NULL DEFAULT 0",
+  );
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
 }
 
 async function migrateCrmContracts(connection: Connection) {
-  const id = '20260808_crm_contracts';
-  if (!(await tableExists(connection, 'quotes'))) return;
-  await addColumnToTable(connection, 'quotes', 'freight', 'DECIMAL(15,2) NOT NULL DEFAULT 0');
-  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
+  const id = "20260808_crm_contracts";
+  if (!(await tableExists(connection, "quotes"))) return;
+  await addColumnToTable(
+    connection,
+    "quotes",
+    "freight",
+    "DECIMAL(15,2) NOT NULL DEFAULT 0",
+  );
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
+}
+
+async function migrateCustomer360Workspace(connection: Connection) {
+  const id = "20260809_customer_360_workspace";
+  if (!(await tableExists(connection, "customers"))) return;
+
+  if (await tableExists(connection, "activities")) {
+    await connection.query(`
+      ALTER TABLE activities
+      MODIFY COLUMN type ENUM('email','call','meeting','whatsapp','note','other') NOT NULL DEFAULT 'note'
+    `);
+  }
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS customer_attachments (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      attachment_id VARCHAR(32) NOT NULL,
+      customer_id INT NOT NULL,
+      original_name VARCHAR(255) NOT NULL,
+      stored_name VARCHAR(96) NOT NULL,
+      mime_type VARCHAR(160) NOT NULL DEFAULT 'application/octet-stream',
+      size INT UNSIGNED NOT NULL,
+      category ENUM('inquiry','drawing','contract','other') NOT NULL DEFAULT 'other',
+      note TEXT NULL,
+      created_by VARCHAR(32) NOT NULL DEFAULT '',
+      created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uq_customer_attachments_attachment_id (attachment_id),
+      UNIQUE KEY uq_customer_attachments_stored_name (stored_name),
+      KEY idx_customer_attachments_customer (customer_id, created_at),
+      CONSTRAINT fk_customer_attachments_customer
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
 }
 
 async function migrateOpportunityLifecycle(connection: Connection) {
-  const id = '20260808_opportunity_lifecycle_sync';
-  if (!(await tableExists(connection, 'customers')) || !(await tableExists(connection, 'opportunities'))) return;
+  const id = "20260808_opportunity_lifecycle_sync";
+  if (
+    !(await tableExists(connection, "customers")) ||
+    !(await tableExists(connection, "opportunities"))
+  )
+    return;
 
   await connection.query(`
     UPDATE customers c
@@ -159,27 +266,45 @@ async function migrateOpportunityLifecycle(connection: Connection) {
       END)
   `);
 
-  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
 }
 
 export async function ensureInitialAdmin(
-  connection: Pick<Connection, 'query'>,
-  credentials: { username?: string; password?: string; displayName?: string } = {},
+  connection: Pick<Connection, "query">,
+  credentials: {
+    username?: string;
+    password?: string;
+    displayName?: string;
+  } = {},
 ) {
-  const username = (credentials.username ?? process.env.INITIAL_ADMIN_USERNAME ?? '').trim();
-  const password = credentials.password ?? process.env.INITIAL_ADMIN_PASSWORD ?? '';
-  const displayName = (credentials.displayName ?? process.env.INITIAL_ADMIN_DISPLAY_NAME ?? '超级管理员').trim();
+  const username = (
+    credentials.username ??
+    process.env.INITIAL_ADMIN_USERNAME ??
+    ""
+  ).trim();
+  const password =
+    credentials.password ?? process.env.INITIAL_ADMIN_PASSWORD ?? "";
+  const displayName = (
+    credentials.displayName ??
+    process.env.INITIAL_ADMIN_DISPLAY_NAME ??
+    "超级管理员"
+  ).trim();
 
   if (!username && !password) return { configured: false, created: false };
   if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
-    throw new Error('INITIAL_ADMIN_USERNAME 必须是 3-32 位字母、数字、点、横线或下划线');
+    throw new Error(
+      "INITIAL_ADMIN_USERNAME 必须是 3-32 位字母、数字、点、横线或下划线",
+    );
   }
   if (password.length < 16 || password.length > 128) {
-    throw new Error('INITIAL_ADMIN_PASSWORD 必须是 16-128 位密码');
+    throw new Error("INITIAL_ADMIN_PASSWORD 必须是 16-128 位密码");
   }
 
   const [rows] = await connection.query<RowDataPacket[]>(
-    'SELECT id, role, status, active FROM users WHERE username = ? LIMIT 1',
+    "SELECT id, role, status, active FROM users WHERE username = ? LIMIT 1",
     [username],
   );
   const existing = rows[0];
@@ -190,7 +315,11 @@ export async function ensureInitialAdmin(
   );
 
   if (existing) {
-    if (existing.role !== 'admin' || existing.status !== 'active' || !existing.active) {
+    if (
+      existing.role !== "admin" ||
+      existing.status !== "active" ||
+      !existing.active
+    ) {
       await connection.query(
         `UPDATE users
          SET role = 'admin', status = 'active', active = 1,
@@ -215,22 +344,28 @@ export async function ensureInitialAdmin(
   return { configured: true, created: true };
 }
 
-export async function normalizeLegacyUserEmails(connection: Pick<Connection, 'query'>) {
-  await connection.query('ALTER TABLE users MODIFY COLUMN email VARCHAR(255) NULL DEFAULT NULL');
-  await connection.query("UPDATE users SET email = NULL WHERE TRIM(COALESCE(email, '')) = ''");
+export async function normalizeLegacyUserEmails(
+  connection: Pick<Connection, "query">,
+) {
+  await connection.query(
+    "ALTER TABLE users MODIFY COLUMN email VARCHAR(255) NULL DEFAULT NULL",
+  );
+  await connection.query(
+    "UPDATE users SET email = NULL WHERE TRIM(COALESCE(email, '')) = ''",
+  );
 }
 
 async function migrateEmailExecution(connection: Connection) {
-  const id = '20260801_email_execution_and_security';
+  const id = "20260801_email_execution_and_security";
   const [applied] = await connection.query<RowDataPacket[]>(
-    'SELECT id FROM schema_migrations WHERE id = ? LIMIT 1',
+    "SELECT id FROM schema_migrations WHERE id = ? LIMIT 1",
     [id],
   );
   if (applied.length) {
     console.log(`Migration already applied: ${id}`);
   }
-  if (!(await tableExists(connection, 'email_tasks'))) {
-    throw new Error('email_tasks 表不存在，请先初始化基础数据库结构');
+  if (!(await tableExists(connection, "email_tasks"))) {
+    throw new Error("email_tasks 表不存在，请先初始化基础数据库结构");
   }
 
   await connection.query(`
@@ -255,36 +390,146 @@ async function migrateEmailExecution(connection: Connection) {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
-  await addColumnToTable(connection, 'email_tasks', 'start_at', 'TIMESTAMP NULL');
-  await addColumnToTable(connection, 'email_tasks', 'next_run_at', 'TIMESTAMP NULL');
-  await addColumnToTable(connection, 'email_tasks', 'failed_send_count', 'INT NOT NULL DEFAULT 0');
-  await addColumnToTable(connection, 'email_tasks', 'skipped_send_count', 'INT NOT NULL DEFAULT 0');
-  await addColumnToTable(connection, 'email_tasks', 'last_message', 'TEXT NULL');
-  await addColumnToTable(connection, 'email_tasks', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
-  await addColumnToTable(connection, 'email_logs', 'contact_id', "VARCHAR(32) NOT NULL DEFAULT ''");
-  await addColumnToTable(connection, 'email_logs', 'message_id', "VARCHAR(255) NOT NULL DEFAULT ''");
-  await addColumnToTable(connection, 'email_logs', 'attempt', 'INT NOT NULL DEFAULT 1');
-  await addColumnToTable(connection, 'email_logs', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
-  await addColumnToTable(connection, 'customers', 'email_failure_reason', 'TEXT NULL');
-  await addColumnToTable(connection, 'customers', 'email_failed_at', 'TIMESTAMP NULL');
-  await addColumnToTable(connection, 'customers', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
-  if (await tableExists(connection, 'lead_tasks')) {
-    await addColumnToTable(connection, 'lead_tasks', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
+  await addColumnToTable(
+    connection,
+    "email_tasks",
+    "start_at",
+    "TIMESTAMP NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "email_tasks",
+    "next_run_at",
+    "TIMESTAMP NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "email_tasks",
+    "failed_send_count",
+    "INT NOT NULL DEFAULT 0",
+  );
+  await addColumnToTable(
+    connection,
+    "email_tasks",
+    "skipped_send_count",
+    "INT NOT NULL DEFAULT 0",
+  );
+  await addColumnToTable(
+    connection,
+    "email_tasks",
+    "last_message",
+    "TEXT NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "email_tasks",
+    "owner_id",
+    "VARCHAR(32) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "email_logs",
+    "contact_id",
+    "VARCHAR(32) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "email_logs",
+    "message_id",
+    "VARCHAR(255) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "email_logs",
+    "attempt",
+    "INT NOT NULL DEFAULT 1",
+  );
+  await addColumnToTable(
+    connection,
+    "email_logs",
+    "owner_id",
+    "VARCHAR(32) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "customers",
+    "email_failure_reason",
+    "TEXT NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "customers",
+    "email_failed_at",
+    "TIMESTAMP NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "customers",
+    "owner_id",
+    "VARCHAR(32) NOT NULL DEFAULT ''",
+  );
+  if (await tableExists(connection, "lead_tasks")) {
+    await addColumnToTable(
+      connection,
+      "lead_tasks",
+      "owner_id",
+      "VARCHAR(32) NOT NULL DEFAULT ''",
+    );
   }
-  if (await tableExists(connection, 'leads')) {
-    await addColumnToTable(connection, 'leads', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
+  if (await tableExists(connection, "leads")) {
+    await addColumnToTable(
+      connection,
+      "leads",
+      "owner_id",
+      "VARCHAR(32) NOT NULL DEFAULT ''",
+    );
   }
-  if (await tableExists(connection, 'customer_views')) {
-    await addColumnToTable(connection, 'customer_views', 'owner_id', "VARCHAR(32) NOT NULL DEFAULT ''");
-    await addIndexIfMissing(connection, 'customer_views', 'idx_customer_views_owner', 'owner_id');
+  if (await tableExists(connection, "customer_views")) {
+    await addColumnToTable(
+      connection,
+      "customer_views",
+      "owner_id",
+      "VARCHAR(32) NOT NULL DEFAULT ''",
+    );
+    await addIndexIfMissing(
+      connection,
+      "customer_views",
+      "idx_customer_views_owner",
+      "owner_id",
+    );
   }
-  await addIndexIfMissing(connection, 'customers', 'idx_customers_owner', 'owner_id');
-  await addIndexIfMissing(connection, 'email_tasks', 'idx_email_tasks_owner', 'owner_id');
-  await addIndexIfMissing(connection, 'email_logs', 'idx_email_logs_owner', 'owner_id');
-  if (await tableExists(connection, 'lead_tasks')) await addIndexIfMissing(connection, 'lead_tasks', 'idx_lead_tasks_owner', 'owner_id');
-  if (await tableExists(connection, 'leads')) await addIndexIfMissing(connection, 'leads', 'idx_leads_owner', 'owner_id');
+  await addIndexIfMissing(
+    connection,
+    "customers",
+    "idx_customers_owner",
+    "owner_id",
+  );
+  await addIndexIfMissing(
+    connection,
+    "email_tasks",
+    "idx_email_tasks_owner",
+    "owner_id",
+  );
+  await addIndexIfMissing(
+    connection,
+    "email_logs",
+    "idx_email_logs_owner",
+    "owner_id",
+  );
+  if (await tableExists(connection, "lead_tasks"))
+    await addIndexIfMissing(
+      connection,
+      "lead_tasks",
+      "idx_lead_tasks_owner",
+      "owner_id",
+    );
+  if (await tableExists(connection, "leads"))
+    await addIndexIfMissing(connection, "leads", "idx_leads_owner", "owner_id");
 
-  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
   console.log(`Applied migration: ${id}`);
 }
 
@@ -300,7 +545,9 @@ async function addColumnToTable(
     [database, table, column],
   );
   if (!rows.length) {
-    await connection.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`);
+    await connection.query(
+      `ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${definition}`,
+    );
   }
 }
 
@@ -324,7 +571,9 @@ async function addColumn(
     [database, column],
   );
   if (!rows.length) {
-    await connection.query(`ALTER TABLE users ADD COLUMN \`${column}\` ${definition}`);
+    await connection.query(
+      `ALTER TABLE users ADD COLUMN \`${column}\` ${definition}`,
+    );
   }
 }
 
@@ -337,13 +586,21 @@ async function indexExists(connection: Connection, indexName: string) {
   return rows.length > 0;
 }
 
-async function addIndexIfMissing(connection: Connection, table: string, indexName: string, column: string) {
+async function addIndexIfMissing(
+  connection: Connection,
+  table: string,
+  indexName: string,
+  column: string,
+) {
   const [rows] = await connection.query<RowDataPacket[]>(
     `SELECT INDEX_NAME FROM information_schema.STATISTICS
      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?`,
     [database, table, indexName],
   );
-  if (!rows.length) await connection.query(`ALTER TABLE \`${table}\` ADD INDEX \`${indexName}\` (\`${column}\`)`);
+  if (!rows.length)
+    await connection.query(
+      `ALTER TABLE \`${table}\` ADD INDEX \`${indexName}\` (\`${column}\`)`,
+    );
 }
 
 if (require.main === module) {

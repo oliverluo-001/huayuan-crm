@@ -23,6 +23,7 @@ CORS_ORIGINS="${CORS_ORIGINS:-$PUBLIC_BASE_URL}"
 JWT_EXPIRES_IN="${JWT_EXPIRES_IN:-7d}"
 CREDENTIAL_ENCRYPTION_KEY="${CREDENTIAL_ENCRYPTION_KEY:-$JWT_SECRET}"
 DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}"
+CUSTOMER_ATTACHMENT_DIR="${CUSTOMER_ATTACHMENT_DIR:-$APP_ROOT/data/customer-attachments}"
 
 RELEASES_DIR="$APP_ROOT/releases"
 RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
@@ -85,9 +86,11 @@ umask 077
   write_env_value LOGIN_LOCK_MINUTES 15
   write_env_value DEEPSEEK_API_KEY "${DEEPSEEK_API_KEY:-}"
   write_env_value DEEPSEEK_BASE_URL "$DEEPSEEK_BASE_URL"
+  write_env_value CUSTOMER_ATTACHMENT_DIR "$CUSTOMER_ATTACHMENT_DIR"
 } > "$RELEASE_DIR/backend/.env"
 chmod 600 "$RELEASE_DIR/backend/.env"
 mkdir -p "$RELEASE_DIR/backend/logs"
+mkdir -p "$CUSTOMER_ATTACHMENT_DIR"
 
 cd "$RELEASE_DIR"
 npm ci --omit=dev --workspace=backend --include-workspace-root=false --no-audit --no-fund

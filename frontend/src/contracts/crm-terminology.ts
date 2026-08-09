@@ -49,8 +49,14 @@ export const LEAD_BUYER_TYPE_OPTIONS = [
   { value: "shipyard / marine company", label: "船厂 / 海事企业" },
   { value: "oil & gas company", label: "石油天然气企业" },
   { value: "power plant / energy company", label: "电厂 / 能源企业" },
-  { value: "pressure vessel / boiler / equipment manufacturer", label: "压力容器、锅炉及设备制造商" },
-  { value: "construction / infrastructure contractor", label: "建筑 / 基础设施承包商" },
+  {
+    value: "pressure vessel / boiler / equipment manufacturer",
+    label: "压力容器、锅炉及设备制造商",
+  },
+  {
+    value: "construction / infrastructure contractor",
+    label: "建筑 / 基础设施承包商",
+  },
 ] as const;
 
 export const LEAD_ACTION_LABELS: Readonly<Record<string, string>> = {
@@ -106,9 +112,17 @@ export const ACTIVITY_TYPE_LABELS: Readonly<Record<string, string>> = {
   email: "邮件往来",
   call: "电话沟通",
   meeting: "客户会议",
+  whatsapp: "WhatsApp 沟通",
   note: "跟进记录",
   other: "其他互动",
 };
+
+export const ATTACHMENT_CATEGORY_OPTIONS = [
+  { value: "inquiry", label: "询价文件" },
+  { value: "drawing", label: "产品图纸" },
+  { value: "contract", label: "合同文件" },
+  { value: "other", label: "其他资料" },
+] as const;
 
 export function optionLabel(
   options: readonly { value: string; label: string }[],

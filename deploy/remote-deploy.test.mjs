@@ -58,3 +58,10 @@ test('uses independent backend and frontend live paths', () => {
   assert.match(nginx, /root \/var\/www\/huayuan-crm\/html;/);
   assert.equal(script.includes('CURRENT_LINK="$APP_ROOT/current"'), false);
 });
+
+test('keeps customer attachments outside replaceable release directories', () => {
+  position('CUSTOMER_ATTACHMENT_DIR="${CUSTOMER_ATTACHMENT_DIR:-$APP_ROOT/data/customer-attachments}"');
+  position('write_env_value CUSTOMER_ATTACHMENT_DIR "$CUSTOMER_ATTACHMENT_DIR"');
+  position('mkdir -p "$CUSTOMER_ATTACHMENT_DIR"');
+  assert.equal(script.includes('CUSTOMER_ATTACHMENT_DIR="$RELEASE_DIR'), false);
+});

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CUSTOMER_JOURNEY_STAGES, OPPORTUNITY_STAGES } from "./crm-stages";
 import {
   ACTIVITY_TYPE_LABELS,
+  ATTACHMENT_CATEGORY_OPTIONS,
   EMAIL_TASK_STATUS_LABELS,
   QUOTE_STATUS_OPTIONS,
   optionLabel,
@@ -39,6 +40,8 @@ describe("CRM frontend/backend contracts", () => {
   it("renders stable Chinese labels for quote, activity, and email task statuses", () => {
     expect(optionLabel(QUOTE_STATUS_OPTIONS, "accepted")).toBe("客户已接受");
     expect(statusLabel(ACTIVITY_TYPE_LABELS, "call")).toBe("电话沟通");
+    expect(statusLabel(ACTIVITY_TYPE_LABELS, "whatsapp")).toBe("WhatsApp 沟通");
+    expect(optionLabel(ATTACHMENT_CATEGORY_OPTIONS, "drawing")).toBe("产品图纸");
     expect(statusLabel(EMAIL_TASK_STATUS_LABELS, "completed")).toBe("已完成");
     expect(statusLabel(EMAIL_TASK_STATUS_LABELS, "unexpected")).toBe("未知状态");
   });

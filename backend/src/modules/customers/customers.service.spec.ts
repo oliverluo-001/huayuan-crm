@@ -501,3 +501,81 @@ describe('CustomersService sample and customer 360 contracts', () => {
     }));
   });
 });
+
+describe('CustomersService contact summary synchronization', () => {
+  let customer: any;
+  let contacts: any[];
+  let nextId: number;
+  const customerRepository = {
+    findOne: jest.fn(async () => customer),
+    save: jest.fn(async (value) => value),
+  };
+  const contactRepository = {
+    create: jest.fn((value) => ({ ...value })),
+    save: jest.fn(async (value) => {
+      if (!value.id) value.id = nextId++;
+      const index = contacts.findIndex((item) => item.id === value.id);
+      if (index >= 0) contacts[index] = value;
+      else contacts.push(value);
+      return value;
+    }),
+    update: jest.fn(async (where, update) => {
+      contacts.filter((item) => item.customerId === where.customerId).forEach((item) => Object.assign(item, update));
+      return { affected: contacts.length };
+    }),
+    findOne: jest.fn(async ({ where, order }: any) => {
+      if (where.id) return contacts.find((item) => item.id === where.id) || null;
+      let matches = contacts.filter((item) => item.customerId === where.customerId);
+      if (where.isPrimary !== undefined) matches = matches.filter((item) => item.isPrimary === where.isPrimary);
+      if (order?.createdAt === 'ASC') matches = [...matches].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      return matches[0] || null;
+    }),
+    delete: jest.fn(async (id) => {
+      const before = contacts.length;
+      contacts = contacts.filter((item) => item.id !== id);
+      return { affected: before - contacts.length };
+    }),
+  };
+  const service = new CustomersService(
+    customerRepository as any,
+    contactRepository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    nextId = 1;
+    contacts = [];
+    customer = { id: 1, customerId: 'cus_1', company: 'Buyer Co', ownerId: '7', tags: [] };
+  });
+
+  it('keeps customer summary aligned when the primary contact changes or is deleted', async () => {
+    const first = await service.createContact(1, {
+      name: 'Anna',
+      email: 'anna@example.com',
+      phone: '+1 100',
+      isPrimary: true,
+    }, '7');
+    const second = await service.createContact(1, {
+      name: 'Ben',
+      email: 'ben@example.com',
+      phone: '+1 200',
+    }, '7');
+    expect(customer).toMatchObject({ contact: 'Anna', email: 'anna@example.com', phone: '+1 100' });
+
+    await service.updateContact(second.id, { isPrimary: true }, '7');
+    expect(first.isPrimary).toBe(false);
+    expect(customer).toMatchObject({ contact: 'Ben', email: 'ben@example.com', phone: '+1 200' });
+
+    await service.deleteContact(second.id, '7');
+    expect(first.isPrimary).toBe(true);
+    expect(customer).toMatchObject({ contact: 'Anna', email: 'anna@example.com', phone: '+1 100' });
+  });
+});

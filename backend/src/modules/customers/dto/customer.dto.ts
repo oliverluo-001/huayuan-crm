@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Type } from "class-transformer";
 import {
   ArrayMinSize,
   IsArray,
@@ -12,7 +12,7 @@ import {
   Max,
   Min,
   ValidateNested,
-} from 'class-validator';
+} from "class-validator";
 
 export class CreateCustomerDto {
   @IsString()
@@ -55,13 +55,40 @@ export class CreateCustomerDto {
   @IsOptional()
   customerType?: string;
 
-  @IsEnum(['A', 'B', 'C', 'D', ''])
+  @IsEnum(["A", "B", "C", "D", ""])
   @IsOptional()
-  tier?: 'A' | 'B' | 'C' | 'D' | '';
+  tier?: "A" | "B" | "C" | "D" | "";
 
-  @IsEnum(['new', 'contacted', 'replied', 'qualified', 'opportunity', 'won', 'lost', 'prospect', 'lead', 'proposal', 'negotiation', 'closed', ''])
+  @IsEnum([
+    "new",
+    "contacted",
+    "replied",
+    "qualified",
+    "opportunity",
+    "won",
+    "lost",
+    "prospect",
+    "lead",
+    "proposal",
+    "negotiation",
+    "closed",
+    "",
+  ])
   @IsOptional()
-  journeyStage?: 'new' | 'contacted' | 'replied' | 'qualified' | 'opportunity' | 'won' | 'lost' | 'prospect' | 'lead' | 'proposal' | 'negotiation' | 'closed' | '';
+  journeyStage?:
+    | "new"
+    | "contacted"
+    | "replied"
+    | "qualified"
+    | "opportunity"
+    | "won"
+    | "lost"
+    | "prospect"
+    | "lead"
+    | "proposal"
+    | "negotiation"
+    | "closed"
+    | "";
 
   @IsString()
   @IsOptional()
@@ -84,9 +111,9 @@ export class CreateCustomerDto {
   @IsOptional()
   tags?: string[];
 
-  @IsEnum(['valid', 'invalid', 'unknown'])
+  @IsEnum(["valid", "invalid", "unknown"])
   @IsOptional()
-  emailStatus?: 'valid' | 'invalid' | 'unknown';
+  emailStatus?: "valid" | "invalid" | "unknown";
 }
 
 export class UpdateCustomerDto {
@@ -130,13 +157,40 @@ export class UpdateCustomerDto {
   @IsOptional()
   customerType?: string;
 
-  @IsEnum(['A', 'B', 'C', 'D', ''])
+  @IsEnum(["A", "B", "C", "D", ""])
   @IsOptional()
-  tier?: 'A' | 'B' | 'C' | 'D' | '';
+  tier?: "A" | "B" | "C" | "D" | "";
 
-  @IsEnum(['new', 'contacted', 'replied', 'qualified', 'opportunity', 'won', 'lost', 'prospect', 'lead', 'proposal', 'negotiation', 'closed', ''])
+  @IsEnum([
+    "new",
+    "contacted",
+    "replied",
+    "qualified",
+    "opportunity",
+    "won",
+    "lost",
+    "prospect",
+    "lead",
+    "proposal",
+    "negotiation",
+    "closed",
+    "",
+  ])
   @IsOptional()
-  journeyStage?: 'new' | 'contacted' | 'replied' | 'qualified' | 'opportunity' | 'won' | 'lost' | 'prospect' | 'lead' | 'proposal' | 'negotiation' | 'closed' | '';
+  journeyStage?:
+    | "new"
+    | "contacted"
+    | "replied"
+    | "qualified"
+    | "opportunity"
+    | "won"
+    | "lost"
+    | "prospect"
+    | "lead"
+    | "proposal"
+    | "negotiation"
+    | "closed"
+    | "";
 
   @IsString()
   @IsOptional()
@@ -159,9 +213,9 @@ export class UpdateCustomerDto {
   @IsOptional()
   tags?: string[];
 
-  @IsEnum(['valid', 'invalid', 'unknown'])
+  @IsEnum(["valid", "invalid", "unknown"])
   @IsOptional()
-  emailStatus?: 'valid' | 'invalid' | 'unknown';
+  emailStatus?: "valid" | "invalid" | "unknown";
 }
 
 export class BulkTagsDto {
@@ -170,7 +224,7 @@ export class BulkTagsDto {
   ids: number[];
 
   @IsString()
-  action: 'add' | 'remove';
+  action: "add" | "remove";
 
   @IsString()
   tag: string;
@@ -187,8 +241,8 @@ export class BulkTierDto {
   @IsNumber({}, { each: true })
   ids: number[];
 
-  @IsEnum(['A', 'B', 'C', 'D', ''])
-  tier: 'A' | 'B' | 'C' | 'D' | '';
+  @IsEnum(["A", "B", "C", "D", ""])
+  tier: "A" | "B" | "C" | "D" | "";
 }
 
 export class CreateContactDto {
@@ -235,9 +289,9 @@ export class UpdateContactDto {
 }
 
 export class CreateActivityDto {
-  @IsEnum(['email', 'call', 'meeting', 'note', 'other'])
+  @IsEnum(["email", "call", "meeting", "whatsapp", "note", "other"])
   @IsOptional()
-  type?: 'email' | 'call' | 'meeting' | 'note' | 'other';
+  type?: "email" | "call" | "meeting" | "whatsapp" | "note" | "other";
 
   @IsString()
   @IsOptional()
@@ -277,9 +331,9 @@ export class UpdateTodoDto {
   @IsOptional()
   dueAt?: string;
 
-  @IsEnum(['open', 'done'])
+  @IsEnum(["open", "done"])
   @IsOptional()
-  status?: 'open' | 'done';
+  status?: "open" | "done";
 }
 
 export class CreateOpportunityDto {
@@ -294,9 +348,22 @@ export class CreateOpportunityDto {
   @IsOptional()
   amount?: number;
 
-  @IsEnum(['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'])
+  @IsEnum([
+    "prospecting",
+    "qualification",
+    "proposal",
+    "negotiation",
+    "won",
+    "lost",
+  ])
   @IsOptional()
-  stage?: 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost';
+  stage?:
+    | "prospecting"
+    | "qualification"
+    | "proposal"
+    | "negotiation"
+    | "won"
+    | "lost";
 
   @IsNumber()
   @Min(0)
@@ -327,9 +394,22 @@ export class UpdateOpportunityDto {
   @IsOptional()
   amount?: number;
 
-  @IsEnum(['prospecting', 'qualification', 'proposal', 'negotiation', 'won', 'lost'])
+  @IsEnum([
+    "prospecting",
+    "qualification",
+    "proposal",
+    "negotiation",
+    "won",
+    "lost",
+  ])
   @IsOptional()
-  stage?: 'prospecting' | 'qualification' | 'proposal' | 'negotiation' | 'won' | 'lost';
+  stage?:
+    | "prospecting"
+    | "qualification"
+    | "proposal"
+    | "negotiation"
+    | "won"
+    | "lost";
 
   @IsNumber()
   @Min(0)
@@ -400,9 +480,9 @@ export class CreateQuoteDto {
   @IsOptional()
   opportunityId?: string | null;
 
-  @IsEnum(['draft', 'sent', 'accepted', 'rejected', 'expired'])
+  @IsEnum(["draft", "sent", "accepted", "rejected", "expired"])
   @IsOptional()
-  status?: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+  status?: "draft" | "sent" | "accepted" | "rejected" | "expired";
 
   @IsString()
   @IsOptional()
@@ -465,9 +545,9 @@ export class UpdateQuoteDto {
   @IsOptional()
   opportunityId?: string | null;
 
-  @IsEnum(['draft', 'sent', 'accepted', 'rejected', 'expired'])
+  @IsEnum(["draft", "sent", "accepted", "rejected", "expired"])
   @IsOptional()
-  status?: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
+  status?: "draft" | "sent" | "accepted" | "rejected" | "expired";
 
   @IsString()
   @IsOptional()
@@ -527,9 +607,9 @@ export class CreateSampleDto {
   @IsOptional()
   unit?: string;
 
-  @IsEnum(['pending', 'sent', 'delivered', 'returned'])
+  @IsEnum(["pending", "sent", "delivered", "returned"])
   @IsOptional()
-  status?: 'pending' | 'sent' | 'delivered' | 'returned';
+  status?: "pending" | "sent" | "delivered" | "returned";
 
   @IsString()
   @IsOptional()
@@ -574,9 +654,9 @@ export class UpdateSampleDto {
   @IsOptional()
   unit?: string;
 
-  @IsEnum(['pending', 'sent', 'delivered', 'returned'])
+  @IsEnum(["pending", "sent", "delivered", "returned"])
   @IsOptional()
-  status?: 'pending' | 'sent' | 'delivered' | 'returned';
+  status?: "pending" | "sent" | "delivered" | "returned";
 
   @IsString()
   @IsOptional()
