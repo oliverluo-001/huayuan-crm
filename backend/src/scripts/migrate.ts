@@ -96,6 +96,7 @@ export async function runDatabaseMigrations() {
     await migrateAuditMetadata(connection);
     await migrateCrmContracts(connection);
     await migrateCustomer360Workspace(connection);
+    await migrateCustomerMasterData(connection);
     const p03Report = await migrateP03DataIntegrity(connection, database);
     await migrateOpportunityLifecycle(connection);
     await connection.beginTransaction();
@@ -208,6 +209,31 @@ async function migrateCustomer360Workspace(connection: Connection) {
     "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
     [id],
   );
+}
+
+export async function migrateCustomerMasterData(connection: Connection) {
+  const id = "20260809_p12_customer_master_data";
+  if (!(await tableExists(connection, "customers"))) return;
+
+  await addColumnToTable(connection, "customers", "address", "TEXT NULL");
+  await addColumnToTable(connection, "customers", "main_markets", "JSON NULL");
+  await addColumnToTable(connection, "customers", "annual_purchase_amount", "DECIMAL(15,2) NOT NULL DEFAULT 0");
+  await addColumnToTable(connection, "customers", "preferred_currency", "VARCHAR(3) NOT NULL DEFAULT 'USD'");
+  await addColumnToTable(connection, "customers", "preferred_incoterm", "VARCHAR(20) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, "customers", "collaborator_ids", "JSON NULL");
+
+  if (await tableExists(connection, "contacts")) {
+    await addColumnToTable(connection, "contacts", "department", "VARCHAR(100) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "contacts", "decision_role", "VARCHAR(30) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "contacts", "purchasing_influence", "VARCHAR(20) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "contacts", "preferred_language", "VARCHAR(50) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "contacts", "whatsapp", "VARCHAR(100) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "contacts", "linkedin", "VARCHAR(500) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "contacts", "contact_status", "VARCHAR(20) NOT NULL DEFAULT 'unknown'");
+    await addColumnToTable(connection, "contacts", "marketing_allowed", "TINYINT(1) NOT NULL DEFAULT 1");
+  }
+
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
 }
 
 async function migrateOpportunityLifecycle(connection: Connection) {

@@ -523,6 +523,10 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         const value = String(rawId);
         if (value.startsWith('contact:')) {
           const contact = await this.customersService.findContactByIdentifier(value.slice(8));
+          if (contact.marketingAllowed === false) {
+            this.logger.warn(`跳过未允许营销邮件的联系人 ${contact.contactId || contact.id}`);
+            continue;
+          }
           const customer = await this.customersService.findOne(contact.customerId);
           await this.addRecipient(task, {
             recipientKey: `contact:${contact.contactId || contact.id}`,
@@ -540,6 +544,10 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         } else {
           const customerId = value.startsWith('customer:') ? value.slice(9) : value;
           const customer = await this.customersService.findByIdentifier(customerId);
+          if (!(await this.customersService.isCustomerEmailMarketingAllowed(customer.id, customer.email))) {
+            this.logger.warn(`跳过未允许营销邮件的客户主邮箱 ${customer.customerId || customer.id}`);
+            continue;
+          }
           await this.addRecipient(task, {
             recipientKey: `customer:${customer.customerId || customer.id}`,
             customerId: customer.id,

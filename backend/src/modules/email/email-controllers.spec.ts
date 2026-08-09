@@ -1,6 +1,34 @@
 import { IS_PUBLIC_KEY } from '../../common/decorators/public.decorator';
 import { createUnsubscribeToken } from '../../common/utils/unsubscribe';
-import { UnsubscribeController } from './email-controllers';
+import { EmailRecipientsController, UnsubscribeController } from './email-controllers';
+
+describe('EmailRecipientsController', () => {
+  it('suppresses contacts that did not allow marketing, including the primary customer email row', async () => {
+    const customersService = {
+      findAll: jest.fn().mockResolvedValue({
+        customers: [{ id: 1, customerId: 'CUS-1', company: 'Acme', contact: 'Anna', email: 'anna@acme.test' }],
+      }),
+      findContactsForCustomers: jest.fn().mockResolvedValue([
+        { id: 11, contactId: 'CON-11', customerId: 1, name: 'Anna', email: 'anna@acme.test', marketingAllowed: false },
+        { id: 12, contactId: 'CON-12', customerId: 1, name: 'Ben', email: 'ben@acme.test', marketingAllowed: false },
+      ]),
+    };
+    const controller = new EmailRecipientsController(
+      {} as any,
+      customersService as any,
+      { findAll: jest.fn().mockResolvedValue([]) } as any,
+    );
+
+    const result = await controller.findAll({}, { sub: 1, role: 'admin' });
+
+    expect(result.recipients).toEqual(expect.arrayContaining([
+      expect.objectContaining({ recipientKey: 'customer:CUS-1', suppressed: true }),
+      expect.objectContaining({ recipientKey: 'contact:CON-12', suppressed: true }),
+    ]));
+    await expect(controller.findAll({ ids: 'true' }, { sub: 1, role: 'admin' }))
+      .resolves.toEqual({ ids: [] });
+  });
+});
 
 describe('UnsubscribeController', () => {
   const secret = 'test-unsubscribe-secret';

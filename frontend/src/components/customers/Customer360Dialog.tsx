@@ -28,6 +28,7 @@ import {
   getCustomer360,
   getCustomerAttachments,
   getProducts,
+  getUserDirectory,
   updateContact,
   updateOpportunity,
   updateTodo,
@@ -39,6 +40,7 @@ import {
   type Opportunity,
   type Product,
   type Sample,
+  type UserDirectoryEntry,
 } from "@/api/client";
 import { canManageCrmData } from "@/auth/permissions";
 import { useAuth } from "@/contexts/AuthContext";
@@ -56,6 +58,15 @@ import {
   optionLabel,
   statusLabel,
 } from "@/contracts/crm-terminology";
+import {
+  CONTACT_STATUS_OPTIONS,
+  CUSTOMER_SOURCE_OPTIONS,
+  CUSTOMER_TYPE_OPTIONS,
+  DECISION_ROLE_OPTIONS,
+  PREFERRED_LANGUAGE_OPTIONS,
+  PURCHASING_INFLUENCE_OPTIONS,
+  masterOptionLabel,
+} from "@/contracts/customer-master-data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,6 +84,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -134,6 +146,7 @@ export function Customer360Dialog({
   const [attachments, setAttachments] = useState<CustomerAttachment[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
+  const [userDirectory, setUserDirectory] = useState<UserDirectoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
@@ -141,8 +154,16 @@ export function Customer360Dialog({
   const [contactForm, setContactForm] = useState({
     name: "",
     title: "",
+    department: "",
+    decisionRole: "" as NonNullable<Contact["decisionRole"]>,
+    purchasingInfluence: "" as NonNullable<Contact["purchasingInfluence"]>,
+    preferredLanguage: "",
     email: "",
     phone: "",
+    whatsapp: "",
+    linkedin: "",
+    contactStatus: "unknown" as NonNullable<Contact["contactStatus"]>,
+    marketingAllowed: true,
     isPrimary: false,
   });
   const [activityForm, setActivityForm] = useState({
@@ -193,11 +214,12 @@ export function Customer360Dialog({
     async (showLoading = false) => {
       if (showLoading) setIsLoading(true);
       try {
-        const [customerResult, attachmentResult, productResult] =
+        const [customerResult, attachmentResult, productResult, directoryResult] =
           await Promise.allSettled([
           getCustomer360(customerId),
           getCustomerAttachments(customerId),
           getProducts(),
+          getUserDirectory(),
         ]);
         if (customerResult.status === "rejected") throw customerResult.reason;
         setData(customerResult.value);
@@ -213,6 +235,7 @@ export function Customer360Dialog({
           );
         }
         setProducts(productResult.status === "fulfilled" ? productResult.value : []);
+        setUserDirectory(directoryResult.status === "fulfilled" ? directoryResult.value : []);
         setError("");
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "客户详情加载失败");
@@ -253,8 +276,16 @@ export function Customer360Dialog({
     setContactForm({
       name: "",
       title: "",
+      department: "",
+      decisionRole: "",
+      purchasingInfluence: "",
+      preferredLanguage: "",
       email: "",
       phone: "",
+      whatsapp: "",
+      linkedin: "",
+      contactStatus: "unknown",
+      marketingAllowed: true,
       isPrimary: false,
     });
   };
@@ -265,8 +296,16 @@ export function Customer360Dialog({
     const payload = {
       name: contactForm.name.trim(),
       title: contactForm.title.trim() || undefined,
+      department: contactForm.department.trim() || undefined,
+      decisionRole: contactForm.decisionRole,
+      purchasingInfluence: contactForm.purchasingInfluence,
+      preferredLanguage: contactForm.preferredLanguage.trim() || undefined,
       email: contactForm.email.trim() || undefined,
       phone: contactForm.phone.trim() || undefined,
+      whatsapp: contactForm.whatsapp.trim() || undefined,
+      linkedin: contactForm.linkedin.trim() || undefined,
+      contactStatus: contactForm.contactStatus,
+      marketingAllowed: contactForm.marketingAllowed,
       isPrimary:
         contactForm.isPrimary ||
         (!editingContactId && (data?.contacts.length || 0) === 0),
@@ -288,8 +327,16 @@ export function Customer360Dialog({
     setContactForm({
       name: contact.name,
       title: contact.title || "",
+      department: contact.department || "",
+      decisionRole: contact.decisionRole || "",
+      purchasingInfluence: contact.purchasingInfluence || "",
+      preferredLanguage: contact.preferredLanguage || "",
       email: contact.email || "",
       phone: contact.phone || "",
+      whatsapp: contact.whatsapp || "",
+      linkedin: contact.linkedin || "",
+      contactStatus: contact.contactStatus || "unknown",
+      marketingAllowed: contact.marketingAllowed !== false,
       isPrimary: Boolean(contact.isPrimary),
     });
   };
@@ -575,6 +622,7 @@ export function Customer360Dialog({
                   <OverviewWorkspace
                     data={data}
                     attachments={attachments}
+                    users={userDirectory}
                     onOpenWorkspace={setActiveWorkspace}
                   />
                 </TabsContent>
@@ -630,6 +678,31 @@ export function Customer360Dialog({
                           }
                         />
                         <Input
+                          placeholder="部门"
+                          value={contactForm.department}
+                          onChange={(event) => setContactForm((current) => ({ ...current, department: event.target.value }))}
+                        />
+                        <Select
+                          value={contactForm.decisionRole || "__none__"}
+                          onValueChange={(value) => setContactForm((current) => ({ ...current, decisionRole: value === "__none__" ? "" : (value || "") as NonNullable<Contact["decisionRole"]> }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="决策角色" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">未设置决策角色</SelectItem>
+                            {DECISION_ROLE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={contactForm.purchasingInfluence || "__none__"}
+                          onValueChange={(value) => setContactForm((current) => ({ ...current, purchasingInfluence: value === "__none__" ? "" : (value || "") as NonNullable<Contact["purchasingInfluence"]> }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="采购影响力" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">未设置采购影响力</SelectItem>
+                            {PURCHASING_INFLUENCE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Input
                           type="email"
                           placeholder="邮箱"
                           value={contactForm.email}
@@ -650,6 +723,44 @@ export function Customer360Dialog({
                             }))
                           }
                         />
+                        <Input
+                          placeholder="WhatsApp"
+                          value={contactForm.whatsapp}
+                          onChange={(event) => setContactForm((current) => ({ ...current, whatsapp: event.target.value }))}
+                        />
+                        <Input
+                          type="url"
+                          placeholder="LinkedIn 个人主页"
+                          value={contactForm.linkedin}
+                          onChange={(event) => setContactForm((current) => ({ ...current, linkedin: event.target.value }))}
+                        />
+                        <Select
+                          value={contactForm.preferredLanguage || "__none__"}
+                          onValueChange={(value) => setContactForm((current) => ({ ...current, preferredLanguage: value === "__none__" ? "" : value || "" }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="首选语言" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">未设置首选语言</SelectItem>
+                            {PREFERRED_LANGUAGE_OPTIONS.map((language) => <SelectItem key={language} value={language}>{language}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={contactForm.contactStatus}
+                          onValueChange={(value) => setContactForm((current) => ({ ...current, contactStatus: (value || "unknown") as NonNullable<Contact["contactStatus"]> }))}
+                        >
+                          <SelectTrigger><SelectValue placeholder="联系状态" /></SelectTrigger>
+                          <SelectContent>
+                            {CONTACT_STATUS_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={contactForm.marketingAllowed}
+                            onChange={(event) => setContactForm((current) => ({ ...current, marketingAllowed: event.target.checked }))}
+                          />
+                          允许发送营销邮件
+                        </label>
                         <label className="flex items-center gap-2 text-sm">
                           <input
                             type="checkbox"
@@ -740,10 +851,28 @@ export function Customer360Dialog({
                             )}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {[contact.title, contact.email, contact.phone]
+                            {[contact.department, contact.title, contact.email, contact.phone, contact.whatsapp && `WhatsApp ${contact.whatsapp}`]
                               .filter(Boolean)
                               .join(" · ") || "未填写联系方式"}
                           </p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <Badge variant="outline">
+                              {masterOptionLabel(CONTACT_STATUS_OPTIONS, contact.contactStatus || "unknown")}
+                            </Badge>
+                            {contact.decisionRole && (
+                              <Badge variant="outline">{masterOptionLabel(DECISION_ROLE_OPTIONS, contact.decisionRole)}</Badge>
+                            )}
+                            {contact.purchasingInfluence && (
+                              <Badge variant="outline">采购影响力：{masterOptionLabel(PURCHASING_INFLUENCE_OPTIONS, contact.purchasingInfluence)}</Badge>
+                            )}
+                            {contact.preferredLanguage && <Badge variant="outline">{contact.preferredLanguage}</Badge>}
+                            <Badge variant={contact.marketingAllowed === false ? "destructive" : "secondary"}>
+                              {contact.marketingAllowed === false ? "禁止营销邮件" : "允许营销邮件"}
+                            </Badge>
+                            {contact.linkedin && (
+                              <a className="text-xs text-primary underline" href={contact.linkedin} target="_blank" rel="noreferrer">LinkedIn</a>
+                            )}
+                          </div>
                         </RecordRow>
                       ))}
                     </RecordList>
@@ -1753,10 +1882,12 @@ export function Customer360Dialog({
 function OverviewWorkspace({
   data,
   attachments,
+  users,
   onOpenWorkspace,
 }: {
   data: Customer360;
   attachments: CustomerAttachment[];
+  users: UserDirectoryEntry[];
   onOpenWorkspace: (workspace: Workspace) => void;
 }) {
   const openTodos = data.todos.filter((todo) => todo.status !== "done");
@@ -1767,6 +1898,33 @@ function OverviewWorkspace({
           <CardTitle>{data.customer.company}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <Summary label="公司类型" value={masterOptionLabel(CUSTOMER_TYPE_OPTIONS, data.customer.customerType)} />
+          <Summary label="详细地址" value={data.customer.address} />
+          <Summary label="主要市场" value={data.customer.mainMarkets?.join("、")} />
+          <Summary
+            label="年采购金额"
+            value={data.customer.annualPurchaseAmount
+              ? `${data.customer.preferredCurrency || "USD"} ${Number(data.customer.annualPurchaseAmount).toLocaleString("en-US")}`
+              : "未填写"}
+          />
+          <Summary label="首选贸易条款" value={data.customer.preferredIncoterm} />
+          <Summary label="客户来源" value={masterOptionLabel(CUSTOMER_SOURCE_OPTIONS, data.customer.source)} />
+          <Summary
+            label="负责人"
+            value={users.find((user) => user.id === data.customer.ownerId)?.displayName || "未分配"}
+          />
+          <Summary
+            label="协作者"
+            value={(data.customer.collaboratorIds || [])
+              .map((id) => users.find((user) => user.id === id)?.displayName || id)
+              .join("、") || "未设置"}
+          />
+          <Summary
+            label="下次跟进"
+            value={data.customer.nextTodoAt
+              ? `${data.customer.nextTodoTitle || "待办"} · ${formatDateTime(data.customer.nextTodoAt)}`
+              : "暂无待办"}
+          />
           <Summary label="主营业务" value={data.customer.business} />
           <Summary label="主联系人" value={data.customer.contact} />
           <Summary label="邮箱" value={data.customer.email} />

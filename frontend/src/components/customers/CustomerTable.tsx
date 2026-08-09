@@ -41,13 +41,20 @@ import {
   getCustomerTags,
   importCustomers,
   previewImport,
+  getUserDirectory,
   getCustomerViews,
   createCustomerView,
   deleteCustomerView,
   type Customer,
   type CustomerView,
+  type UserDirectoryEntry,
 } from "@/api/client";
 import { Customer360Dialog } from "@/components/customers/Customer360Dialog";
+import { CustomerMasterDataFields } from "@/components/customers/CustomerMasterDataFields";
+import {
+  EMPTY_CUSTOMER_MASTER_FORM,
+  type CustomerMasterForm,
+} from "@/contracts/customer-master-data";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
@@ -95,6 +102,7 @@ export function CustomerTable(_props: CustomerTableProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [tags, setTags] = useState<string[]>([]);
+  const [userDirectory, setUserDirectory] = useState<UserDirectoryEntry[]>([]);
 
   // Filters
   const [filters, setFilters] = useState(emptyCustomerFilters);
@@ -159,12 +167,14 @@ export function CustomerTable(_props: CustomerTableProps) {
       setCustomers(result.customers);
       setTotal(result.total);
 
-      const [availableTags, views] = await Promise.allSettled([
+      const [availableTags, views, directory] = await Promise.allSettled([
         getCustomerTags(),
         getCustomerViews(),
+        getUserDirectory(),
       ]);
       if (availableTags.status === "fulfilled") setTags(availableTags.value);
       if (views.status === "fulfilled") setSavedViews(views.value);
+      if (directory.status === "fulfilled") setUserDirectory(directory.value);
     } finally {
       setIsLoading(false);
     }
@@ -827,6 +837,8 @@ export function CustomerTable(_props: CustomerTableProps) {
       {/* Create Dialog */}
       {canManage && <CustomerCreateDialog
         open={createOpen}
+        users={userDirectory}
+        canAssignOwner={role === "admin"}
         onOpenChange={setCreateOpen}
         onSuccess={() => {
           setCreateOpen(false);
@@ -838,6 +850,8 @@ export function CustomerTable(_props: CustomerTableProps) {
       {canManage && editCustomer && (
         <CustomerEditDialog
           customer={editCustomer}
+          users={userDirectory}
+          canAssignOwner={role === "admin"}
           open={!!editCustomer}
           onOpenChange={(open) => !open && setEditCustomer(null)}
           onSuccess={() => {
@@ -862,10 +876,14 @@ export function CustomerTable(_props: CustomerTableProps) {
 // Customer Create Dialog
 function CustomerCreateDialog({
   open,
+  users,
+  canAssignOwner,
   onOpenChange,
   onSuccess,
 }: {
   open: boolean;
+  users: UserDirectoryEntry[];
+  canAssignOwner: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }) {
@@ -881,6 +899,7 @@ function CustomerCreateDialog({
     timezone: "",
     tags: "",
     tier: "C",
+    ...EMPTY_CUSTOMER_MASTER_FORM,
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -889,6 +908,8 @@ function CustomerCreateDialog({
     try {
       await createCustomer({
         ...form,
+        mainMarkets: form.mainMarkets.split(/[,，;；]/).map((item) => item.trim()).filter(Boolean),
+        annualPurchaseAmount: Number(form.annualPurchaseAmount || 0),
         tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
         tier: form.tier as "A" | "B" | "C" | "D",
       });
@@ -904,6 +925,7 @@ function CustomerCreateDialog({
         timezone: "",
         tags: "",
         tier: "C",
+        ...EMPTY_CUSTOMER_MASTER_FORM,
       });
     } finally {
       setIsLoading(false);
@@ -912,7 +934,7 @@ function CustomerCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>新增客户</DialogTitle>
         </DialogHeader>
@@ -983,6 +1005,14 @@ function CustomerCreateDialog({
                 ))}
               </datalist>
             </div>
+            <CustomerMasterDataFields
+              form={form}
+              users={users}
+              canAssignOwner={canAssignOwner}
+              onChange={(field, value) =>
+                setForm((current) => ({ ...current, [field]: value }))
+              }
+            />
             <div className="space-y-2">
               <Label>客户分层</Label>
               <Select value={form.tier} onValueChange={(v) => setForm({ ...form, tier: v as "A" | "B" | "C" | "D" })}>
@@ -1025,11 +1055,15 @@ function CustomerCreateDialog({
 function CustomerEditDialog({
   customer,
   open,
+  users,
+  canAssignOwner,
   onOpenChange,
   onSuccess,
 }: {
   customer: Customer;
   open: boolean;
+  users: UserDirectoryEntry[];
+  canAssignOwner: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
 }) {
@@ -1047,6 +1081,16 @@ function CustomerEditDialog({
     tier: customer.tier,
     journeyStage: customer.journeyStage,
     notes: customer.notes || "",
+    country: customer.country || "",
+    address: customer.address || "",
+    customerType: customer.customerType || "",
+    mainMarkets: customer.mainMarkets?.join(", ") || "",
+    annualPurchaseAmount: customer.annualPurchaseAmount ? String(customer.annualPurchaseAmount) : "",
+    preferredCurrency: customer.preferredCurrency || "USD",
+    preferredIncoterm: customer.preferredIncoterm || "",
+    source: customer.source || "",
+    ownerId: customer.ownerId || "",
+    collaboratorIds: customer.collaboratorIds || [],
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1055,6 +1099,8 @@ function CustomerEditDialog({
     try {
       await updateCustomer(customer.id, {
         ...form,
+        mainMarkets: form.mainMarkets.split(/[,，;；]/).map((item) => item.trim()).filter(Boolean),
+        annualPurchaseAmount: Number(form.annualPurchaseAmount || 0),
         tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
       });
       onSuccess();
@@ -1065,7 +1111,7 @@ function CustomerEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>编辑客户</DialogTitle>
         </DialogHeader>
@@ -1139,6 +1185,14 @@ function CustomerEditDialog({
                 用于按客户当地工作时间发送邮件；留空时会尝试根据地区自动识别。
               </p>
             </div>
+            <CustomerMasterDataFields
+              form={form as CustomerMasterForm}
+              users={users}
+              canAssignOwner={canAssignOwner}
+              onChange={(field, value) =>
+                setForm((current) => ({ ...current, [field]: value }))
+              }
+            />
             <div className="space-y-2">
               <Label>客户分层</Label>
               <Select value={form.tier} onValueChange={(v) => setForm({ ...form, tier: v as "A" | "B" | "C" | "D" })}>

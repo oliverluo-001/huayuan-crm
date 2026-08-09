@@ -65,7 +65,10 @@ export class EmailRecipientsController {
 
       if (customerEmail && !seenEmails.has(customerEmail)) {
         seenEmails.add(customerEmail);
-        const customerSuppressed = suppressedEmails.has(customerEmail);
+        const matchingContact = (contactsByCustomer.get(Number(customer.id)) || [])
+          .find((contact) => String(contact.email || '').toLowerCase().trim() === customerEmail);
+        const marketingBlocked = matchingContact?.marketingAllowed === false;
+        const customerSuppressed = suppressedEmails.has(customerEmail) || marketingBlocked;
         const recipientKey = `customer:${customerId}`;
         const searchText = `${customerEmail} ${(customer as any).company || ''} ${(customer as any).contact || ''}`.toLowerCase();
         if (!q || searchText.includes(q)) {
@@ -80,6 +83,7 @@ export class EmailRecipientsController {
             region: (customer as any).region || '',
             emailStatus: (customer as any).emailStatus || 'unknown',
             suppressed: customerSuppressed,
+            suppressionReason: marketingBlocked ? '该联系人未允许营销邮件' : '',
           });
         }
       }
@@ -91,7 +95,8 @@ export class EmailRecipientsController {
         if (!contactEmail || seenEmails.has(contactEmail)) continue;
         seenEmails.add(contactEmail);
 
-        const contactSuppressed = suppressedEmails.has(contactEmail);
+        const marketingBlocked = contact.marketingAllowed === false;
+        const contactSuppressed = suppressedEmails.has(contactEmail) || marketingBlocked;
         const recipientKey = `contact:${contact.contactId || contact.id}`;
         const searchText = `${contactEmail} ${contact.name} ${(customer as any).company || ''}`.toLowerCase();
         if (!q || searchText.includes(q)) {
@@ -106,6 +111,7 @@ export class EmailRecipientsController {
             region: (customer as any).region || '',
             emailStatus: (customer as any).emailStatus || 'unknown',
             suppressed: contactSuppressed,
+            suppressionReason: marketingBlocked ? '该联系人未允许营销邮件' : '',
           });
         }
       }

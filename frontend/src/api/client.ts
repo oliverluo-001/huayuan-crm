@@ -35,6 +35,7 @@ import type {
   DashboardData,
   DashboardSnapshot,
   User,
+  UserDirectoryEntry,
   EmailPolicy,
   EmailRecipient,
   SuppressionEntry,
@@ -81,6 +82,7 @@ export type {
   DashboardData,
   DashboardSnapshot,
   User,
+  UserDirectoryEntry,
   EmailPolicy,
   SuppressionEntry,
   BackupSettings,
@@ -905,6 +907,10 @@ export async function previewImport(
 export async function getUsers(): Promise<User[]> {
   const result = await api<User[] | { users: User[] }>("/api/users");
   return Array.isArray(result) ? result : result.users || [];
+}
+
+export async function getUserDirectory(): Promise<UserDirectoryEntry[]> {
+  return api<UserDirectoryEntry[]>("/api/users/directory");
 }
 
 export async function createUser(data: {

@@ -117,6 +117,20 @@ export class UsersService {
     if (count <= 1) throw new BadRequestException('至少需要保留一个有效管理员');
   }
 
+  async findDirectory() {
+    const users = await this.userRepository.find({
+      where: { status: 'active', active: true },
+      order: { displayName: 'ASC', username: 'ASC' },
+    });
+    return users.map((user) => ({
+      id: String(user.id),
+      username: user.username,
+      displayName: user.displayName || user.username,
+      email: user.email || '',
+      role: user.role,
+    }));
+  }
+
   private assertInitialAdminProtected(user: User, nextRole: User['role'], nextActive: boolean) {
     const username = this.configService.get<string>('INITIAL_ADMIN_USERNAME', '').trim();
     if (!username || user.username !== username) return;

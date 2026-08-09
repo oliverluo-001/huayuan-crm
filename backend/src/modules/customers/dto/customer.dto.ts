@@ -45,6 +45,10 @@ export class CreateCustomerDto {
 
   @IsString()
   @IsOptional()
+  address?: string;
+
+  @IsString()
+  @IsOptional()
   business?: string;
 
   @IsString()
@@ -54,6 +58,24 @@ export class CreateCustomerDto {
   @IsString()
   @IsOptional()
   customerType?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  mainMarkets?: string[];
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  annualPurchaseAmount?: number;
+
+  @IsString()
+  @IsOptional()
+  preferredCurrency?: string;
+
+  @IsString()
+  @IsOptional()
+  preferredIncoterm?: string;
 
   @IsEnum(["A", "B", "C", "D", ""])
   @IsOptional()
@@ -109,6 +131,11 @@ export class CreateCustomerDto {
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
+  collaboratorIds?: string[];
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
   tags?: string[];
 
   @IsEnum(["valid", "invalid", "unknown"])
@@ -147,6 +174,10 @@ export class UpdateCustomerDto {
 
   @IsString()
   @IsOptional()
+  address?: string;
+
+  @IsString()
+  @IsOptional()
   business?: string;
 
   @IsString()
@@ -156,6 +187,24 @@ export class UpdateCustomerDto {
   @IsString()
   @IsOptional()
   customerType?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  mainMarkets?: string[];
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  annualPurchaseAmount?: number;
+
+  @IsString()
+  @IsOptional()
+  preferredCurrency?: string;
+
+  @IsString()
+  @IsOptional()
+  preferredIncoterm?: string;
 
   @IsEnum(["A", "B", "C", "D", ""])
   @IsOptional()
@@ -207,6 +256,11 @@ export class UpdateCustomerDto {
   @IsString()
   @IsOptional()
   ownerId?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  collaboratorIds?: string[];
 
   @IsArray()
   @IsString({ each: true })
@@ -253,6 +307,22 @@ export class CreateContactDto {
   @IsOptional()
   title?: string;
 
+  @IsString()
+  @IsOptional()
+  department?: string;
+
+  @IsEnum(["", "decision_maker", "influencer", "champion", "user", "gatekeeper", "other"])
+  @IsOptional()
+  decisionRole?: string;
+
+  @IsEnum(["", "high", "medium", "low"])
+  @IsOptional()
+  purchasingInfluence?: string;
+
+  @IsString()
+  @IsOptional()
+  preferredLanguage?: string;
+
   @IsEmail()
   @IsOptional()
   email?: string;
@@ -260,6 +330,22 @@ export class CreateContactDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @IsString()
+  @IsOptional()
+  whatsapp?: string;
+
+  @IsString()
+  @IsOptional()
+  linkedin?: string;
+
+  @IsEnum(["unknown", "active", "inactive", "left"])
+  @IsOptional()
+  contactStatus?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  marketingAllowed?: boolean;
 
   @IsOptional()
   @IsBoolean()
@@ -275,6 +361,22 @@ export class UpdateContactDto {
   @IsOptional()
   title?: string;
 
+  @IsString()
+  @IsOptional()
+  department?: string;
+
+  @IsEnum(["", "decision_maker", "influencer", "champion", "user", "gatekeeper", "other"])
+  @IsOptional()
+  decisionRole?: string;
+
+  @IsEnum(["", "high", "medium", "low"])
+  @IsOptional()
+  purchasingInfluence?: string;
+
+  @IsString()
+  @IsOptional()
+  preferredLanguage?: string;
+
   @IsEmail()
   @IsOptional()
   email?: string;
@@ -282,6 +384,22 @@ export class UpdateContactDto {
   @IsString()
   @IsOptional()
   phone?: string;
+
+  @IsString()
+  @IsOptional()
+  whatsapp?: string;
+
+  @IsString()
+  @IsOptional()
+  linkedin?: string;
+
+  @IsEnum(["unknown", "active", "inactive", "left"])
+  @IsOptional()
+  contactStatus?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  marketingAllowed?: boolean;
 
   @IsBoolean()
   @IsOptional()

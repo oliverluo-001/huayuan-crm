@@ -96,9 +96,7 @@ export class CustomersService {
         .orderBy("customer.createdAt", "DESC");
 
       if (queryFilters.ownerId)
-        qb.andWhere("customer.ownerId = :ownerId", {
-          ownerId: queryFilters.ownerId,
-        });
+        this.applyCustomerAccess(qb, queryFilters.ownerId);
 
       if (take > 0) qb.skip(skip).take(take);
       const [customers, total] = await qb.getManyAndCount();
@@ -117,14 +115,27 @@ export class CustomersService {
     if (queryFilters.emailStatus) {
       where.emailStatus = queryFilters.emailStatus as any;
     }
-    if (queryFilters.ownerId) {
-      where.ownerId = queryFilters.ownerId;
-    }
     if (queryFilters.health) {
       where.health = queryFilters.health as any;
     }
     if (queryFilters.tag) {
       return this.findByTag(queryFilters.tag, skip, take, queryFilters.ownerId);
+    }
+
+    if (queryFilters.ownerId) {
+      const qb = this.customerRepository
+        .createQueryBuilder("customer")
+        .leftJoinAndSelect("customer.tags", "tag")
+        .orderBy("customer.createdAt", "DESC");
+      this.applyCustomerAccess(qb, queryFilters.ownerId);
+      if (queryFilters.region) qb.andWhere("customer.region LIKE :region", { region: `%${queryFilters.region}%` });
+      if (queryFilters.tier) qb.andWhere("customer.tier = :tier", { tier: queryFilters.tier });
+      if (queryFilters.journeyStage) qb.andWhere("customer.journeyStage = :journeyStage", { journeyStage: queryFilters.journeyStage });
+      if (queryFilters.emailStatus) qb.andWhere("customer.emailStatus = :emailStatus", { emailStatus: queryFilters.emailStatus });
+      if (queryFilters.health) qb.andWhere("customer.health = :health", { health: queryFilters.health });
+      if (take > 0) qb.skip(skip).take(take);
+      const [customers, total] = await qb.getManyAndCount();
+      return { customers, total };
     }
 
     if (take > 0) {
@@ -157,7 +168,7 @@ export class CustomersService {
 
   async assertCustomerOwner(id: number, ownerId?: string) {
     const customer = await this.findOne(id);
-    if (ownerId && customer.ownerId !== ownerId) {
+    if (ownerId && !this.hasCustomerAccess(customer, ownerId)) {
       // Do not disclose whether another salesperson owns the record.
       throw new NotFoundException("客户不存在");
     }
@@ -235,6 +246,10 @@ export class CustomersService {
     }
 
     const { tags, ...rest } = createCustomerDto;
+    rest.collaboratorIds = this.normalizeCollaboratorIds(
+      rest.collaboratorIds,
+      rest.ownerId,
+    );
     const customer = this.customerRepository.create({
       ...rest,
       customerId: this.generateId("cus"),
@@ -250,6 +265,12 @@ export class CustomersService {
   async update(id: number, updateCustomerDto: UpdateCustomerDto) {
     const customer = await this.findOne(id);
     const { tags, ...rest } = updateCustomerDto;
+    if (rest.collaboratorIds !== undefined) {
+      rest.collaboratorIds = this.normalizeCollaboratorIds(
+        rest.collaboratorIds,
+        rest.ownerId ?? customer.ownerId,
+      );
+    }
 
     if (rest.email && rest.email !== customer.email) {
       const existing = await this.customerRepository.findOne({
@@ -363,17 +384,45 @@ export class CustomersService {
       .leftJoinAndSelect("customer.tags", "tag")
       .where("tag.name = :tagName", { tagName })
       .orderBy("customer.createdAt", "DESC");
-    if (ownerId) qb.andWhere("customer.ownerId = :ownerId", { ownerId });
+    if (ownerId) this.applyCustomerAccess(qb, ownerId);
 
     if (take > 0) qb.skip(skip).take(take);
     const [customers, total] = await qb.getManyAndCount();
     return { customers, total };
   }
 
+  private applyCustomerAccess(qb: any, userId: string) {
+    qb.andWhere(
+      "(customer.ownerId = :customerAccessUserId OR JSON_CONTAINS(COALESCE(customer.collaboratorIds, JSON_ARRAY()), JSON_QUOTE(:customerAccessUserId)))",
+      { customerAccessUserId: userId },
+    );
+  }
+
+  private hasCustomerAccess(customer: Customer, userId: string) {
+    return (
+      customer.ownerId === userId ||
+      (Array.isArray(customer.collaboratorIds) &&
+        customer.collaboratorIds.includes(userId))
+    );
+  }
+
+  private normalizeCollaboratorIds(ids?: string[], ownerId?: string) {
+    return [
+      ...new Set(
+        (Array.isArray(ids) ? ids : [])
+          .map((id) => String(id).trim())
+          .filter((id) => id && id !== ownerId),
+      ),
+    ];
+  }
+
   async bulkDelete(bulkDeleteDto: BulkDeleteDto, ownerId?: string) {
-    const ids = bulkDeleteDto.ids;
+    const ids = ownerId
+      ? (await this.findAccessibleCustomers(bulkDeleteDto.ids, ownerId)).map((customer) => customer.id)
+      : bulkDeleteDto.ids;
+    if (!ids.length) return { deleted: 0 };
     const result = await this.customerRepository.softDelete(
-      ownerId ? { id: In(ids), ownerId } : { id: In(ids) },
+      { id: In(ids) },
     );
     return { deleted: result.affected || 0 };
   }
@@ -381,10 +430,12 @@ export class CustomersService {
   async bulkTags(bulkTagsDto: BulkTagsDto, ownerId?: string) {
     const { ids, action, tag } = bulkTagsDto;
     const tagEntity = await this.getOrCreateTags([tag]);
-    const customers = await this.customerRepository.find({
-      where: ownerId ? { id: In(ids), ownerId } : { id: In(ids) },
-      relations: ["tags"],
-    });
+    const customers = ownerId
+      ? await this.findAccessibleCustomers(ids, ownerId, true)
+      : await this.customerRepository.find({
+          where: { id: In(ids) },
+          relations: ["tags"],
+        });
 
     let updated = 0;
     for (const customer of customers) {
@@ -404,13 +455,25 @@ export class CustomersService {
   }
 
   async bulkTier(bulkTierDto: BulkTierDto, ownerId?: string) {
+    const ids = ownerId
+      ? (await this.findAccessibleCustomers(bulkTierDto.ids, ownerId)).map((customer) => customer.id)
+      : bulkTierDto.ids;
+    if (!ids.length) return { updated: 0, tier: bulkTierDto.tier };
     const result = await this.customerRepository.update(
-      ownerId
-        ? { id: In(bulkTierDto.ids), ownerId }
-        : { id: In(bulkTierDto.ids) },
+      { id: In(ids) },
       { tier: bulkTierDto.tier as any },
     );
     return { updated: result.affected || 0, tier: bulkTierDto.tier };
+  }
+
+  private async findAccessibleCustomers(ids: number[], userId: string, withTags = false) {
+    if (!ids.length) return [];
+    const qb = this.customerRepository
+      .createQueryBuilder("customer")
+      .where("customer.id IN (:...customerAccessIds)", { customerAccessIds: ids });
+    if (withTags) qb.leftJoinAndSelect("customer.tags", "tag");
+    this.applyCustomerAccess(qb, userId);
+    return qb.getMany();
   }
 
   async getCustomer360(id: number, ownerId?: string) {
@@ -1099,6 +1162,16 @@ export class CustomersService {
     });
   }
 
+  async isCustomerEmailMarketingAllowed(customerId: number, email: string) {
+    const normalized = this.normalizeEmail(email);
+    if (!normalized) return false;
+    const contacts = await this.contactRepository.find({ where: { customerId } });
+    const matching = contacts.find(
+      (contact) => this.normalizeEmail(contact.email) === normalized,
+    );
+    return matching?.marketingAllowed !== false;
+  }
+
   async assertTodoOwner(id: number, ownerId?: string) {
     const item = await this.todoRepository.findOne({ where: { id } });
     if (!item) throw new NotFoundException("待办不存在");
@@ -1131,7 +1204,7 @@ export class CustomersService {
 
   async parseAndPreview(file: UploadedFile) {
     const rows = await this.parseExcelFile(file);
-    const normalizedRows = rows.map((row) => this.normalizeImportedRow(row));
+    const normalizedRows = rows.map((row) => this.normalizeImportedMasterRow(row));
     const customers = await this.customerRepository.find();
     const existingEmails = new Set(
       customers.filter((c) => c.email).map((c) => this.normalizeEmail(c.email)),
@@ -1183,7 +1256,7 @@ export class CustomersService {
     );
 
     for (const row of rows) {
-      const data = this.normalizeImportedRow(row);
+      const data = this.normalizeImportedMasterRow(row);
       if (!data.email && !data.company) {
         skipped++;
         continue;
@@ -1193,7 +1266,7 @@ export class CustomersService {
         : undefined;
 
       if (existing) {
-        if (ownerId && existing.ownerId !== ownerId) {
+        if (ownerId && !this.hasCustomerAccess(existing, ownerId)) {
           skipped++;
           continue;
         }
@@ -1228,15 +1301,20 @@ export class CustomersService {
       website: String(data.website || ""),
       region: String(data.region || ""),
       country: String(data.country || ""),
+      address: String(data.address || ""),
       business: String(data.business || ""),
       product: String(data.product || ""),
       customerType: String(data.customerType || ""),
+      mainMarkets: Array.isArray(data.mainMarkets) ? data.mainMarkets : [],
+      annualPurchaseAmount: Number(data.annualPurchaseAmount || 0),
+      preferredCurrency: String(data.preferredCurrency || "USD"),
+      preferredIncoterm: String(data.preferredIncoterm || ""),
       timezone: String(data.timezone || ""),
       notes: String(data.notes || ""),
       source: String(data.source || "lead"),
     });
     if (existing) {
-      if (ownerId && existing.ownerId !== ownerId) {
+      if (ownerId && !this.hasCustomerAccess(existing, ownerId)) {
         throw new BadRequestException(
           "该邮箱已存在于其他负责人客户中，请联系管理员调整归属",
         );
@@ -1289,6 +1367,51 @@ export class CustomersService {
     };
   }
 
+  private normalizeImportedMasterRow(row: Record<string, unknown>) {
+    const value = (...keys: string[]) => {
+      for (const key of keys) {
+        const candidate = row[key];
+        if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+          return String(candidate).trim();
+        }
+      }
+      return "";
+    };
+    const list = (...keys: string[]) =>
+      value(...keys)
+        .split(/[,，;；]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    const amount = (...keys: string[]) =>
+      Number(value(...keys).replace(/[^0-9.-]/g, "")) || 0;
+
+    return {
+      company: value("company", "Company", "公司", "公司名称", "客户名称"),
+      contact: value("contact", "Contact", "联系人", "联系人姓名", "姓名"),
+      email: this.normalizeEmail(value("email", "Email", "邮箱", "电子邮箱", "E-mail", "E-Mail")),
+      phone: value("phone", "Phone", "电话", "手机号", "联系电话"),
+      website: value("website", "Website", "官网", "网站", "网址"),
+      region: value("region", "Region", "地区", "城市", "市场区域"),
+      country: value("country", "Country", "国家", "国家/地区"),
+      address: value("address", "Address", "详细地址", "公司地址"),
+      business: value("business", "Business", "主营业务", "行业", "业务"),
+      product: value("product", "Product", "产品", "主营产品"),
+      customerType: value("customerType", "Customer Type", "公司类型", "客户类型"),
+      mainMarkets: list("mainMarkets", "Main Markets", "主要市场"),
+      annualPurchaseAmount: amount(
+        "annualPurchaseAmount",
+        "Annual Purchase Amount",
+        "年采购金额",
+        "年采购规模",
+      ),
+      preferredCurrency: value("preferredCurrency", "Preferred Currency", "首选币种") || "USD",
+      preferredIncoterm: value("preferredIncoterm", "Preferred Incoterm", "首选贸易条款", "贸易条款"),
+      timezone: value("timezone", "Timezone", "时区", "客户时区"),
+      notes: value("notes", "Notes", "备注"),
+      source: value("source", "Source", "客户来源") || "import",
+    };
+  }
+
   private normalizeImportedRow(row: Record<string, unknown>) {
     const value = (...keys: string[]) => {
       for (const key of keys) {
@@ -1323,11 +1446,17 @@ export class CustomersService {
   }
 
   private mergeImportedCustomer(
-    incoming: ReturnType<CustomersService["normalizeImportedRow"]>,
+    incoming: Record<string, unknown>,
   ) {
-    const merged: Record<string, string> = {};
+    const merged: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(incoming)) {
-      if (String(value || "").trim()) merged[key] = value;
+      if (Array.isArray(value)) {
+        if (value.length) merged[key] = value;
+      } else if (typeof value === "number") {
+        if (value > 0) merged[key] = value;
+      } else if (String(value || "").trim()) {
+        merged[key] = value;
+      }
     }
     // Profile fields merge in place, so ownership, lifecycle, email health,
     // tags, activities and historical email logs remain untouched.

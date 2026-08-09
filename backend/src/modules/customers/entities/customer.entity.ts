@@ -59,6 +59,9 @@ export class Customer {
   country: string;
 
   @Column({ type: 'text', nullable: true })
+  address: string;
+
+  @Column({ type: 'text', nullable: true })
   business: string;
 
   @Column({ type: 'text', nullable: true })
@@ -66,6 +69,25 @@ export class Customer {
 
   @Column({ name: 'customer_type', type: 'varchar', length: 50, default: '' })
   customerType: string;
+
+  @Column({ name: 'main_markets', type: 'json', nullable: true })
+  mainMarkets: string[];
+
+  @Column({
+    name: 'annual_purchase_amount',
+    type: 'decimal',
+    precision: 15,
+    scale: 2,
+    default: 0,
+    transformer: decimalNumberTransformer,
+  })
+  annualPurchaseAmount: number;
+
+  @Column({ name: 'preferred_currency', type: 'varchar', length: 3, default: 'USD' })
+  preferredCurrency: string;
+
+  @Column({ name: 'preferred_incoterm', type: 'varchar', length: 20, default: '' })
+  preferredIncoterm: string;
 
   @Column({ type: 'varchar', length: 1, default: '' })
   tier: CustomerTier;
@@ -93,6 +115,9 @@ export class Customer {
 
   @Column({ name: 'owner_id', type: 'varchar', length: 32, default: '' })
   ownerId: string;
+
+  @Column({ name: 'collaborator_ids', type: 'json', nullable: true })
+  collaboratorIds: string[];
 
   @Column({ type: 'varchar', length: 10, default: '' })
   health: CustomerHealth;

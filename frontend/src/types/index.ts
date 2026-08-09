@@ -40,6 +40,14 @@ export interface User {
   updatedAt?: string;
 }
 
+export interface UserDirectoryEntry {
+  id: string;
+  username: string;
+  displayName: string;
+  email?: string;
+  role: "admin" | "sales" | "viewer";
+}
+
 // Customer types
 export interface Customer {
   id: string;
@@ -51,6 +59,7 @@ export interface Customer {
   website?: string;
   region?: string;
   country?: string;
+  address?: string;
   timezone?: string;
   tags?: string[];
   tier: "A" | "B" | "C" | "D" | "";
@@ -69,10 +78,15 @@ export interface Customer {
     | "closed"
     | "";
   customerType?: string;
+  mainMarkets?: string[];
+  annualPurchaseAmount?: number;
+  preferredCurrency?: string;
+  preferredIncoterm?: string;
   product?: string;
   source?: string;
   ownerId?: string;
   ownerName?: string;
+  collaboratorIds?: string[];
   notes?: string;
   emailStatus?: "valid" | "invalid" | "unknown";
   emailFailureReason?: string;
@@ -124,8 +138,16 @@ export interface Contact {
   customerId: string;
   name: string;
   title?: string;
+  department?: string;
+  decisionRole?: "" | "decision_maker" | "influencer" | "champion" | "user" | "gatekeeper" | "other";
+  purchasingInfluence?: "" | "high" | "medium" | "low";
+  preferredLanguage?: string;
   email?: string;
   phone?: string;
+  whatsapp?: string;
+  linkedin?: string;
+  contactStatus?: "unknown" | "active" | "inactive" | "left";
+  marketingAllowed?: boolean;
   isPrimary?: boolean;
   createdAt: string;
 }

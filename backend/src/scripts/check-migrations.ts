@@ -35,6 +35,26 @@ async function createCurrentSchema() {
 }
 
 async function seedLegacyFixture(connection: Connection) {
+  await connection.query(`
+    ALTER TABLE customers
+      DROP COLUMN address,
+      DROP COLUMN main_markets,
+      DROP COLUMN annual_purchase_amount,
+      DROP COLUMN preferred_currency,
+      DROP COLUMN preferred_incoterm,
+      DROP COLUMN collaborator_ids
+  `);
+  await connection.query(`
+    ALTER TABLE contacts
+      DROP COLUMN department,
+      DROP COLUMN decision_role,
+      DROP COLUMN purchasing_influence,
+      DROP COLUMN preferred_language,
+      DROP COLUMN whatsapp,
+      DROP COLUMN linkedin,
+      DROP COLUMN contact_status,
+      DROP COLUMN marketing_allowed
+  `);
   await connection.query(
     "ALTER TABLE products ADD COLUMN base_price VARCHAR(64) NULL",
   );
@@ -55,6 +75,11 @@ async function seedLegacyFixture(connection: Connection) {
     "SELECT id FROM customers WHERE customerId = 'CUST-CI-1'",
   );
   const customerId = Number(customerRows[0].id);
+
+  await connection.query(
+    "INSERT INTO contacts (contact_id, customer_id, name, email, is_primary) VALUES ('CONTACT-CI-1', ?, 'Anna', 'anna@ci.test', 1)",
+    [customerId],
+  );
 
   await connection.query(
     "INSERT INTO products (product_id, code, name, price, currency, base_price) VALUES ('PROD-CI-1', 'WN-DN50', 'Weld neck flange', '0', '', 'US$ 1,250.50')",
@@ -136,6 +161,23 @@ async function verifyMigratedData(connection: Connection) {
     [database],
   );
   assert.equal(Number(attachments[0].count), 1, "客户附件表未创建");
+
+  const [masterColumns] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND (
+       (TABLE_NAME = 'customers' AND COLUMN_NAME IN ('address','main_markets','annual_purchase_amount','preferred_currency','preferred_incoterm','collaborator_ids'))
+       OR
+       (TABLE_NAME = 'contacts' AND COLUMN_NAME IN ('department','decision_role','purchasing_influence','preferred_language','whatsapp','linkedin','contact_status','marketing_allowed'))
+     )`,
+    [database],
+  );
+  assert.equal(Number(masterColumns[0].count), 14, "P1.2 客户主数据字段迁移不完整");
+
+  const [contacts] = await connection.query<CheckRow[]>(
+    "SELECT contact_status, marketing_allowed FROM contacts WHERE contact_id = 'CONTACT-CI-1'",
+  );
+  assert.equal(contacts[0].contact_status, "unknown", "历史联系人状态默认值不正确");
+  assert.equal(Number(contacts[0].marketing_allowed), 1, "历史联系人营销许可默认值不正确");
 
   const [activityColumn] = await connection.query<CheckRow[]>(
     `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
