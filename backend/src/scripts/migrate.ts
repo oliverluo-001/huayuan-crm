@@ -6,7 +6,7 @@ import { migrateP03DataIntegrity } from './p03-data-integrity';
 const migrationId = '20260730_online_accounts';
 const database = process.env.DB_DATABASE || 'international_trade_crm';
 
-async function main() {
+export async function runDatabaseMigrations() {
   const connection = await mysql.createConnection({
     host: process.env.DB_HOST || '127.0.0.1',
     port: Number(process.env.DB_PORT || 3306),
@@ -72,7 +72,7 @@ async function main() {
     await migrateEmailExecution(connection);
     await migrateAuditMetadata(connection);
     await migrateCrmContracts(connection);
-    await migrateP03DataIntegrity(connection, database);
+    const p03Report = await migrateP03DataIntegrity(connection, database);
     await migrateOpportunityLifecycle(connection);
     await connection.beginTransaction();
     try {
@@ -82,6 +82,7 @@ async function main() {
       await connection.rollback();
       throw error;
     }
+    return { p03Report };
   } finally {
     await connection.end();
   }
@@ -346,7 +347,7 @@ async function addIndexIfMissing(connection: Connection, table: string, indexNam
 }
 
 if (require.main === module) {
-  main().catch((error) => {
+  runDatabaseMigrations().catch((error) => {
     console.error(error);
     process.exitCode = 1;
   });

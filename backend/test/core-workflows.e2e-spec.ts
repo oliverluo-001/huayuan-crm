@@ -2,7 +2,12 @@ import { CanActivate, ExecutionContext, INestApplication, Injectable, Validation
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { RolesGuard } from '../src/common/guards/roles.guard';
-import { ImportController } from '../src/modules/customers/customers.controller';
+import {
+  CustomersController,
+  ImportController,
+  OpportunitiesController,
+  QuotesController,
+} from '../src/modules/customers/customers.controller';
 import { CustomersService } from '../src/modules/customers/customers.service';
 import { LeadTasksController } from '../src/modules/leads/leads.controller';
 import { LeadsService } from '../src/modules/leads/leads.service';
@@ -11,26 +16,49 @@ import { EmailService } from '../src/modules/email/email.service';
 
 type StoredEntity = Record<string, any> & { id?: number };
 
+function matchesValue(actual: any, expected: any): boolean {
+  if (expected && typeof expected === 'object' && '_type' in expected) {
+    const type = expected._type;
+    const value = expected._value;
+    if (type === 'in') return value.includes(actual);
+    if (type === 'like') {
+      const pattern = String(value)
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/%/g, '.*')
+        .replace(/_/g, '.');
+      return new RegExp(`^${pattern}$`, 'i').test(String(actual ?? ''));
+    }
+    if (type === 'not') return !matchesValue(actual, value);
+    if (type === 'isNull') return actual === null || actual === undefined;
+  }
+  if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
+    return matchesWhere(actual || {}, expected);
+  }
+  return actual === expected;
+}
+
 function matchesWhere(
   entity: StoredEntity,
   where: Record<string, any> | Array<Record<string, any>> | undefined,
 ): boolean {
   if (!where) return true;
   if (Array.isArray(where)) return where.some((candidate) => matchesWhere(entity, candidate));
-  return Object.entries(where).every(([key, value]) => entity[key] === value);
+  return Object.entries(where).every(([key, value]) => matchesValue(entity[key], value));
 }
 
 class MemoryRepository<T extends StoredEntity> {
   items: T[] = [];
   private nextId = 1;
 
+  constructor(private readonly defaults: Partial<T> = {}) {}
+
   reset(items: T[] = []) {
-    this.items = items.map((item) => ({ ...item }));
+    this.items = items.map((item) => ({ ...this.defaults, ...item }));
     this.nextId = Math.max(0, ...this.items.map((item) => Number(item.id || 0))) + 1;
   }
 
   create(data: Partial<T>): T {
-    return { ...data } as T;
+    return { ...this.defaults, ...data } as T;
   }
 
   async save(entity: T): Promise<T> {
@@ -41,8 +69,28 @@ class MemoryRepository<T extends StoredEntity> {
     return entity;
   }
 
-  async find(options?: { where?: Record<string, any> | Array<Record<string, any>> }): Promise<T[]> {
-    return this.items.filter((item) => matchesWhere(item, options?.where));
+  async find(options?: {
+    where?: Record<string, any> | Array<Record<string, any>>;
+    order?: Record<string, 'ASC' | 'DESC'>;
+    skip?: number;
+    take?: number;
+  }): Promise<T[]> {
+    let result = this.items.filter((item) => matchesWhere(item, options?.where));
+    if (options?.order) {
+      const entries = Object.entries(options.order);
+      result = [...result].sort((left, right) => {
+        for (const [key, direction] of entries) {
+          const a = left[key] instanceof Date ? left[key].getTime() : left[key];
+          const b = right[key] instanceof Date ? right[key].getTime() : right[key];
+          if (a === b) continue;
+          const comparison = a === undefined ? -1 : b === undefined ? 1 : a < b ? -1 : 1;
+          return direction === 'DESC' ? -comparison : comparison;
+        }
+        return 0;
+      });
+    }
+    const start = options?.skip || 0;
+    return options?.take ? result.slice(start, start + options.take) : result.slice(start);
   }
 
   async findOne(options: { where: Record<string, any> | Array<Record<string, any>> }): Promise<T | null> {
@@ -51,6 +99,22 @@ class MemoryRepository<T extends StoredEntity> {
 
   async count(options?: { where?: Record<string, any> | Array<Record<string, any>> }) {
     return (await this.find(options)).length;
+  }
+
+  async findAndCount(options?: Parameters<MemoryRepository<T>['find']>[0]) {
+    const all = this.items.filter((item) => matchesWhere(item, options?.where));
+    return [await this.find(options), all.length] as const;
+  }
+
+  async update(criteria: Record<string, any>, update: Partial<T>) {
+    let affected = 0;
+    this.items.forEach((item) => {
+      if (matchesWhere(item, criteria)) {
+        Object.assign(item, update);
+        affected += 1;
+      }
+    });
+    return { affected };
   }
 
   async delete(criteria: number | Record<string, any>) {
@@ -84,6 +148,13 @@ describe('core CRM workflows (HTTP e2e)', () => {
 
   const customerRepository = new MemoryRepository<any>();
   const contactRepository = new MemoryRepository<any>();
+  const activityRepository = new MemoryRepository<any>({ type: 'note' });
+  const todoRepository = new MemoryRepository<any>({ status: 'open' });
+  const opportunityRepository = new MemoryRepository<any>();
+  const quoteRepository = new MemoryRepository<any>({ status: 'draft', currency: 'USD' });
+  const sampleRepository = new MemoryRepository<any>();
+  const tagRepository = new MemoryRepository<any>();
+  const customerViewRepository = new MemoryRepository<any>();
   const leadRepository = new MemoryRepository<any>();
   const leadTaskRepository = new MemoryRepository<any>();
   const templateRepository = new MemoryRepository<any>();
@@ -92,17 +163,16 @@ describe('core CRM workflows (HTTP e2e)', () => {
   const recipientRepository = new MemoryRepository<any>();
 
   beforeAll(async () => {
-    const unusedRepository = () => new MemoryRepository<any>() as any;
     customersService = new CustomersService(
       customerRepository as any,
       contactRepository as any,
-      unusedRepository(),
-      unusedRepository(),
-      unusedRepository(),
-      unusedRepository(),
-      unusedRepository(),
-      unusedRepository(),
-      unusedRepository(),
+      activityRepository as any,
+      todoRepository as any,
+      opportunityRepository as any,
+      quoteRepository as any,
+      sampleRepository as any,
+      tagRepository as any,
+      customerViewRepository as any,
       emailLogRepository as any,
     );
     leadsService = new LeadsService(
@@ -126,7 +196,14 @@ describe('core CRM workflows (HTTP e2e)', () => {
     jest.spyOn(emailService as any, 'processTask').mockResolvedValue(undefined);
 
     const moduleRef = await Test.createTestingModule({
-      controllers: [ImportController, LeadTasksController, EmailTasksController],
+      controllers: [
+        CustomersController,
+        ImportController,
+        OpportunitiesController,
+        QuotesController,
+        LeadTasksController,
+        EmailTasksController,
+      ],
       providers: [
         { provide: CustomersService, useValue: customersService },
         { provide: LeadsService, useValue: leadsService },
@@ -153,6 +230,13 @@ describe('core CRM workflows (HTTP e2e)', () => {
   beforeEach(() => {
     customerRepository.reset();
     contactRepository.reset();
+    activityRepository.reset();
+    todoRepository.reset();
+    opportunityRepository.reset();
+    quoteRepository.reset();
+    sampleRepository.reset();
+    tagRepository.reset();
+    customerViewRepository.reset();
     leadRepository.reset();
     leadTaskRepository.reset();
     templateRepository.reset();
@@ -261,5 +345,158 @@ describe('core CRM workflows (HTTP e2e)', () => {
       expect.objectContaining({ taskId: 1, email: 'bob@beta.test', status: 'queued' }),
     ]));
     expect(emailTaskRepository.items[0]).toMatchObject({ status: 'active', ownerId: '7' });
+  });
+
+  it('completes the foreign-trade CRM main chain through real HTTP endpoints', async () => {
+    templateRepository.reset([{
+      id: 9,
+      templateId: 'tmpl_9',
+      name: 'Quotation follow-up',
+      subject: 'Your flange quotation',
+      body: 'Hello {{company}}',
+      images: [],
+    }]);
+    const headers = {
+      'content-type': 'application/json',
+      'x-test-role': 'sales',
+      'x-test-user-id': '7',
+    };
+
+    const customerResponse = await fetch(`${baseUrl}/api/customers`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        company: 'Northwind Valves GmbH',
+        contact: 'Anna Keller',
+        email: 'anna@northwind.test',
+        country: 'Germany',
+        business: 'Industrial valve distributor',
+      }),
+    });
+    expect(customerResponse.status).toBe(201);
+    const customer = await customerResponse.json();
+    expect(customer).toMatchObject({ id: 1, company: 'Northwind Valves GmbH', ownerId: '7' });
+
+    const contactResponse = await fetch(`${baseUrl}/api/customers/${customer.id}/contacts`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: 'Anna Keller',
+        title: 'Purchasing Manager',
+        email: 'anna@northwind.test',
+        isPrimary: true,
+      }),
+    });
+    expect(contactResponse.status).toBe(201);
+    await expect(contactResponse.json()).resolves.toMatchObject({
+      customerId: customer.id,
+      name: 'Anna Keller',
+      isPrimary: true,
+    });
+
+    const activityResponse = await fetch(`${baseUrl}/api/customers/${customer.id}/activities`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        type: 'call',
+        subject: '确认 EN 1092-1 法兰需求',
+        content: '客户需要两种规格，并要求本周报价。',
+      }),
+    });
+    expect(activityResponse.status).toBe(201);
+    await expect(activityResponse.json()).resolves.toMatchObject({ customerId: customer.id, type: 'call' });
+
+    const todoResponse = await fetch(`${baseUrl}/api/customers/${customer.id}/todos`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        title: '发送正式报价并跟进',
+        dueAt: '2026-08-12T09:00:00.000Z',
+      }),
+    });
+    expect(todoResponse.status).toBe(201);
+    await expect(todoResponse.json()).resolves.toMatchObject({
+      customerId: customer.id,
+      title: '发送正式报价并跟进',
+      status: 'open',
+    });
+
+    const opportunityResponse = await fetch(`${baseUrl}/api/customers/${customer.id}/opportunities`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        title: 'Northwind 2026 flange order',
+        value: 12800,
+        stage: 'prospecting',
+      }),
+    });
+    expect(opportunityResponse.status).toBe(201);
+    const opportunity = await opportunityResponse.json();
+    expect(opportunity).toMatchObject({ customerId: customer.id, amount: 12800, stage: 'prospecting' });
+
+    const stageResponse = await fetch(`${baseUrl}/api/opportunities/${opportunity.id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ stage: 'proposal' }),
+    });
+    expect(stageResponse.status).toBe(200);
+    await expect(stageResponse.json()).resolves.toMatchObject({ stage: 'proposal', probability: 60 });
+    expect(customerRepository.items[0]).toMatchObject({
+      journeyStage: 'proposal',
+      lastActivityType: 'call',
+      nextTodoTitle: '发送正式报价并跟进',
+      openOpportunityCount: 1,
+      openOpportunityValue: 12800,
+    });
+
+    const quoteResponse = await fetch(`${baseUrl}/api/quotes`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        customerId: customer.id,
+        opportunityId: opportunity.opportunityId,
+        currency: 'USD',
+        freight: 20,
+        taxRate: 5,
+        validUntil: '2026-09-01',
+        items: [
+          { productName: 'Weld neck flange DN50', quantity: 10, unit: 'pcs', unitPrice: 25 },
+          { productName: 'Blind flange DN80', quantity: 4, unit: 'pcs', unitPrice: 50, discount: 10 },
+        ],
+      }),
+    });
+    expect(quoteResponse.status).toBe(201);
+    const quote = await quoteResponse.json();
+    expect(quote.items).toHaveLength(2);
+    expect(quote).toMatchObject({ subtotal: 430, freight: 20, taxAmount: 21.5, total: 471.5 });
+
+    const exportResponse = await fetch(`${baseUrl}/api/quotes/${quote.id}/export`, {
+      headers: { 'x-test-role': 'sales', 'x-test-user-id': '7' },
+    });
+    expect(exportResponse.status).toBe(200);
+    expect(exportResponse.headers.get('content-type')).toContain('text/html');
+    expect(exportResponse.headers.get('content-disposition')).toContain('attachment');
+    const exportedQuote = await exportResponse.text();
+    expect(exportedQuote).toContain('Weld neck flange DN50');
+    expect(exportedQuote).toContain('Blind flange DN80');
+    expect(exportedQuote).toContain('Northwind Valves GmbH');
+
+    const emailTaskResponse = await fetch(`${baseUrl}/api/email-tasks`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name: 'Northwind quotation follow-up',
+        templateId: '9',
+        customerIds: [String(customer.id)],
+        batchSize: 10,
+      }),
+    });
+    expect(emailTaskResponse.status).toBe(201);
+    await expect(emailTaskResponse.json()).resolves.toMatchObject({
+      ownerId: '7',
+      name: 'Northwind quotation follow-up',
+      customerIds: [String(customer.id)],
+      status: 'pending',
+    });
   });
 });

@@ -3,10 +3,25 @@ name: 部署 huayuan-crm 到腾讯云
 on:
   push:
     branches: ['main']
+  pull_request:
+    branches: ['main']
 
 jobs:
-  deploy:
+  quality-and-deploy:
     runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
 
     steps:
       - name: Checkout code
@@ -21,10 +36,31 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build all packages
+      - name: 1. Backend unit tests
+        run: npm run test -w backend -- --runInBand
+
+      - name: 2. Backend integration tests
+        run: npm run test:e2e -w backend -- --runInBand
+
+      - name: 3. Frontend type check
+        run: npm run typecheck -w frontend
+
+      - name: 4. Frontend tests
+        run: npm run test -w frontend
+
+      - name: 5. Build backend and frontend
         run: npm run build
 
+      - name: 6. Database migration check
+        run: npm run db:migrate:check -w backend
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USERNAME: root
+          DB_PASSWORD: root
+
       - name: Package artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           mkdir -p deploy-artifacts/backend deploy-artifacts/frontend
           cp -r backend/dist deploy-artifacts/backend/
@@ -35,6 +71,7 @@ jobs:
           cp deploy/nginx-huayuan-crm.conf deploy-artifacts/
 
       - name: Upload to Tencent Cloud
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -45,7 +82,8 @@ jobs:
           target: ${{ secrets.SERVER_PROJECT_PATH }}
           strip_components: 1
 
-      - name: Remote deploy
+      - name: 7. Deploy to Tencent Cloud
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -119,3 +157,9 @@ jobs:
             rm -rf $DEPLOY_DIR/package.json
 
             echo "===== Deploy to Tencent Cloud complete ====="
+
+      - name: 8. Production health check
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: node deploy/health-check.mjs
+        env:
+          HEALTHCHECK_URL: ${{ secrets.PUBLIC_BASE_URL || 'https://crm.huayuanflange.com' }}
