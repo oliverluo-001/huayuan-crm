@@ -10,6 +10,10 @@ import { Save, KeyRound, Plus, Trash2, TestTube, RefreshCw, Loader2, Download, D
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import {
+  smtpConfigurationHint,
+  validateSmtpProfileDraft,
+} from "@/contracts/smtp-profile";
+import {
   getSmtpProfile,
   getImapProfile,
   getAiProfile,
@@ -115,6 +119,10 @@ export function SettingsPage() {
   });
   const [aiTesting, setAiTesting] = useState(false);
   const [smtpTesting, setSmtpTesting] = useState(false);
+  const [smtpTestFeedback, setSmtpTestFeedback] = useState<{
+    type: "testing" | "success" | "error";
+    message: string;
+  } | null>(null);
   const [searchTestingId, setSearchTestingId] = useState<string | null>(null);
 
   // Email policy
@@ -220,6 +228,10 @@ export function SettingsPage() {
         pass: smtpForm.smtpPass || undefined,
       } as any);
       toast.success("SMTP 配置已保存");
+      setSmtpTestFeedback({
+        type: "success",
+        message: "配置已保存，但尚未验证连接。请点击“保存并测试连接”。",
+      });
       fetchData();
     } catch {
       // Error handled by API client
@@ -227,7 +239,17 @@ export function SettingsPage() {
   };
 
   const handleTestSmtp = async () => {
+    const validationError = validateSmtpProfileDraft(smtpForm);
+    if (validationError) {
+      setSmtpTestFeedback({ type: "error", message: validationError });
+      toast.error(validationError);
+      return;
+    }
     setSmtpTesting(true);
+    setSmtpTestFeedback({
+      type: "testing",
+      message: "正在保存配置并连接 SMTP 服务器，请稍候（最长约 15 秒）...",
+    });
     try {
       await saveSmtpProfile({
         smtpProvider: smtpForm.smtpProvider,
@@ -239,14 +261,22 @@ export function SettingsPage() {
         pass: smtpForm.smtpPass || undefined,
       } as any);
       const result = await testSmtpProfile();
-      toast.success(result.message || "SMTP 连接测试成功");
+      const successMessage = result.message || "SMTP 连接测试成功";
+      toast.success(successMessage);
+      setSmtpTestFeedback({ type: "success", message: successMessage });
       setSmtpForm((current) => ({
         ...current,
         smtpPass: "",
         credentialStatus: "saved",
       }));
-    } catch {
-      // Error handled by API client
+    } catch (error) {
+      setSmtpTestFeedback({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "SMTP 连接测试失败，请核对服务器、端口和授权码",
+      });
     } finally {
       setSmtpTesting(false);
     }
@@ -903,6 +933,11 @@ export function SettingsPage() {
                       onChange={(e) => setSmtpForm({ ...smtpForm, smtpHost: e.target.value })}
                       required
                     />
+                    {smtpConfigurationHint(smtpForm) && (
+                      <p className="text-xs text-amber-700">
+                        {smtpConfigurationHint(smtpForm)}
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>端口 *</Label>
@@ -920,8 +955,8 @@ export function SettingsPage() {
                       value={smtpForm.smtpSecure ? "true" : "false"}
                       onChange={(e) => setSmtpForm({ ...smtpForm, smtpSecure: e.target.value === "true" })}
                     >
-                      <option value="true">SSL/TLS</option>
-                      <option value="false">无加密</option>
+                      <option value="true">SSL/TLS（通常端口 465）</option>
+                      <option value="false">STARTTLS（通常端口 587）</option>
                     </select>
                   </div>
                   <div className="space-y-2">
@@ -978,9 +1013,23 @@ export function SettingsPage() {
                     ) : (
                       <TestTube className="mr-2 h-4 w-4" />
                     )}
-                    保存并测试连接
+                    {smtpTesting ? "正在连接..." : "保存并测试连接"}
                   </Button>
                 </div>
+                {smtpTestFeedback && (
+                  <div
+                    role="status"
+                    className={`rounded-lg border px-4 py-3 text-sm ${
+                      smtpTestFeedback.type === "success"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                        : smtpTestFeedback.type === "error"
+                          ? "border-red-300 bg-red-50 text-red-800"
+                          : "border-blue-300 bg-blue-50 text-blue-800"
+                    }`}
+                  >
+                    {smtpTestFeedback.message}
+                  </div>
+                )}
               </form>
             </CardContent>
           </Card>

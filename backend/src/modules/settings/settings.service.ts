@@ -211,12 +211,17 @@ export class SettingsService {
       port: Number(profile.smtpPort || 587),
       secure: Boolean(profile.smtpSecure),
       auth: { user: profile.smtpUser, pass: profile.pass },
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
     });
     try {
       await transport.verify();
       return { ok: true, message: 'SMTP 连接和身份认证成功' };
     } catch (error) {
       throw new BadRequestException(formatSmtpError(error));
+    } finally {
+      transport.close();
     }
   }
 

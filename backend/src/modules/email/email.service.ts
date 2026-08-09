@@ -656,6 +656,9 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       port: Number(profile.smtpPort || 587),
       secure: Boolean(profile.smtpSecure),
       auth: { user: profile.smtpUser, pass: profile.pass },
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
     });
   }
 
