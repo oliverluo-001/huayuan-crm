@@ -398,7 +398,7 @@ export class CreateQuoteDto {
 
   @IsString()
   @IsOptional()
-  opportunityId?: string;
+  opportunityId?: string | null;
 
   @IsEnum(['draft', 'sent', 'accepted', 'rejected', 'expired'])
   @IsOptional()
@@ -463,7 +463,7 @@ export class UpdateQuoteDto {
 
   @IsString()
   @IsOptional()
-  opportunityId?: string;
+  opportunityId?: string | null;
 
   @IsEnum(['draft', 'sent', 'accepted', 'rejected', 'expired'])
   @IsOptional()
@@ -509,7 +509,7 @@ export class CreateSampleDto {
 
   @IsString()
   @IsOptional()
-  opportunityId?: string;
+  opportunityId?: string | null;
 
   @IsString()
   productName: string;
@@ -555,7 +555,7 @@ export class UpdateSampleDto {
 
   @IsString()
   @IsOptional()
-  opportunityId?: string;
+  opportunityId?: string | null;
 
   @IsString()
   @IsOptional()

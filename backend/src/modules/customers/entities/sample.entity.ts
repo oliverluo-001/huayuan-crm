@@ -24,7 +24,7 @@ export class Sample {
   customerId: number;
 
   @Column({ name: 'opportunity_id', type: 'varchar', length: 32, nullable: true })
-  opportunityId: string;
+  opportunityId: string | null;
 
   @Column({ name: 'product_name', type: 'varchar', length: 255 })
   productName: string;

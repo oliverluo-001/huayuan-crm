@@ -28,7 +28,7 @@ export class Quote {
   customerId: number;
 
   @Column({ name: 'opportunity_id', type: 'varchar', length: 32, nullable: true })
-  opportunityId: string;
+  opportunityId: string | null;
 
   @Column({ type: 'enum', enum: ['draft', 'sent', 'accepted', 'rejected', 'expired'], default: 'draft' })
   status: QuoteStatus;

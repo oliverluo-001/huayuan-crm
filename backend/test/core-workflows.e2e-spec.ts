@@ -7,8 +7,11 @@ import {
   ImportController,
   OpportunitiesController,
   QuotesController,
+  SamplesController,
 } from '../src/modules/customers/customers.controller';
 import { CustomersService } from '../src/modules/customers/customers.service';
+import { ProductsController } from '../src/modules/products/products.controller';
+import { ProductsService } from '../src/modules/products/products.service';
 import { LeadTasksController } from '../src/modules/leads/leads.controller';
 import { LeadsService } from '../src/modules/leads/leads.service';
 import { EmailTasksController } from '../src/modules/email/email.controller';
@@ -143,6 +146,7 @@ describe('core CRM workflows (HTTP e2e)', () => {
   let app: INestApplication;
   let baseUrl: string;
   let customersService: CustomersService;
+  let productsService: ProductsService;
   let leadsService: LeadsService;
   let emailService: EmailService;
 
@@ -153,6 +157,7 @@ describe('core CRM workflows (HTTP e2e)', () => {
   const opportunityRepository = new MemoryRepository<any>();
   const quoteRepository = new MemoryRepository<any>({ status: 'draft', currency: 'USD' });
   const sampleRepository = new MemoryRepository<any>();
+  const productRepository = new MemoryRepository<any>();
   const tagRepository = new MemoryRepository<any>();
   const customerViewRepository = new MemoryRepository<any>();
   const leadRepository = new MemoryRepository<any>();
@@ -175,6 +180,7 @@ describe('core CRM workflows (HTTP e2e)', () => {
       customerViewRepository as any,
       emailLogRepository as any,
     );
+    productsService = new ProductsService(productRepository as any);
     leadsService = new LeadsService(
       leadRepository as any,
       leadTaskRepository as any,
@@ -201,11 +207,14 @@ describe('core CRM workflows (HTTP e2e)', () => {
         ImportController,
         OpportunitiesController,
         QuotesController,
+        SamplesController,
+        ProductsController,
         LeadTasksController,
         EmailTasksController,
       ],
       providers: [
         { provide: CustomersService, useValue: customersService },
+        { provide: ProductsService, useValue: productsService },
         { provide: LeadsService, useValue: leadsService },
         { provide: EmailService, useValue: emailService },
         { provide: APP_GUARD, useClass: TestAuthGuard },
@@ -235,6 +244,7 @@ describe('core CRM workflows (HTTP e2e)', () => {
     opportunityRepository.reset();
     quoteRepository.reset();
     sampleRepository.reset();
+    productRepository.reset();
     tagRepository.reset();
     customerViewRepository.reset();
     leadRepository.reset();
@@ -345,6 +355,123 @@ describe('core CRM workflows (HTTP e2e)', () => {
       expect.objectContaining({ taskId: 1, email: 'bob@beta.test', status: 'queued' }),
     ]));
     expect(emailTaskRepository.items[0]).toMatchObject({ status: 'active', ownerId: '7' });
+  });
+
+  it('creates and fully updates products, samples, opportunities, and multi-line quotes', async () => {
+    customerRepository.reset([{ id: 1, customerId: 'cus_1', company: 'Acme Flow Control', ownerId: '7' }]);
+    const headers = {
+      'content-type': 'application/json',
+      'x-test-role': 'sales',
+      'x-test-user-id': '7',
+    };
+
+    const productResponse = await fetch(`${baseUrl}/api/products`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ code: 'WN-DN50', name: 'Weld neck flange DN50', category: 'Flange', unit: 'pcs', price: 25, currency: 'USD' }),
+    });
+    expect(productResponse.status).toBe(201);
+    const product = await productResponse.json();
+    const productUpdateResponse = await fetch(`${baseUrl}/api/products/${product.id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ code: 'WN-DN50-PN16', name: 'Weld neck flange DN50 PN16', category: 'Forged flange', unit: 'piece', price: 27.5, currency: 'EUR', description: 'EN 1092-1' }),
+    });
+    expect(productUpdateResponse.status).toBe(200);
+    await expect(productUpdateResponse.json()).resolves.toMatchObject({
+      id: product.id,
+      name: 'Weld neck flange DN50 PN16',
+      price: 27.5,
+      currency: 'EUR',
+      description: 'EN 1092-1',
+    });
+
+    const opportunityResponse = await fetch(`${baseUrl}/api/opportunities`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ customerId: 1, name: 'Acme annual order', amount: 10000, stage: 'qualification' }),
+    });
+    expect(opportunityResponse.status).toBe(201);
+    const opportunity = await opportunityResponse.json();
+    const opportunityUpdateResponse = await fetch(`${baseUrl}/api/opportunities/${opportunity.id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ customerId: 1, name: 'Acme 2026 annual order', amount: 12800, stage: 'proposal', expectedCloseDate: '2026-09-30', description: 'Two flange specifications' }),
+    });
+    expect(opportunityUpdateResponse.status).toBe(200);
+    await expect(opportunityUpdateResponse.json()).resolves.toMatchObject({
+      name: 'Acme 2026 annual order',
+      amount: 12800,
+      stage: 'proposal',
+      probability: 60,
+      description: 'Two flange specifications',
+    });
+
+    const sampleResponse = await fetch(`${baseUrl}/api/samples`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ customerId: 1, opportunityId: opportunity.opportunityId, productId: product.productId, productName: product.name, quantity: 2, unit: 'pcs', status: 'pending' }),
+    });
+    expect(sampleResponse.status).toBe(201);
+    const sample = await sampleResponse.json();
+    const sampleUpdateResponse = await fetch(`${baseUrl}/api/samples/${sample.id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ customerId: 1, opportunityId: null, productId: product.productId, productName: 'Weld neck flange sample PN16', quantity: 3, unit: 'piece', status: 'sent', sentAt: '2026-08-09', trackingNo: 'DHL-20260809', notes: 'Material certificate included' }),
+    });
+    expect(sampleUpdateResponse.status).toBe(200);
+    await expect(sampleUpdateResponse.json()).resolves.toMatchObject({
+      opportunityId: null,
+      productName: 'Weld neck flange sample PN16',
+      quantity: 3,
+      unit: 'piece',
+      status: 'sent',
+      trackingNo: 'DHL-20260809',
+      notes: 'Material certificate included',
+    });
+
+    const quoteResponse = await fetch(`${baseUrl}/api/quotes`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        customerId: 1,
+        opportunityId: opportunity.opportunityId,
+        currency: 'USD',
+        freight: 20,
+        taxRate: 5,
+        items: [
+          { productId: product.productId, productName: 'Weld neck flange DN50', quantity: 10, unit: 'pcs', unitPrice: 25 },
+          { productName: 'Blind flange DN80', quantity: 4, unit: 'pcs', unitPrice: 50, discount: 10 },
+        ],
+      }),
+    });
+    expect(quoteResponse.status).toBe(201);
+    const quote = await quoteResponse.json();
+    const quoteUpdateResponse = await fetch(`${baseUrl}/api/quotes/${quote.id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        customerId: 1,
+        opportunityId: null,
+        status: 'sent',
+        currency: 'EUR',
+        freight: 30,
+        taxRate: 10,
+        notes: 'Updated commercial terms',
+        items: [
+          { productId: product.productId, productName: 'Weld neck flange DN50 PN16', quantity: 12, unit: 'pcs', unitPrice: 27.5, discount: 5 },
+          { productName: 'Blind flange DN80 PN16', quantity: 6, unit: 'pcs', unitPrice: 52, discount: 0 },
+        ],
+      }),
+    });
+    expect(quoteUpdateResponse.status).toBe(200);
+    const updatedQuote = await quoteUpdateResponse.json();
+    expect(updatedQuote.items).toHaveLength(2);
+    expect(updatedQuote.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ productName: 'Weld neck flange DN50 PN16', quantity: 12, unitPrice: 27.5 }),
+      expect.objectContaining({ productName: 'Blind flange DN80 PN16', quantity: 6, unitPrice: 52 }),
+    ]));
+    expect(updatedQuote).toMatchObject({ opportunityId: null, status: 'sent', currency: 'EUR', subtotal: 625.5, taxAmount: 62.55, total: 718.05, notes: 'Updated commercial terms' });
   });
 
   it('completes the foreign-trade CRM main chain through real HTTP endpoints', async () => {

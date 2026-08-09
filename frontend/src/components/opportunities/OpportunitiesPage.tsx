@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2 } from "lucide-react";
+import { Edit, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   createCustomerOpportunity,
@@ -28,6 +28,7 @@ export function OpportunitiesPage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     customerId: "",
     name: "",
@@ -55,6 +56,11 @@ export function OpportunitiesPage() {
     fetchOpportunities();
   }, [fetchOpportunities]);
 
+  const resetForm = () => {
+    setEditingId(null);
+    setForm({ customerId: "", name: "", amount: "", stage: "prospecting", expectedCloseDate: "", description: "" });
+  };
+
   const handleStageChange = async (id: string, newStage: string) => {
     try {
       await updateOpportunity(id, { stage: newStage as Opportunity["stage"] });
@@ -65,26 +71,45 @@ export function OpportunitiesPage() {
     }
   };
 
-  const handleCreate = async (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!form.customerId || !form.name.trim()) {
       toast.error("请选择客户并填写商机名称");
       return;
     }
     try {
-      await createCustomerOpportunity(form.customerId, {
+      const data = {
         name: form.name.trim(),
         amount: form.amount === "" ? 0 : Number(form.amount),
         stage: form.stage,
         expectedCloseDate: form.expectedCloseDate || undefined,
         description: form.description.trim() || undefined,
-      });
-      toast.success("商机已创建，客户跟进阶段已同步");
-      setForm({ customerId: "", name: "", amount: "", stage: "prospecting", expectedCloseDate: "", description: "" });
+      };
+      if (editingId) {
+        await updateOpportunity(editingId, { customerId: Number(form.customerId), ...data });
+        toast.success("商机已更新，客户跟进阶段已同步");
+      } else {
+        await createCustomerOpportunity(form.customerId, data);
+        toast.success("商机已创建，客户跟进阶段已同步");
+      }
+      resetForm();
       await fetchOpportunities();
     } catch {
       // Error handled by API client.
     }
+  };
+
+  const handleEdit = (opportunity: Opportunity) => {
+    setEditingId(opportunity.id);
+    setForm({
+      customerId: String(opportunity.customerId),
+      name: opportunity.name || "",
+      amount: opportunity.amount === undefined || opportunity.amount === null ? "" : String(opportunity.amount),
+      stage: opportunity.stage,
+      expectedCloseDate: opportunity.expectedCloseDate?.split("T")[0] || "",
+      description: opportunity.description || "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleDelete = async (id: string) => {
@@ -129,9 +154,9 @@ export function OpportunitiesPage() {
     <div className="space-y-4">
       {canManage && (
         <Card>
-          <CardHeader><CardTitle className="text-base">创建商机</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{editingId ? "编辑商机" : "创建商机"}</CardTitle></CardHeader>
           <CardContent>
-            <form className="grid gap-4 md:grid-cols-3" onSubmit={handleCreate}>
+            <form className="grid gap-4 md:grid-cols-3" onSubmit={handleSubmit}>
               <div className="space-y-2">
                 <Label>客户 *</Label>
                 <Select value={form.customerId} onValueChange={(value) => value && setForm((current) => ({ ...current, customerId: value }))} required>
@@ -162,8 +187,9 @@ export function OpportunitiesPage() {
                 <Label>商机说明</Label>
                 <Textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} placeholder="客户需求、关键规格或下一步计划" rows={1} />
               </div>
-              <div className="md:col-span-3">
-                <Button type="submit"><Plus className="mr-2 h-4 w-4" />创建商机</Button>
+              <div className="md:col-span-3 flex gap-2">
+                <Button type="submit"><Plus className="mr-2 h-4 w-4" />{editingId ? "保存商机" : "创建商机"}</Button>
+                {editingId && <Button type="button" variant="outline" onClick={resetForm}>取消编辑</Button>}
               </div>
             </form>
           </CardContent>
@@ -226,6 +252,7 @@ export function OpportunitiesPage() {
                           ))}
                         </SelectContent>
                       </Select>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="编辑商机" onClick={() => handleEdit(opp)}><Edit className="h-4 w-4" /></Button>
                       <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive" title="删除商机" onClick={() => handleDelete(opp.id)}><Trash2 className="h-4 w-4" /></Button>
                     </div>}
                   </div>

@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2 } from "lucide-react";
+import { Edit, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   getSamples,
@@ -35,6 +35,7 @@ export function SamplesPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     customerId: "",
     opportunityId: "",
@@ -46,7 +47,27 @@ export function SamplesPage() {
     deliveredAt: "",
     trackingNo: "",
     notes: "",
+    originalProductId: "",
+    originalProductName: "",
   });
+
+  const resetForm = () => {
+    setEditingId(null);
+    setForm({
+      customerId: "",
+      opportunityId: "",
+      productId: "",
+      quantity: "1",
+      unit: "pcs",
+      status: "pending",
+      sentAt: "",
+      deliveredAt: "",
+      trackingNo: "",
+      notes: "",
+      originalProductId: "",
+      originalProductName: "",
+    });
+  };
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -74,16 +95,16 @@ export function SamplesPage() {
     e.preventDefault();
     try {
       const product = products.find((item) => String(item.id) === form.productId);
-      if (!product || !form.customerId) {
+      if ((!product && !form.originalProductName) || !form.customerId) {
         toast.error("请选择客户和样品产品");
         return;
       }
       const opportunity = opportunities.find((item) => String(item.id) === form.opportunityId);
-      await createSample({
+      const data = {
         customerId: Number(form.customerId),
-        opportunityId: opportunity?.opportunityId || (opportunity ? String(opportunity.id) : undefined),
-        productId: product.productId || String(product.id),
-        productName: product.name,
+        opportunityId: opportunity?.opportunityId || (opportunity ? String(opportunity.id) : null),
+        productId: product?.productId || (product ? String(product.id) : form.originalProductId) || undefined,
+        productName: product?.name || form.originalProductName,
         quantity: Number(form.quantity),
         unit: form.unit,
         status: form.status,
@@ -91,24 +112,44 @@ export function SamplesPage() {
         deliveredAt: form.deliveredAt || undefined,
         trackingNo: form.trackingNo || undefined,
         notes: form.notes || undefined,
-      });
-      toast.success("样品记录已创建");
-      setForm({
-        customerId: "",
-        opportunityId: "",
-        productId: "",
-        quantity: "1",
-        unit: "pcs",
-        status: "pending",
-        sentAt: "",
-        deliveredAt: "",
-        trackingNo: "",
-        notes: "",
-      });
-      fetchData();
+      };
+      if (editingId) {
+        await updateSample(editingId, data);
+        toast.success("样品记录已更新");
+      } else {
+        await createSample(data);
+        toast.success("样品记录已创建");
+      }
+      resetForm();
+      await fetchData();
     } catch {
       // Error handled by API client
     }
+  };
+
+  const handleEdit = (sample: Sample) => {
+    const product = products.find((candidate) =>
+      candidate.productId === sample.productId || String(candidate.id) === sample.productId
+    );
+    const opportunity = opportunities.find((candidate) =>
+      candidate.opportunityId === sample.opportunityId || String(candidate.id) === sample.opportunityId
+    );
+    setEditingId(sample.id);
+    setForm({
+      customerId: String(sample.customerId),
+      opportunityId: opportunity ? String(opportunity.id) : "",
+      productId: product ? String(product.id) : "legacy",
+      quantity: String(sample.quantity ?? 1),
+      unit: sample.unit || "pcs",
+      status: sample.status,
+      sentAt: sample.sentAt?.split("T")[0] || "",
+      deliveredAt: sample.deliveredAt?.split("T")[0] || "",
+      trackingNo: sample.trackingNo || "",
+      notes: sample.notes || "",
+      originalProductId: sample.productId || "",
+      originalProductName: sample.productName || "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleDelete = async (id: string) => {
@@ -142,7 +183,7 @@ export function SamplesPage() {
       {/* Form */}
       {canManage && <Card>
         <CardHeader>
-          <CardTitle>登记样品寄送</CardTitle>
+          <CardTitle>{editingId ? "编辑样品记录" : "登记样品寄送"}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -198,6 +239,9 @@ export function SamplesPage() {
                     {products.find((product) => String(product.id) === form.productId)?.name || <SelectValue placeholder="选择产品" />}
                   </SelectTrigger>
                   <SelectContent>
+                    {form.productId === "legacy" && (
+                      <SelectItem value="legacy">{form.originalProductName || "历史产品"}</SelectItem>
+                    )}
                     {products.map((product) => (
                       <SelectItem key={product.id} value={String(product.id)}>
                         {product.name} {product.code ? `(${product.code})` : ""}
@@ -275,10 +319,13 @@ export function SamplesPage() {
                 />
               </div>
             </div>
-            <Button type="submit">
-              <Plus className="mr-2 h-4 w-4" />
-              登记样品寄送
-            </Button>
+            <div className="flex gap-2">
+              <Button type="submit">
+                <Plus className="mr-2 h-4 w-4" />
+                {editingId ? "保存样品记录" : "登记样品寄送"}
+              </Button>
+              {editingId && <Button type="button" variant="outline" onClick={resetForm}>取消编辑</Button>}
+            </div>
           </form>
         </CardContent>
       </Card>}
@@ -356,15 +403,14 @@ export function SamplesPage() {
                   <TableCell>{sample.sentAt ? new Date(sample.sentAt).toLocaleDateString() : "-"}</TableCell>
                   <TableCell className="font-mono text-sm">{sample.trackingNo || "-"}</TableCell>
                   {canManage && <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      type="button"
-                      className="text-destructive"
-                      onClick={() => handleDelete(sample.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" type="button" title="编辑样品记录" onClick={() => handleEdit(sample)}>
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="sm" type="button" className="text-destructive" title="删除样品记录" onClick={() => handleDelete(sample.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>}
                 </TableRow>
               ))

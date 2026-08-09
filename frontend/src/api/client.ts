@@ -9,6 +9,8 @@ import type {
   Activity,
   Todo,
   Opportunity,
+  CreateOpportunityInput,
+  UpdateOpportunityInput,
   Product,
   Quote,
   CreateQuoteInput,
@@ -50,6 +52,8 @@ export type {
   Activity,
   Todo,
   Opportunity,
+  CreateOpportunityInput,
+  UpdateOpportunityInput,
   Product,
   Quote,
   CreateQuoteInput,
@@ -341,11 +345,11 @@ export async function getOpportunities(): Promise<Opportunity[]> {
   return result.opportunities || [];
 }
 
-export async function createCustomerOpportunity(customerId: string, data: Partial<Opportunity>): Promise<Opportunity> {
+export async function createCustomerOpportunity(customerId: string, data: CreateOpportunityInput): Promise<Opportunity> {
   return api<Opportunity>(`/api/customers/${encodeURIComponent(customerId)}/opportunities`, { method: "POST", body: data });
 }
 
-export async function updateOpportunity(id: string, data: Partial<Opportunity>): Promise<Opportunity> {
+export async function updateOpportunity(id: string, data: UpdateOpportunityInput): Promise<Opportunity> {
   return api<Opportunity>(`/api/opportunities/${encodeURIComponent(id)}`, { method: "PUT", body: data });
 }
 

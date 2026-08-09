@@ -210,6 +210,19 @@ export interface Sample {
   updatedAt: string;
 }
 
+export interface CreateOpportunityInput {
+  name: string;
+  amount?: number;
+  stage?: Opportunity["stage"];
+  expectedCloseDate?: string;
+  description?: string;
+}
+
+export interface UpdateOpportunityInput extends Partial<CreateOpportunityInput> {
+  customerId?: number;
+  probability?: number;
+}
+
 export interface QuoteItemInput {
   productId?: string;
   productName: string;
@@ -223,7 +236,7 @@ export interface QuoteItemInput {
 
 export interface CreateQuoteInput {
   customerId: number;
-  opportunityId?: string;
+  opportunityId?: string | null;
   quoteNo?: string;
   status?: Quote["status"];
   currency?: string;
@@ -239,7 +252,7 @@ export type UpdateQuoteInput = Partial<CreateQuoteInput>;
 
 export interface CreateSampleInput {
   customerId: number;
-  opportunityId?: string;
+  opportunityId?: string | null;
   productId?: string;
   productName: string;
   quantity?: number;
