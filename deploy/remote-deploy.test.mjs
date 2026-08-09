@@ -4,6 +4,8 @@ import test from 'node:test';
 
 const script = await readFile(new URL('./remote-deploy.sh', import.meta.url), 'utf8');
 const nginx = await readFile(new URL('./nginx-huayuan-crm.conf', import.meta.url), 'utf8');
+const ecosystem = await readFile(new URL('../ecosystem.config.js', import.meta.url), 'utf8');
+const healthCheck = await readFile(new URL('./health-check.mjs', import.meta.url), 'utf8');
 
 const position = (fragment) => {
   const index = script.indexOf(fragment);
@@ -45,7 +47,7 @@ test('restores data and previous releases from the error trap', () => {
 
 test('only activates the new frontend and backend after the new backend passes health check', () => {
   const migrate = position('node dist/scripts/migrate.js');
-  const health = position('http://127.0.0.1:$PORT/api/auth/status');
+  const health = position('http://127.0.0.1:$PORT/api/health/$RELEASE_ID');
   const appSwitch = script.lastIndexOf('switch_symlink "$RELEASE_DIR" "$CURRENT_LINK"');
   const webSwitch = script.lastIndexOf('sudo mv -T "$WEB_RELEASE_DIR" "$WEB_ROOT/html"');
   assert.ok(migrate < health && health < appSwitch && health < webSwitch);
@@ -64,4 +66,14 @@ test('keeps customer attachments outside replaceable release directories', () =>
   position('write_env_value CUSTOMER_ATTACHMENT_DIR "$CUSTOMER_ATTACHMENT_DIR"');
   position('mkdir -p "$CUSTOMER_ATTACHMENT_DIR"');
   assert.equal(script.includes('CUSTOMER_ATTACHMENT_DIR="$RELEASE_DIR'), false);
+});
+
+test('recreates PM2 from an absolute release path and verifies the exact backend release', () => {
+  position('write_env_value RELEASE_ID "$RELEASE_ID"');
+  position('pm2 delete huayuan-crm-backend');
+  position('pm2 start "$directory/ecosystem.config.js"');
+  assert.match(ecosystem, /cwd: path\.join\(releaseRoot, 'backend'\)/);
+  assert.equal(ecosystem.includes("cwd: './backend'"), false);
+  assert.match(healthCheck, /EXPECTED_RELEASE_ID/);
+  assert.match(healthCheck, /healthData\.releaseId !== expectedReleaseId/);
 });

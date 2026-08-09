@@ -132,6 +132,7 @@ export function Customer360Dialog({
   const [activeWorkspace, setActiveWorkspace] = useState<Workspace>("overview");
   const [data, setData] = useState<Customer360 | null>(null);
   const [attachments, setAttachments] = useState<CustomerAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -192,14 +193,26 @@ export function Customer360Dialog({
     async (showLoading = false) => {
       if (showLoading) setIsLoading(true);
       try {
-        const [customerData, attachmentData, productData] = await Promise.all([
+        const [customerResult, attachmentResult, productResult] =
+          await Promise.allSettled([
           getCustomer360(customerId),
           getCustomerAttachments(customerId),
           getProducts(),
         ]);
-        setData(customerData);
-        setAttachments(attachmentData);
-        setProducts(productData);
+        if (customerResult.status === "rejected") throw customerResult.reason;
+        setData(customerResult.value);
+        if (attachmentResult.status === "fulfilled") {
+          setAttachments(attachmentResult.value);
+          setAttachmentError("");
+        } else {
+          setAttachments([]);
+          setAttachmentError(
+            attachmentResult.reason instanceof Error
+              ? attachmentResult.reason.message
+              : "附件服务暂时不可用",
+          );
+        }
+        setProducts(productResult.status === "fulfilled" ? productResult.value : []);
         setError("");
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "客户详情加载失败");
@@ -571,6 +584,25 @@ export function Customer360Dialog({
                     title="联系人"
                     description="维护联系人资料；主联系人会同步到客户列表和概览摘要。"
                   >
+                    {attachmentError && (
+                      <div className="flex flex-col justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm sm:flex-row sm:items-center">
+                        <div>
+                          <p className="font-medium text-destructive">
+                            附件服务暂时不可用
+                          </p>
+                          <p className="mt-1 text-muted-foreground">
+                            {attachmentError}。联系人、跟进、待办、商机等其他工作区仍可正常使用。
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void refresh(false)}
+                        >
+                          重试附件服务
+                        </Button>
+                      </div>
+                    )}
                     {canManage && (
                       <form
                         className="grid gap-3 rounded-xl border bg-muted/20 p-4 md:grid-cols-2"

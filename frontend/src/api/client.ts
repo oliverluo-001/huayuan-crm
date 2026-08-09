@@ -404,6 +404,7 @@ export async function getCustomerAttachments(
 ): Promise<CustomerAttachment[]> {
   return api<CustomerAttachment[]>(
     `/api/customers/${encodeURIComponent(customerId)}/attachments`,
+    { silent: true },
   );
 }
 

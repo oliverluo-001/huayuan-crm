@@ -1,8 +1,12 @@
+const path = require('node:path');
+
+const releaseRoot = __dirname;
+
 module.exports = {
   apps: [
     {
       name: 'huayuan-crm-backend',
-      cwd: './backend',
+      cwd: path.join(releaseRoot, 'backend'),
       script: 'dist/main.js',
       instances: 1,
       exec_mode: 'fork',
@@ -12,8 +16,8 @@ module.exports = {
       },
       // 日志配置
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
-      error_file: './logs/error.log',
-      out_file: './logs/out.log',
+      error_file: path.join(releaseRoot, 'backend', 'logs', 'error.log'),
+      out_file: path.join(releaseRoot, 'backend', 'logs', 'out.log'),
       merge_logs: true,
       // 进程守护
       max_restarts: 10,
@@ -25,7 +29,7 @@ module.exports = {
       kill_timeout: 5000,
       listen_timeout: 3000,
       // 环境变量白名单
-      env_file: './backend/.env',
+      env_file: path.join(releaseRoot, 'backend', '.env'),
     },
   ],
 };

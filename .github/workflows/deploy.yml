@@ -128,3 +128,4 @@ jobs:
         run: node deploy/health-check.mjs
         env:
           HEALTHCHECK_URL: ${{ secrets.PUBLIC_BASE_URL || 'https://crm.huayuanflange.com' }}
+          EXPECTED_RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}

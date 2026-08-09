@@ -18,6 +18,7 @@ import { CustomerAttachmentsModule } from "./modules/attachments";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { TransformInterceptor } from "./common/interceptors/transform.interceptor";
 import { AuditInterceptor } from "./common/interceptors/audit.interceptor";
+import { HealthController } from "./health.controller";
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { AuditInterceptor } from "./common/interceptors/audit.interceptor";
     AuditModule,
     CustomerAttachmentsModule,
   ],
+  controllers: [HealthController],
   providers: [
     // Global exception filter
     {

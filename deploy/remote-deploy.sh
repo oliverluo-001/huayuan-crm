@@ -60,6 +60,7 @@ write_env_value() {
 umask 077
 {
   write_env_value PORT "$PORT"
+  write_env_value RELEASE_ID "$RELEASE_ID"
   write_env_value NODE_ENV production
   write_env_value DB_TYPE mysql
   write_env_value DB_HOST "$DB_HOST"
@@ -149,7 +150,8 @@ start_backend() {
   local directory="$1"
   (
     cd "$directory"
-    pm2 startOrReload ecosystem.config.js --only huayuan-crm-backend --update-env
+    pm2 delete huayuan-crm-backend >/dev/null 2>&1 || true
+    pm2 start "$directory/ecosystem.config.js" --only huayuan-crm-backend --update-env
   )
 }
 
@@ -239,7 +241,7 @@ MIGRATION_STARTED=1
 
 start_backend "$RELEASE_DIR"
 curl --retry 15 --retry-delay 2 --retry-connrefused --fail --silent --show-error \
-  "http://127.0.0.1:$PORT/api/auth/status" >/dev/null
+  "http://127.0.0.1:$PORT/api/health/$RELEASE_ID" >/dev/null
 
 switch_symlink "$RELEASE_DIR" "$CURRENT_LINK"
 APP_SWITCHED=1
