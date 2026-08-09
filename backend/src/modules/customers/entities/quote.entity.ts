@@ -27,7 +27,7 @@ export class Quote {
   @Column({ name: 'customer_id', type: 'int' })
   customerId: number;
 
-  @Column({ name: 'opportunity_id', type: 'varchar', length: 32, default: '' })
+  @Column({ name: 'opportunity_id', type: 'varchar', length: 32, nullable: true })
   opportunityId: string;
 
   @Column({ type: 'enum', enum: ['draft', 'sent', 'accepted', 'rejected', 'expired'], default: 'draft' })
@@ -82,7 +82,7 @@ export class QuoteItem {
   @Column({ name: 'quote_id', type: 'int' })
   quoteId: number;
 
-  @Column({ name: 'product_id', type: 'varchar', length: 32, default: '' })
+  @Column({ name: 'product_id', type: 'varchar', length: 32, nullable: true })
   productId: string;
 
   @Column({ name: 'product_name', type: 'varchar', length: 255 })

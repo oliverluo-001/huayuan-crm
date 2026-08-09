@@ -23,13 +23,13 @@ export class Sample {
   @Column({ name: 'customer_id', type: 'int' })
   customerId: number;
 
-  @Column({ name: 'opportunity_id', type: 'varchar', length: 32, default: '' })
+  @Column({ name: 'opportunity_id', type: 'varchar', length: 32, nullable: true })
   opportunityId: string;
 
   @Column({ name: 'product_name', type: 'varchar', length: 255 })
   productName: string;
 
-  @Column({ name: 'product_id', type: 'varchar', length: 32, default: '' })
+  @Column({ name: 'product_id', type: 'varchar', length: 32, nullable: true })
   productId: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 1, transformer: decimalNumberTransformer })

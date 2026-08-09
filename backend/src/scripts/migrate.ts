@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import * as bcrypt from 'bcrypt';
+import { migrateP03DataIntegrity } from './p03-data-integrity';
 
 const migrationId = '20260730_online_accounts';
 const database = process.env.DB_DATABASE || 'international_trade_crm';
@@ -71,8 +72,8 @@ async function main() {
     await migrateEmailExecution(connection);
     await migrateAuditMetadata(connection);
     await migrateCrmContracts(connection);
+    await migrateP03DataIntegrity(connection, database);
     await migrateOpportunityLifecycle(connection);
-    await migrateCustomerSummaries(connection);
     await connection.beginTransaction();
     try {
       await ensureInitialAdmin(connection);
@@ -120,6 +121,8 @@ async function migrateOpportunityLifecycle(connection: Connection) {
     ) summary ON summary.customer_id = c.id
     SET c.open_opportunity_count = COALESCE(summary.open_count, 0),
         c.open_opportunity_value = COALESCE(summary.open_value, 0)
+    WHERE NOT (c.open_opportunity_count <=> COALESCE(summary.open_count, 0))
+       OR NOT (c.open_opportunity_value <=> COALESCE(summary.open_value, 0))
   `);
 
   await connection.query(`
@@ -144,67 +147,16 @@ async function migrateOpportunityLifecycle(connection: Connection) {
       ELSE c.journey_stage
     END
     WHERE newer_opportunity.id IS NULL
+      AND NOT (c.journey_stage <=> CASE current_opportunity.stage
+        WHEN 'prospecting' THEN 'opportunity'
+        WHEN 'qualification' THEN 'qualified'
+        WHEN 'proposal' THEN 'proposal'
+        WHEN 'negotiation' THEN 'negotiation'
+        WHEN 'won' THEN 'won'
+        WHEN 'lost' THEN 'lost'
+        ELSE c.journey_stage
+      END)
   `);
-
-  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
-}
-
-async function migrateCustomerSummaries(connection: Connection) {
-  const id = '20260809_customer_summary_refresh';
-  if (!(await tableExists(connection, 'customers'))) return;
-
-  if (await tableExists(connection, 'activities')) {
-    await connection.query(`
-      UPDATE customers c
-      LEFT JOIN (
-        SELECT activity.customer_id, activity.created_at, activity.type
-        FROM activities activity
-        LEFT JOIN activities newer_activity
-          ON newer_activity.customer_id = activity.customer_id
-         AND (
-           newer_activity.created_at > activity.created_at
-           OR (newer_activity.created_at = activity.created_at AND newer_activity.id > activity.id)
-         )
-        WHERE newer_activity.id IS NULL
-      ) latest_activity ON latest_activity.customer_id = c.id
-      SET c.last_activity_at = latest_activity.created_at,
-          c.last_activity_type = COALESCE(latest_activity.type, '')
-    `);
-  }
-
-  if (await tableExists(connection, 'todos')) {
-    await connection.query(`
-      UPDATE customers c
-      SET c.next_todo_at = (
-            SELECT todo.due_at
-            FROM todos todo
-            WHERE todo.customer_id = c.id AND todo.status = 'open'
-            ORDER BY todo.due_at IS NULL, todo.due_at, todo.created_at, todo.id
-            LIMIT 1
-          ),
-          c.next_todo_title = COALESCE((
-            SELECT todo.title
-            FROM todos todo
-            WHERE todo.customer_id = c.id AND todo.status = 'open'
-            ORDER BY todo.due_at IS NULL, todo.due_at, todo.created_at, todo.id
-            LIMIT 1
-          ), ''),
-          c.health = CASE
-            WHEN EXISTS (
-              SELECT 1 FROM todos overdue
-              WHERE overdue.customer_id = c.id
-                AND overdue.status = 'open'
-                AND overdue.due_at IS NOT NULL
-                AND overdue.due_at < CURRENT_TIMESTAMP
-            ) THEN 'critical'
-            WHEN EXISTS (
-              SELECT 1 FROM todos pending
-              WHERE pending.customer_id = c.id AND pending.status = 'open'
-            ) THEN 'warning'
-            ELSE 'good'
-          END
-    `);
-  }
 
   await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', [id]);
 }
