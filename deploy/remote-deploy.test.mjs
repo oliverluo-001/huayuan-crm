@@ -22,6 +22,10 @@ test('backs up the stopped database before any migration starts', () => {
   assert.ok(dump < verify && verify < migrationFlag && migrationFlag < migrate, '迁移只能在可恢复备份验证通过后执行');
 });
 
+test('keeps the existing JWT-secret fallback for encrypted credentials', () => {
+  position('CREDENTIAL_ENCRYPTION_KEY="${CREDENTIAL_ENCRYPTION_KEY:-$JWT_SECRET}"');
+});
+
 test('restores data and previous releases from the error trap', () => {
   const trap = position('trap rollback ERR');
   const restore = position('gzip -dc "$BACKUP_FILE" | MYSQL_PWD="$DB_PASSWORD" mysql');

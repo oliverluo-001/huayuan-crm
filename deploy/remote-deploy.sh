@@ -9,7 +9,6 @@ set -Eeuo pipefail
 : "${DB_PASSWORD:?DB_PASSWORD is required}"
 : "${DB_DATABASE:?DB_DATABASE is required}"
 : "${JWT_SECRET:?JWT_SECRET is required}"
-: "${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY is required}"
 
 case "$RELEASE_ID" in
   *[!A-Za-z0-9._-]*|'') echo "Invalid RELEASE_ID" >&2; exit 1 ;;
@@ -22,6 +21,7 @@ BACKUP_DIR="${BACKUP_DIR:-/var/backups/huayuan-crm}"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://crm.huayuanflange.com}"
 CORS_ORIGINS="${CORS_ORIGINS:-$PUBLIC_BASE_URL}"
 JWT_EXPIRES_IN="${JWT_EXPIRES_IN:-7d}"
+CREDENTIAL_ENCRYPTION_KEY="${CREDENTIAL_ENCRYPTION_KEY:-$JWT_SECRET}"
 DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}"
 
 RELEASES_DIR="$APP_ROOT/releases"
