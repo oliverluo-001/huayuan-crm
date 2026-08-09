@@ -26,6 +26,11 @@ test('keeps the existing JWT-secret fallback for encrypted credentials', () => {
   position('CREDENTIAL_ENCRYPTION_KEY="${CREDENTIAL_ENCRYPTION_KEY:-$JWT_SECRET}"');
 });
 
+test('separates web releases from application artifact releases', () => {
+  position('WEB_RELEASE_DIR="$WEB_ROOT/web-releases/$RELEASE_ID"');
+  assert.equal(script.includes('WEB_RELEASE_DIR="$WEB_ROOT/releases/$RELEASE_ID"'), false);
+});
+
 test('restores data and previous releases from the error trap', () => {
   const trap = position('trap rollback ERR');
   const restore = position('gzip -dc "$BACKUP_FILE" | MYSQL_PWD="$DB_PASSWORD" mysql');

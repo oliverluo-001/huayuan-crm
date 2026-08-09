@@ -28,7 +28,7 @@ RELEASES_DIR="$APP_ROOT/releases"
 RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
 CURRENT_LINK="$APP_ROOT/current"
 WEB_ROOT="${WEB_ROOT:-/var/www/huayuan-crm}"
-WEB_RELEASE_DIR="$WEB_ROOT/releases/$RELEASE_ID"
+WEB_RELEASE_DIR="$WEB_ROOT/web-releases/$RELEASE_ID"
 WEB_CURRENT_LINK="$WEB_ROOT/current"
 NGINX_CONF="${NGINX_CONF:-/etc/nginx/conf.d/huayuan-crm.conf}"
 BACKUP_FILE="$BACKUP_DIR/pre-deploy-$RELEASE_ID.sql.gz"
@@ -92,7 +92,7 @@ mkdir -p "$RELEASE_DIR/backend/logs"
 cd "$RELEASE_DIR"
 npm ci --omit=dev --workspace=backend --include-workspace-root=false --no-audit --no-fund
 
-sudo mkdir -p "$WEB_ROOT/releases"
+sudo mkdir -p "$WEB_ROOT/web-releases"
 if sudo test -e "$WEB_RELEASE_DIR"; then
   echo "Web release already exists: $WEB_RELEASE_DIR" >&2
   exit 1
