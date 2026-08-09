@@ -21,6 +21,7 @@ import type {
   UpdateSampleInput,
   EmailTemplate,
   EmailTask,
+  CreateEmailTaskInput,
   SendLog,
   B2BLeadTask,
   B2BLead,
@@ -65,6 +66,7 @@ export type {
   UpdateSampleInput,
   EmailTemplate,
   EmailTask,
+  CreateEmailTaskInput,
   EmailRecipient,
   SendLog,
   B2BLeadTask,
@@ -650,7 +652,7 @@ export async function getEmailTasks(): Promise<EmailTask[]> {
 }
 
 export async function createEmailTask(
-  data: Partial<EmailTask>,
+  data: CreateEmailTaskInput,
 ): Promise<EmailTask> {
   return api<EmailTask>("/api/email-tasks", { method: "POST", body: data });
 }

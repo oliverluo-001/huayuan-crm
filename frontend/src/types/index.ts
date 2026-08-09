@@ -339,6 +339,19 @@ export interface EmailTask {
   updatedAt: string;
 }
 
+export interface CreateEmailTaskInput {
+  name: string;
+  taskMode: "once" | "scheduled";
+  templateId: string;
+  customerIds: string[];
+  batchSize?: number;
+  region?: string;
+  business?: string;
+  intervalMinutes?: number;
+  totalRuns?: number;
+  startAt?: string;
+}
+
 export interface SendLog {
   id: string;
   email: string;

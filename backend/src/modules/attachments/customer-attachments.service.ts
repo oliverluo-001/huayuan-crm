@@ -42,6 +42,19 @@ interface UploadedAttachment {
   buffer?: Buffer;
 }
 
+export function normalizeUploadedFilename(value: string) {
+  const original = path.basename(String(value || ""));
+  if (!original || Array.from(original).some((character) => character.charCodeAt(0) > 255)) {
+    return original;
+  }
+
+  const decoded = Buffer.from(original, "latin1").toString("utf8");
+  if (decoded.includes("\uFFFD")) return original;
+  const roundTrip = Buffer.from(decoded, "utf8").toString("latin1");
+  const containsExtendedBytes = /[\u0080-\u00ff]/.test(original);
+  return containsExtendedBytes && roundTrip === original ? decoded : original;
+}
+
 @Injectable()
 export class CustomerAttachmentsService {
   private readonly storageRoot: string;
@@ -60,10 +73,14 @@ export class CustomerAttachmentsService {
 
   async list(customerId: number, ownerId?: string) {
     await this.customersService.assertCustomerOwner(customerId, ownerId);
-    return this.attachmentRepository.find({
+    const attachments = await this.attachmentRepository.find({
       where: { customerId },
       order: { createdAt: "DESC" },
     });
+    return attachments.map((attachment) => ({
+      ...attachment,
+      originalName: normalizeUploadedFilename(attachment.originalName),
+    }));
   }
 
   async create(
@@ -77,7 +94,8 @@ export class CustomerAttachmentsService {
     this.validateFile(file);
 
     const attachmentId = randomUUID().replace(/-/g, "").slice(0, 24);
-    const extension = path.extname(file!.originalname).toLowerCase();
+    const originalName = normalizeUploadedFilename(file!.originalname).slice(0, 255);
+    const extension = path.extname(originalName).toLowerCase();
     const storedName = `${attachmentId}${extension}`;
     const target = this.resolveStoredPath(storedName);
     await fs.mkdir(this.storageRoot, { recursive: true });
@@ -88,7 +106,7 @@ export class CustomerAttachmentsService {
         this.attachmentRepository.create({
           attachmentId,
           customerId,
-          originalName: path.basename(file!.originalname).slice(0, 255),
+          originalName,
           storedName,
           mimeType: (file!.mimetype || "application/octet-stream").slice(
             0,
@@ -108,6 +126,7 @@ export class CustomerAttachmentsService {
 
   async getDownload(id: number, ownerId?: string) {
     const attachment = await this.findOwned(id, ownerId);
+    attachment.originalName = normalizeUploadedFilename(attachment.originalName);
     const filePath = this.resolveStoredPath(attachment.storedName);
     try {
       await fs.access(filePath);
@@ -147,7 +166,7 @@ export class CustomerAttachmentsService {
     if (file.size <= 0 || file.size > MAX_ATTACHMENT_SIZE) {
       throw new BadRequestException("附件大小必须在 20MB 以内");
     }
-    const extension = path.extname(file.originalname).toLowerCase();
+    const extension = path.extname(normalizeUploadedFilename(file.originalname)).toLowerCase();
     if (!ALLOWED_EXTENSIONS.has(extension)) {
       throw new BadRequestException(
         "不支持该文件格式，请上传询价单、图纸、表格、文档或压缩包",

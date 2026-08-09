@@ -3,7 +3,10 @@ import { ConfigService } from "@nestjs/config";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { CustomerAttachmentsService } from "./customer-attachments.service";
+import {
+  CustomerAttachmentsService,
+  normalizeUploadedFilename,
+} from "./customer-attachments.service";
 
 describe("CustomerAttachmentsService", () => {
   let storageRoot: string;
@@ -141,5 +144,37 @@ describe("CustomerAttachmentsService", () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(records).toHaveLength(0);
+  });
+
+  it("restores UTF-8 Chinese names received through multipart Latin-1", async () => {
+    const expectedName = "技术图纸_法兰尺寸.xlsx";
+    const multipartName = Buffer.from(expectedName, "utf8").toString("latin1");
+    expect(normalizeUploadedFilename(multipartName)).toBe(expectedName);
+    expect(normalizeUploadedFilename(expectedName)).toBe(expectedName);
+    expect(normalizeUploadedFilename("café.pdf")).toBe("café.pdf");
+
+    const attachment = await service.create(
+      1,
+      {
+        originalname: multipartName,
+        mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        size: 8,
+        buffer: Buffer.from("xlsxdata"),
+      },
+      { category: "drawing" },
+      "7",
+      "7",
+    );
+    expect(attachment.originalName).toBe(expectedName);
+
+    records[0].originalName = multipartName;
+    await expect(service.list(1, "7")).resolves.toEqual([
+      expect.objectContaining({ originalName: expectedName }),
+    ]);
+    await expect(service.getDownload(attachment.id, "7")).resolves.toEqual(
+      expect.objectContaining({
+        attachment: expect.objectContaining({ originalName: expectedName }),
+      }),
+    );
   });
 });

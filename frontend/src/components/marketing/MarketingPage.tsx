@@ -32,6 +32,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
 import { CUSTOMER_JOURNEY_STAGES } from "@/contracts/crm-stages";
+import { buildCreateEmailTaskInput } from "@/contracts/email-task";
 import {
   CUSTOMER_TIER_OPTIONS,
   EMAIL_SEND_STATUS_LABELS,
@@ -360,18 +361,16 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
     taskMode: "once" as "once" | "scheduled",
     templateId: "",
     batchSize: "0",
-    region: "",
-    business: "",
     intervalMinutes: "1440",
     totalRuns: "1",
     startAt: "",
-    successfulSendCount: "0",
   });
   const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
   const [recipientFilters, setRecipientFilters] = useState({
@@ -405,44 +404,39 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.name.trim()) {
+      toast.error("请输入任务名称");
+      return;
+    }
     if (!form.templateId) {
-      alert("请选择一个邮件模板");
+      toast.error("请选择一个邮件模板");
       return;
     }
     if (selectedCustomerIds.size === 0) {
-      alert("请先选择收件客户");
+      toast.error("请先选择收件客户");
       return;
     }
 
-    const isScheduled = form.taskMode === "scheduled";
-    await createEmailTask({
-      name: form.name,
-      taskMode: form.taskMode,
-      customerIds: [...selectedCustomerIds],
-      templateId: form.templateId,
-      region: isScheduled ? form.region : "",
-      business: isScheduled ? form.business : "",
-      successfulSendCount: isScheduled ? parseInt(form.successfulSendCount) || 0 : 0,
-      intervalMinutes: isScheduled ? parseInt(form.intervalMinutes) : undefined,
-      totalRuns: isScheduled ? parseInt(form.totalRuns) : undefined,
-      startAt: isScheduled ? form.startAt : undefined,
-      batchSize: parseInt(form.batchSize),
-    });
-
-    setForm({
-      name: "",
-      taskMode: "once",
-      templateId: "",
-      batchSize: "0",
-      region: "",
-      business: "",
-      intervalMinutes: "1440",
-      totalRuns: "1",
-      startAt: "",
-      successfulSendCount: "0",
-    });
-    setSelectedCustomerIds(new Set());
-    fetchData();
+    setIsCreating(true);
+    try {
+      await createEmailTask(buildCreateEmailTaskInput(form, [...selectedCustomerIds]));
+      toast.success("发信任务已创建");
+      setForm({
+        name: "",
+        taskMode: "once",
+        templateId: "",
+        batchSize: "0",
+        intervalMinutes: "1440",
+        totalRuns: "1",
+        startAt: "",
+      });
+      setSelectedCustomerIds(new Set());
+      await fetchData();
+    } catch {
+      // API 客户端已经展示具体错误，保留表单和已选客户以便重试。
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const handleRun = async (id: string) => {
@@ -679,9 +673,9 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
               </div>
             </div>
 
-            <Button type="submit">
+            <Button type="submit" disabled={isCreating}>
               <Plus className="mr-2 h-4 w-4" />
-              创建发信任务
+              {isCreating ? "正在创建..." : "创建发信任务"}
             </Button>
           </form>
         </CardContent>
