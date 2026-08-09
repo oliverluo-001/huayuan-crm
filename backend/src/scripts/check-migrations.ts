@@ -55,6 +55,7 @@ async function seedLegacyFixture(connection: Connection) {
       DROP COLUMN contact_status,
       DROP COLUMN marketing_allowed
   `);
+  await connection.query("ALTER TABLE email_templates DROP COLUMN owner_id");
   await connection.query(
     "ALTER TABLE products ADD COLUMN base_price VARCHAR(64) NULL",
   );
@@ -172,6 +173,13 @@ async function verifyMigratedData(connection: Connection) {
     [database],
   );
   assert.equal(Number(masterColumns[0].count), 14, "P1.2 客户主数据字段迁移不完整");
+
+  const [ownershipColumns] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'email_templates' AND COLUMN_NAME = 'owner_id'`,
+    [database],
+  );
+  assert.equal(Number(ownershipColumns[0].count), 1, "邮件模板归属字段迁移不完整");
 
   const [contacts] = await connection.query<CheckRow[]>(
     "SELECT contact_status, marketing_allowed FROM contacts WHERE contact_id = 'CONTACT-CI-1'",

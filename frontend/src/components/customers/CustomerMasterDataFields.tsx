@@ -33,6 +33,7 @@ export function CustomerMasterDataFields({
   );
 
   const toggleCollaborator = (id: string, checked: boolean) => {
+    if (!canAssignOwner) return;
     const next = checked
       ? [...new Set([...form.collaboratorIds, id])]
       : form.collaboratorIds.filter((item) => item !== id);
@@ -111,12 +112,16 @@ export function CustomerMasterDataFields({
         <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
           {collaborators.length ? collaborators.map((user) => (
             <label key={user.id} className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={form.collaboratorIds.includes(user.id)} onChange={(event) => toggleCollaborator(user.id, event.target.checked)} />
+              <input type="checkbox" disabled={!canAssignOwner} checked={form.collaboratorIds.includes(user.id)} onChange={(event) => toggleCollaborator(user.id, event.target.checked)} />
               <span>{user.displayName}（{user.username}）</span>
             </label>
           )) : <span className="text-sm text-muted-foreground">暂无可选协作者</span>}
         </div>
-        <p className="text-xs text-muted-foreground">协作者可查看并维护该客户，但不能变更负责人。</p>
+        <p className="text-xs text-muted-foreground">
+          {canAssignOwner
+            ? "协作者可查看并维护该客户；负责人和授权范围仅由管理员调整。"
+            : "你只能查看当前授权范围；如需调整负责人或协作者，请联系管理员。"}
+        </p>
       </div>
     </>
   );

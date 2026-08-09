@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { SettingsService } from './settings.service';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import {
   SearchProfileDto,
   AiProfileDto,
@@ -16,6 +17,9 @@ import {
   ImapProfileDto,
   EmailPolicyDto,
 } from './dto';
+
+interface RequestUser { sub: number; role: 'admin' | 'sales' | 'viewer' }
+const smtpOwnerId = (user: RequestUser) => user.role === 'sales' ? String(user.sub) : undefined;
 
 @Controller('settings')
 @Roles('admin')
@@ -72,19 +76,22 @@ export class SettingsController {
   // ==================== SMTP Profile ====================
 
   @Get('smtp-profile')
-  getSmtpProfile() {
-    return this.settingsService.getSmtpProfile();
+  @Roles('admin', 'sales')
+  getSmtpProfile(@CurrentUser() user: RequestUser) {
+    return this.settingsService.getSmtpProfile(smtpOwnerId(user));
   }
 
   @Post('smtp-profile')
-  saveSmtpProfile(@Body() profile: SmtpProfileDto) {
-    return this.settingsService.saveSmtpProfile(profile);
+  @Roles('admin', 'sales')
+  saveSmtpProfile(@Body() profile: SmtpProfileDto, @CurrentUser() user: RequestUser) {
+    return this.settingsService.saveSmtpProfile(profile, smtpOwnerId(user));
   }
 
   @Post('smtp-profile/test')
+  @Roles('admin', 'sales')
   @HttpCode(200)
-  testSmtpProfile() {
-    return this.settingsService.testSmtpProfile();
+  testSmtpProfile(@CurrentUser() user: RequestUser) {
+    return this.settingsService.testSmtpProfile(smtpOwnerId(user));
   }
 
   // ==================== IMAP Profile ====================

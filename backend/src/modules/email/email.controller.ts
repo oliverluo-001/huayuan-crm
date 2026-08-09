@@ -27,32 +27,32 @@ export class TemplatesController {
   constructor(private readonly emailService: EmailService) {}
 
   @Get()
-  async findAll() {
-    const templates = await this.emailService.findAllTemplates();
+  async findAll(@CurrentUser() user: RequestUser) {
+    const templates = await this.emailService.findAllTemplates(ownerScope(user));
     return { templates };
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.emailService.findOneTemplate(+id);
+  findOne(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.emailService.findOneTemplate(+id, ownerScope(user));
   }
 
   @Post()
   @Roles('admin', 'sales')
-  create(@Body() createDto: CreateTemplateDto) {
-    return this.emailService.createTemplate(createDto);
+  create(@Body() createDto: CreateTemplateDto, @CurrentUser() user: RequestUser) {
+    return this.emailService.createTemplate(createDto, ownerScope(user) || '');
   }
 
   @Put(':id')
   @Roles('admin', 'sales')
-  update(@Param('id') id: string, @Body() updateDto: UpdateTemplateDto) {
-    return this.emailService.updateTemplate(+id, updateDto);
+  update(@Param('id') id: string, @Body() updateDto: UpdateTemplateDto, @CurrentUser() user: RequestUser) {
+    return this.emailService.updateTemplate(+id, updateDto, ownerScope(user));
   }
 
   @Delete(':id')
   @Roles('admin', 'sales')
-  remove(@Param('id') id: string) {
-    return this.emailService.removeTemplate(+id);
+  remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.emailService.removeTemplate(+id, ownerScope(user));
   }
 }
 

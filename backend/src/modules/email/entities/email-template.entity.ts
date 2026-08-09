@@ -29,6 +29,9 @@ export class EmailTemplate {
   @Column({ type: 'json', nullable: true })
   images: Array<{ id: string; name?: string; dataUrl: string }>;
 
+  @Column({ name: 'owner_id', type: 'varchar', length: 32, default: '' })
+  ownerId: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

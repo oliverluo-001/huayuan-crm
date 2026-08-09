@@ -64,6 +64,7 @@ export class CustomersController {
     return this.customersService.create({
       ...createCustomerDto,
       ownerId: user.role === 'sales' ? String(user.sub) : createCustomerDto.ownerId,
+      collaboratorIds: user.role === 'sales' ? [] : createCustomerDto.collaboratorIds,
     });
   }
 
@@ -72,7 +73,10 @@ export class CustomersController {
   async update(@Param('id') id: string, @Body() updateCustomerDto: UpdateCustomerDto, @CurrentUser() user: RequestUser) {
     await this.assertSalesOwnership(+id, user);
     const update = { ...updateCustomerDto };
-    if (user.role === 'sales') delete update.ownerId;
+    if (user.role === 'sales') {
+      delete update.ownerId;
+      delete update.collaboratorIds;
+    }
     return this.customersService.update(+id, update);
   }
 

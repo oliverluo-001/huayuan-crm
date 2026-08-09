@@ -35,7 +35,10 @@ export class SettingsService {
     const settings = await this.settingRepository.find();
     const result: Record<string, any> = {};
     for (const setting of settings) {
-      if (!['search_profiles', 'ai_profile', 'smtp_profile', 'imap_profile', 'unsubscribe_secret'].includes(setting.keyName)) {
+      if (
+        !['search_profiles', 'ai_profile', 'smtp_profile', 'imap_profile', 'unsubscribe_secret'].includes(setting.keyName) &&
+        !setting.keyName.startsWith('smtp_profile_user_')
+      ) {
         result[setting.keyName] = setting.keyValue;
       }
     }
@@ -203,8 +206,8 @@ export class SettingsService {
     return { ok: true, message: '密钥已安全保存；真实模型测试将在获客引擎恢复阶段启用' };
   }
 
-  async testSmtpProfile() {
-    const profile = await this.getSmtpCredentials();
+  async testSmtpProfile(userId?: string) {
+    const profile = await this.getSmtpCredentials(userId);
     this.assertSmtpProfile(profile);
     const transport = createTransport({
       host: profile.smtpHost,
@@ -227,10 +230,11 @@ export class SettingsService {
 
   // ==================== SMTP Profile ====================
 
-  async getSmtpProfile() {
-    const profile = await this.findRaw('smtp_profile');
+  async getSmtpProfile(userId?: string) {
+    const keyName = this.smtpProfileKey(userId);
+    const profile = await this.findRaw(keyName);
     if (!profile) return null;
-    const migrated = await this.migrateLegacySecret('smtp_profile', profile, 'pass');
+    const migrated = await this.migrateLegacySecret(keyName, profile, 'pass');
     const { pass, passEncrypted, ...safe } = migrated;
     return {
       ...safe,
@@ -239,10 +243,11 @@ export class SettingsService {
     };
   }
 
-  async getSmtpCredentials(): Promise<StoredProfile> {
-    const profile: StoredProfile | null = await this.findRaw('smtp_profile');
+  async getSmtpCredentials(userId?: string): Promise<StoredProfile> {
+    const keyName = this.smtpProfileKey(userId);
+    const profile: StoredProfile | null = await this.findRaw(keyName);
     if (!profile) throw new BadRequestException('请先在设置中配置发件邮箱');
-    const migrated = await this.migrateLegacySecret('smtp_profile', profile, 'pass');
+    const migrated = await this.migrateLegacySecret(keyName, profile, 'pass');
     return {
       ...migrated,
       pass: this.decryptStoredSecret(migrated.passEncrypted, migrated.pass),
@@ -250,8 +255,9 @@ export class SettingsService {
     };
   }
 
-  async saveSmtpProfile(profile: SmtpProfileDto) {
-    const existing = (await this.findRaw('smtp_profile')) || {};
+  async saveSmtpProfile(profile: SmtpProfileDto, userId?: string) {
+    const keyName = this.smtpProfileKey(userId);
+    const existing = (await this.findRaw(keyName)) || {};
     const incomingSecret = this.usableSecret(profile.pass);
     const stored: StoredProfile = {
       ...existing,
@@ -265,8 +271,12 @@ export class SettingsService {
     stored.passEncrypted = incomingSecret
       ? this.crypto.encrypt(incomingSecret)
       : existing.passEncrypted || (existing.pass ? this.crypto.encrypt(existing.pass) : undefined);
-    await this.upsert('smtp_profile', stored);
-    return this.getSmtpProfile();
+    await this.upsert(keyName, stored);
+    return this.getSmtpProfile(userId);
+  }
+
+  private smtpProfileKey(userId?: string) {
+    return userId ? `smtp_profile_user_${userId}` : 'smtp_profile';
   }
 
   // ==================== IMAP Profile ====================

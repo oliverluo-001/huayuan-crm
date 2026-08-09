@@ -75,31 +75,45 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   // ==================== Templates ====================
 
-  async findAllTemplates() {
-    return this.templateRepository.find({ order: { createdAt: 'DESC' } });
+  async findAllTemplates(ownerId?: string) {
+    return this.templateRepository.find({
+      where: ownerId ? { ownerId: In(['', ownerId]) } : {},
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  async findOneTemplate(id: number) {
+  async findOneTemplate(id: number, ownerId?: string) {
     const template = await this.templateRepository.findOne({ where: { id } });
     if (!template) throw new NotFoundException('模板不存在');
+    if (ownerId && !['', ownerId].includes(template.ownerId || '')) {
+      throw new NotFoundException('邮件模板不存在');
+    }
     return template;
   }
 
-  async createTemplate(createDto: CreateTemplateDto) {
+  async createTemplate(createDto: CreateTemplateDto, ownerId = '') {
     const template = this.templateRepository.create({
       ...createDto,
+      ownerId,
       templateId: this.generateId('tmpl'),
     });
     return this.templateRepository.save(template);
   }
 
-  async updateTemplate(id: number, updateDto: UpdateTemplateDto) {
-    const template = await this.findOneTemplate(id);
+  async updateTemplate(id: number, updateDto: UpdateTemplateDto, ownerId?: string) {
+    const template = await this.findOneTemplate(id, ownerId);
+    if (ownerId && template.ownerId !== ownerId) {
+      throw new NotFoundException('邮件模板不存在');
+    }
     Object.assign(template, updateDto);
     return this.templateRepository.save(template);
   }
 
-  async removeTemplate(id: number) {
+  async removeTemplate(id: number, ownerId?: string) {
+    if (ownerId) {
+      const template = await this.findOneTemplate(id, ownerId);
+      if (template.ownerId !== ownerId) throw new NotFoundException('邮件模板不存在');
+    }
     const result = await this.templateRepository.delete(id);
     if (result.affected === 0) throw new NotFoundException('模板不存在');
     return { deleted: true };
@@ -136,7 +150,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     if (customerIds.length === 0) throw new BadRequestException('请至少选择一个收件客户');
     if (!createDto.templateId) throw new BadRequestException('请选择邮件模板');
 
-    const template = await this.findTemplateByIdentifier(createDto.templateId);
+    const template = await this.findTemplateByIdentifier(createDto.templateId, ownerId || undefined);
     const startAt = createDto.startAt ? new Date(createDto.startAt) : null;
     if (startAt && Number.isNaN(startAt.getTime())) throw new BadRequestException('指定开始时间无效');
 
@@ -308,8 +322,8 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       }
 
       const [template, smtp, policy] = await Promise.all([
-        this.findTemplateByIdentifier(task.templateId),
-        this.settingsService.getSmtpCredentials(),
+        this.findTemplateByIdentifier(task.templateId, task.ownerId || undefined),
+        this.settingsService.getSmtpCredentials(task.ownerId || undefined),
         this.settingsService.getEmailPolicy(),
       ]);
       const transporter = this.createSmtpTransport(smtp);
@@ -342,6 +356,19 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         if (successfulThisRun >= targetSuccess) break;
         const latest = await this.taskRepository.findOne({ where: { id: taskId } });
         if (!latest || latest.status === 'cancelled') return;
+
+        if (task.ownerId) {
+          if (!recipient.customerId) {
+            await this.skipRecipient(recipient, '收件人未关联授权客户');
+            continue;
+          }
+          try {
+            await this.customersService.assertCustomerOwner(recipient.customerId, task.ownerId);
+          } catch {
+            await this.skipRecipient(recipient, '当前账号已无权访问该客户');
+            continue;
+          }
+        }
 
         if (!isValidEmail(recipient.email)) {
           await this.skipRecipient(recipient, '邮箱格式无效');
@@ -528,6 +555,9 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
             continue;
           }
           const customer = await this.customersService.findOne(contact.customerId);
+          if (task.ownerId) {
+            await this.customersService.assertCustomerOwner(customer.id, task.ownerId);
+          }
           await this.addRecipient(task, {
             recipientKey: `contact:${contact.contactId || contact.id}`,
             customerId: customer.id,
@@ -544,6 +574,9 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         } else {
           const customerId = value.startsWith('customer:') ? value.slice(9) : value;
           const customer = await this.customersService.findByIdentifier(customerId);
+          if (task.ownerId) {
+            await this.customersService.assertCustomerOwner(customer.id, task.ownerId);
+          }
           if (!(await this.customersService.isCustomerEmailMarketingAllowed(customer.id, customer.email))) {
             this.logger.warn(`跳过未允许营销邮件的客户主邮箱 ${customer.customerId || customer.id}`);
             continue;
@@ -753,7 +786,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     return task;
   }
 
-  private async findTemplateByIdentifier(identifier: string) {
+  private async findTemplateByIdentifier(identifier: string, ownerId?: string) {
     const numericId = Number(identifier);
     const template = await this.templateRepository.findOne({
       where: Number.isInteger(numericId) && numericId > 0
@@ -761,6 +794,9 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         : { templateId: identifier },
     });
     if (!template) throw new NotFoundException('邮件模板不存在');
+    if (ownerId && !['', ownerId].includes(template.ownerId || '')) {
+      throw new NotFoundException('邮件模板不存在');
+    }
     return template;
   }
 

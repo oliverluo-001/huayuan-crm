@@ -579,3 +579,45 @@ describe('CustomersService contact summary synchronization', () => {
     expect(customer).toMatchObject({ contact: 'Anna', email: 'anna@example.com', phone: '+1 100' });
   });
 });
+
+describe('CustomersService authorized sales scope', () => {
+  const queryBuilder = () => ({
+    leftJoinAndSelect: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getMany: jest.fn().mockResolvedValue([]),
+  });
+  const todoQb = queryBuilder();
+  const opportunityQb = queryBuilder();
+  const quoteQb = queryBuilder();
+  const sampleQb = queryBuilder();
+  const service = new CustomersService(
+    {} as any,
+    {} as any,
+    {} as any,
+    { createQueryBuilder: jest.fn(() => todoQb) } as any,
+    { createQueryBuilder: jest.fn(() => opportunityQb) } as any,
+    { createQueryBuilder: jest.fn(() => quoteQb) } as any,
+    { createQueryBuilder: jest.fn(() => sampleQb) } as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('includes collaborator access in todo, opportunity, quote and sample lists', async () => {
+    await service.findTodos({ ownerId: '7' });
+    await service.findOpportunities({ ownerId: '7' });
+    await service.findQuotes({ ownerId: '7' });
+    await service.findSamples({ ownerId: '7' });
+
+    for (const qb of [todoQb, opportunityQb, quoteQb, sampleQb]) {
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('customer.collaboratorIds'),
+        { customerAccessUserId: '7' },
+      );
+    }
+  });
+});

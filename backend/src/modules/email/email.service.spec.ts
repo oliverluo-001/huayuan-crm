@@ -1,7 +1,13 @@
 import { EmailService } from './email.service';
 
 describe('EmailService ownership', () => {
-  const templateRepository = { findOne: jest.fn() };
+  const templateRepository = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+    create: jest.fn((value) => value),
+    save: jest.fn(async (value) => value),
+    delete: jest.fn(),
+  };
   const taskRepository = {
     find: jest.fn(),
     findOne: jest.fn(),
@@ -12,7 +18,13 @@ describe('EmailService ownership', () => {
     count: jest.fn(),
     save: jest.fn(async (value) => value),
   };
-  const customersService = { findOne: jest.fn() };
+  const customersService = {
+    findOne: jest.fn(),
+    findByIdentifier: jest.fn(),
+    findContactByIdentifier: jest.fn(),
+    assertCustomerOwner: jest.fn(),
+    isCustomerEmailMarketingAllowed: jest.fn().mockResolvedValue(true),
+  };
   const service = new EmailService(
     templateRepository as any,
     taskRepository as any,
@@ -107,5 +119,39 @@ describe('EmailService ownership', () => {
       expect.objectContaining({ status: 'active' }),
     );
     processTask.mockRestore();
+  });
+
+  it('does not let a salesperson edit a shared system template', async () => {
+    templateRepository.findOne.mockResolvedValue({ id: 1, ownerId: '', name: 'System template' });
+    await expect(service.updateTemplate(1, { name: 'Changed' }, '7'))
+      .rejects.toThrow('邮件模板不存在');
+  });
+
+  it('stores new salesperson templates under the current account', async () => {
+    await expect(service.createTemplate({
+      name: 'My template',
+      subject: 'Hello',
+      body: 'Body',
+    }, '7')).resolves.toEqual(expect.objectContaining({ ownerId: '7' }));
+    expect(templateRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerId: '7' }),
+    );
+  });
+
+  it('rejects manually submitted recipients outside the sales authorization scope', async () => {
+    recipientRepository.count.mockResolvedValue(0);
+    customersService.findByIdentifier.mockResolvedValue({
+      id: 99,
+      customerId: 'CUS-99',
+      email: 'other@test',
+    });
+    customersService.assertCustomerOwner.mockRejectedValue(new Error('not found'));
+
+    await expect((service as any).ensureTaskRecipients({
+      id: 3,
+      ownerId: '7',
+      customerIds: '["customer:CUS-99"]',
+    })).resolves.toBe(0);
+    expect(recipientRepository.save).not.toHaveBeenCalled();
   });
 });

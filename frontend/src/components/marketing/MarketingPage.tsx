@@ -45,7 +45,7 @@ import {
 } from "@/contracts/crm-terminology";
 
 export function MarketingPage() {
-  const { role } = useAuth();
+  const { role, userId } = useAuth();
   const canManage = canManageCrmData(role);
   const [activeTab, setActiveTab] = useState("templates");
 
@@ -58,7 +58,7 @@ export function MarketingPage() {
       </TabsList>
 
       <TabsContent value="templates">
-        <TemplatesTab canManage={canManage} />
+        <TemplatesTab canManage={canManage} role={role} userId={userId || ""} />
       </TabsContent>
 
       <TabsContent value="tasks">
@@ -72,7 +72,7 @@ export function MarketingPage() {
   );
 }
 
-function TemplatesTab({ canManage }: { canManage: boolean }) {
+function TemplatesTab({ canManage, role, userId }: { canManage: boolean; role: string; userId: string }) {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -330,13 +330,16 @@ function TemplatesTab({ canManage }: { canManage: boolean }) {
             ) : (
               templates.map((template) => (
                 <TableRow key={template.id}>
-                  <TableCell className="font-medium">{template.name}</TableCell>
+                  <TableCell className="font-medium">
+                    {template.name}
+                    {!template.ownerId && <Badge variant="outline" className="ml-2">系统共享</Badge>}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{template.subject}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {template.updatedAt ? new Date(template.updatedAt).toLocaleDateString() : "-"}
                   </TableCell>
                   {canManage && <TableCell>
-                    <div className="flex gap-1">
+                    {(role === "admin" || template.ownerId === userId) && <div className="flex gap-1">
                       <Button variant="ghost" size="sm" onClick={() => handleEdit(template)}>
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -348,7 +351,7 @@ function TemplatesTab({ canManage }: { canManage: boolean }) {
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
-                    </div>
+                    </div>}
                   </TableCell>}
                 </TableRow>
               ))

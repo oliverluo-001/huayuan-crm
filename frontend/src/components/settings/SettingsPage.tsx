@@ -232,6 +232,11 @@ export function SettingsPage() {
         type: "success",
         message: "配置已保存，但尚未验证连接。请点击“保存并测试连接”。",
       });
+      setSmtpForm((current) => ({
+        ...current,
+        smtpPass: "",
+        credentialStatus: "saved",
+      }));
       fetchData();
     } catch {
       // Error handled by API client
@@ -586,10 +591,27 @@ export function SettingsPage() {
       fetchUsers();
       fetchAuditLogs();
       fetchTrash();
+    } else if (role === "sales") {
+      void Promise.all([
+        accountRequest,
+        getSmtpProfile().then((smtpProfile) => {
+          if (!smtpProfile) return;
+          setSmtpForm({
+            smtpProvider: smtpProfile.smtpProvider || "custom",
+            smtpHost: smtpProfile.smtpHost || "",
+            smtpPort: smtpProfile.smtpPort?.toString() || "465",
+            smtpSecure: smtpProfile.smtpSecure ?? true,
+            smtpUser: smtpProfile.smtpUser || "",
+            smtpFrom: smtpProfile.smtpFrom || "",
+            smtpPass: "",
+            credentialStatus: smtpProfile.credentialStatus || "not_set",
+          });
+        }),
+      ]).finally(() => setIsLoading(false));
     } else {
       void accountRequest.finally(() => setIsLoading(false));
     }
-  }, [isAdmin, fetchData, fetchEmailPolicy, fetchSuppressions, fetchBackups, fetchAccount, fetchUsers, fetchAuditLogs, fetchTrash]);
+  }, [role, isAdmin, fetchData, fetchEmailPolicy, fetchSuppressions, fetchBackups, fetchAccount, fetchUsers, fetchAuditLogs, fetchTrash]);
 
   return (
     <div className="space-y-8">
@@ -914,11 +936,11 @@ export function SettingsPage() {
           </Card>
 
           {/* SMTP Settings */}
-          <Card hidden={!isAdmin}>
+          <Card hidden={role === "viewer"}>
             <CardHeader>
-              <CardTitle>SMTP 发信配置</CardTitle>
+              <CardTitle>个人邮箱 SMTP 发信配置</CardTitle>
               <CardDescription>
-                配置邮件发送服务。密码会加密保存，页面只显示是否已配置。
+                当前账号独立使用此邮箱发送邮件。授权码会加密保存，其他销售账号无法查看或使用。
               </CardDescription>
             </CardHeader>
             <CardContent>

@@ -710,11 +710,20 @@ export class CustomersService {
   // ==================== Todos ====================
 
   async findTodos(filters: Record<string, any> = {}) {
+    if (filters.ownerId) {
+      const qb = this.todoRepository
+        .createQueryBuilder("todo")
+        .leftJoinAndSelect("todo.customer", "customer")
+        .orderBy("todo.status", "ASC")
+        .addOrderBy("todo.dueAt", "ASC");
+      if (filters.status) qb.andWhere("todo.status = :todoStatus", { todoStatus: filters.status });
+      if (filters.customerId) qb.andWhere("todo.customerId = :todoCustomerId", { todoCustomerId: filters.customerId });
+      this.applyCustomerAccess(qb, filters.ownerId);
+      return qb.getMany();
+    }
     const where: FindOptionsWhere<Todo> = {};
     if (filters.status) where.status = filters.status;
     if (filters.customerId) where.customerId = filters.customerId;
-    if (filters.ownerId)
-      where.customer = { ownerId: filters.ownerId } as Customer;
     return this.todoRepository.find({
       where,
       order: { status: "ASC", dueAt: "ASC" },
@@ -789,10 +798,17 @@ export class CustomersService {
   // ==================== Opportunities ====================
 
   async findOpportunities(filters: Record<string, any> = {}) {
+    if (filters.ownerId) {
+      const qb = this.opportunityRepository
+        .createQueryBuilder("opportunity")
+        .leftJoinAndSelect("opportunity.customer", "customer")
+        .orderBy("opportunity.updatedAt", "DESC");
+      if (filters.customerId) qb.andWhere("opportunity.customerId = :opportunityCustomerId", { opportunityCustomerId: filters.customerId });
+      this.applyCustomerAccess(qb, filters.ownerId);
+      return qb.getMany();
+    }
     const where: FindOptionsWhere<Opportunity> = {};
     if (filters.customerId) where.customerId = filters.customerId;
-    if (filters.ownerId)
-      where.customer = { ownerId: filters.ownerId } as Customer;
     return this.opportunityRepository.find({
       where,
       relations: ["customer"],
@@ -982,11 +998,20 @@ export class CustomersService {
   // ==================== Quotes ====================
 
   async findQuotes(filters: Record<string, any> = {}) {
+    if (filters.ownerId) {
+      const qb = this.quoteRepository
+        .createQueryBuilder("quote")
+        .leftJoinAndSelect("quote.customer", "customer")
+        .leftJoinAndSelect("quote.items", "item")
+        .orderBy("quote.updatedAt", "DESC");
+      if (filters.customerId) qb.andWhere("quote.customerId = :quoteCustomerId", { quoteCustomerId: filters.customerId });
+      if (filters.status) qb.andWhere("quote.status = :quoteStatus", { quoteStatus: filters.status });
+      this.applyCustomerAccess(qb, filters.ownerId);
+      return qb.getMany();
+    }
     const where: FindOptionsWhere<Quote> = {};
     if (filters.customerId) where.customerId = filters.customerId;
     if (filters.status) where.status = filters.status as any;
-    if (filters.ownerId)
-      where.customer = { ownerId: filters.ownerId } as Customer;
     return this.quoteRepository.find({
       where,
       relations: ["customer", "items"],
@@ -1109,11 +1134,19 @@ export class CustomersService {
   // ==================== Samples ====================
 
   async findSamples(filters: Record<string, any> = {}) {
+    if (filters.ownerId) {
+      const qb = this.sampleRepository
+        .createQueryBuilder("sample")
+        .leftJoinAndSelect("sample.customer", "customer")
+        .orderBy("sample.updatedAt", "DESC");
+      if (filters.customerId) qb.andWhere("sample.customerId = :sampleCustomerId", { sampleCustomerId: filters.customerId });
+      if (filters.status) qb.andWhere("sample.status = :sampleStatus", { sampleStatus: filters.status });
+      this.applyCustomerAccess(qb, filters.ownerId);
+      return qb.getMany();
+    }
     const where: FindOptionsWhere<Sample> = {};
     if (filters.customerId) where.customerId = filters.customerId;
     if (filters.status) where.status = filters.status as any;
-    if (filters.ownerId)
-      where.customer = { ownerId: filters.ownerId } as Customer;
     return this.sampleRepository.find({
       where,
       relations: ["customer"],

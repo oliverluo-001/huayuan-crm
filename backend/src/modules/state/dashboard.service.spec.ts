@@ -55,8 +55,18 @@ describe('DashboardService analytics', () => {
     const result = await service.getDashboard({ sub: 7, role: 'sales' });
 
     expect(result.scope).toBe('owned');
-    expect(scopedCustomersQb.where).toHaveBeenCalledWith('customer.owner_id = :ownerId', { ownerId: '7' });
-    expect(opportunityQb.where).toHaveBeenCalledWith('customer.owner_id = :ownerId', { ownerId: '7' });
+    expect(scopedCustomersQb.where).toHaveBeenCalledWith(
+      expect.stringContaining('customer.collaborator_ids'),
+      { ownerId: '7' },
+    );
+    expect(newCustomersQb.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('customer.collaborator_ids'),
+      { ownerId: '7' },
+    );
+    expect(opportunityQb.where).toHaveBeenCalledWith(
+      expect.stringContaining('customer.collaborator_ids'),
+      { ownerId: '7' },
+    );
     expect(result.metrics).toMatchObject({ openTodoCount: 12, overdueTodoCount: 3 });
     expect(result.trends.days30).toHaveLength(30);
     expect(result.trends.days30.at(-1)).toMatchObject({ customers: 1, sent: 1, failed: 1, bounced: 1 });

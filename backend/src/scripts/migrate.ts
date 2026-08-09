@@ -97,6 +97,7 @@ export async function runDatabaseMigrations() {
     await migrateCrmContracts(connection);
     await migrateCustomer360Workspace(connection);
     await migrateCustomerMasterData(connection);
+    await migrateSalesDataOwnership(connection);
     const p03Report = await migrateP03DataIntegrity(connection, database);
     await migrateOpportunityLifecycle(connection);
     await connection.beginTransaction();
@@ -233,6 +234,25 @@ export async function migrateCustomerMasterData(connection: Connection) {
     await addColumnToTable(connection, "contacts", "marketing_allowed", "TINYINT(1) NOT NULL DEFAULT 1");
   }
 
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+}
+
+export async function migrateSalesDataOwnership(connection: Connection) {
+  const id = "20260809_sales_data_ownership";
+  if (await tableExists(connection, "email_templates")) {
+    await addColumnToTable(
+      connection,
+      "email_templates",
+      "owner_id",
+      "VARCHAR(32) NOT NULL DEFAULT ''",
+    );
+    await addIndexIfMissing(
+      connection,
+      "email_templates",
+      "idx_email_templates_owner",
+      "owner_id",
+    );
+  }
   await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
 }
 

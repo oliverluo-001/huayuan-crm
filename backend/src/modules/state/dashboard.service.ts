@@ -25,8 +25,12 @@ export class DashboardService {
 
   async getDashboard(user: DashboardUser) {
     const ownerId = user.role === 'sales' ? String(user.sub) : undefined;
+    const customerAccessSql = `(
+      customer.owner_id = :ownerId
+      OR JSON_CONTAINS(COALESCE(customer.collaborator_ids, JSON_ARRAY()), JSON_QUOTE(:ownerId))
+    )`;
     const customerQb = this.customers.createQueryBuilder('customer');
-    if (ownerId) customerQb.where('customer.owner_id = :ownerId', { ownerId });
+    if (ownerId) customerQb.where(customerAccessSql, { ownerId });
     const scopedCustomers = await customerQb
       .select(['customer.id', 'customer.customerId', 'customer.createdAt', 'customer.journeyStage'])
       .getMany();
@@ -37,7 +41,7 @@ export class DashboardService {
 
     const newCustomerQb = this.customers.createQueryBuilder('customer')
       .where('customer.created_at >= :sevenDaysAgo', { sevenDaysAgo });
-    if (ownerId) newCustomerQb.andWhere('customer.owner_id = :ownerId', { ownerId });
+    if (ownerId) newCustomerQb.andWhere(customerAccessSql, { ownerId });
 
     const todoWhere = ownerId
       ? customerIds.length ? { status: 'open' as const, customerId: In(customerIds) } : { id: -1 }
@@ -48,7 +52,7 @@ export class DashboardService {
     const taskWhere = ownerId ? { ownerId } : {};
     const opportunityQb = this.opportunities.createQueryBuilder('opportunity')
       .leftJoin('opportunity.customer', 'customer');
-    if (ownerId) opportunityQb.where('customer.owner_id = :ownerId', { ownerId });
+    if (ownerId) opportunityQb.where(customerAccessSql, { ownerId });
 
     const [newCustomers7d, openTodos, openTodoCount, overdueTodoCount, recentLogs, activeLeadTasks, activeEmailTasks, allLeadTasks, allLogs, allOpportunities] = await Promise.all([
       newCustomerQb.getCount(),

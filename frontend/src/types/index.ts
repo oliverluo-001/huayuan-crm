@@ -329,6 +329,7 @@ export interface EmailTemplate {
   subject: string;
   body: string;
   images?: Array<{ id: string; dataUrl: string }>;
+  ownerId?: string;
   createdAt: string;
   updatedAt: string;
 }
