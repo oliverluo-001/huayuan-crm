@@ -767,12 +767,15 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                     </TableCell>
                     {canManage && <TableCell>
                       <div className="flex gap-1">
-                        {(task.status === "pending" || task.status === "failed") && (
+                        {(task.status === "pending" ||
+                          task.status === "failed" ||
+                          (task.status === "completed" &&
+                            Number(task.failedSendCount || task.skippedSendCount || 0) > 0)) && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleRun(task.id)}
-                            title={task.status === "failed" ? "修正 SMTP 配置后重新运行" : "运行"}
+                            title={task.status === "pending" ? "运行" : "重新运行未成功的收件人"}
                           >
                             <Play className="h-4 w-4" />
                           </Button>

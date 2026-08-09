@@ -34,6 +34,7 @@ import {
   renderTemplate,
 } from './email-utils';
 import { formatSmtpError } from './smtp-error';
+import { resolveCustomerTimezone } from './customer-timezone';
 
 const MAX_SEND_ATTEMPTS = 3;
 const SCHEDULER_INTERVAL_MS = 15_000;
@@ -121,11 +122,13 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     if (filters.customerId) where.customerId = filters.customerId;
     if (filters.ownerId) where.ownerId = filters.ownerId;
     const tasks = await this.taskRepository.find({ where, order: { createdAt: 'DESC' } });
-    return tasks.map((task) => this.formatTask(task));
+    return Promise.all(tasks.map((task) => this.formatTaskWithSkipReasons(task)));
   }
 
   async findOneTask(idOrEmailTaskId: string, ownerId?: string) {
-    return this.formatTask(await this.findTaskEntity(idOrEmailTaskId, ownerId));
+    return this.formatTaskWithSkipReasons(
+      await this.findTaskEntity(idOrEmailTaskId, ownerId),
+    );
   }
 
   async createTask(createDto: CreateEmailTaskDto, ownerId = '') {
@@ -184,6 +187,11 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
     if (['active', 'sending'].includes(task.status)) return this.formatTask(task);
     if (task.status === 'cancelled') throw new BadRequestException('已取消任务不能重新启动');
+
+    if (['completed', 'failed'].includes(task.status)) {
+      await this.requeueRetryableRecipients(task);
+      await this.refreshTaskCounts(task);
+    }
 
     const recipientCount = await this.ensureTaskRecipients(task);
     if (recipientCount === 0) throw new BadRequestException('所选客户没有可用邮箱');
@@ -523,7 +531,11 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
             email: contact.email,
             name: contact.name,
             company: customer.company,
-            timezone: customer.timezone,
+            timezone: resolveCustomerTimezone(
+              customer.timezone,
+              customer.region,
+              customer.country,
+            ),
           }, seen);
         } else {
           const customerId = value.startsWith('customer:') ? value.slice(9) : value;
@@ -535,7 +547,11 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
             email: customer.email,
             name: customer.contact || customer.company,
             company: customer.company,
-            timezone: customer.timezone,
+            timezone: resolveCustomerTimezone(
+              customer.timezone,
+              customer.region,
+              customer.country,
+            ),
           }, seen);
         }
       } catch (error: any) {
@@ -584,11 +600,66 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   private async finishTask(task: EmailTask) {
     await this.refreshTaskCounts(task);
-    task.status = task.successfulSendCount === 0 && task.failedSendCount > 0 ? 'failed' : 'completed';
+    task.status = task.successfulSendCount === 0
+      && (task.failedSendCount > 0 || task.skippedSendCount > 0)
+      ? 'failed'
+      : 'completed';
     task.nextRunAt = null;
     task.lastRunAt = new Date();
-    task.lastMessage = `任务结束：成功 ${task.successfulSendCount} 封，失败 ${task.failedSendCount} 封，跳过 ${task.skippedSendCount} 封`;
+    const skipReasons = await this.getSkipReasonSummary(task.id);
+    task.lastMessage = `任务结束：成功 ${task.successfulSendCount} 封，失败 ${task.failedSendCount} 封，跳过 ${task.skippedSendCount} 封${skipReasons ? `；跳过原因：${skipReasons}` : ''}`;
     await this.taskRepository.save(task);
+  }
+
+  private async formatTaskWithSkipReasons(task: EmailTask) {
+    const formatted = this.formatTask(task);
+    if (!task.skippedSendCount || String(task.lastMessage || '').includes('跳过原因：')) {
+      return formatted;
+    }
+    const skipReasons = await this.getSkipReasonSummary(task.id);
+    return skipReasons
+      ? { ...formatted, lastMessage: `${task.lastMessage || ''}；跳过原因：${skipReasons}` }
+      : formatted;
+  }
+
+  private async getSkipReasonSummary(taskId: number) {
+    const recipients = await this.recipientRepository.find({
+      where: { taskId, status: 'skipped' },
+      take: 50,
+    });
+    const counts = new Map<string, number>();
+    for (const recipient of recipients) {
+      const reason = recipient.lastError || '原因未知';
+      counts.set(reason, (counts.get(reason) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([reason, count]) => `${reason}${count > 1 ? `（${count} 封）` : ''}`)
+      .join('；');
+  }
+
+  private async requeueRetryableRecipients(task: EmailTask) {
+    const recipients = await this.recipientRepository.find({
+      where: { taskId: task.id, status: In(['failed', 'skipped']) },
+    });
+    for (const recipient of recipients) {
+      if (recipient.customerId) {
+        try {
+          const customer = await this.customersService.findOne(recipient.customerId);
+          recipient.timezone = resolveCustomerTimezone(
+            customer.timezone,
+            customer.region,
+            customer.country,
+          );
+        } catch {
+          // 保留原始收件人信息，后续校验会展示具体跳过原因。
+        }
+      }
+      recipient.status = 'queued';
+      recipient.attempts = 0;
+      recipient.lastError = null;
+      recipient.sentAt = null;
+      await this.recipientRepository.save(recipient);
+    }
   }
 
   private async getRateLimitWait(policy: Record<string, any>) {

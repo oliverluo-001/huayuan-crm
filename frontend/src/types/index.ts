@@ -322,6 +322,8 @@ export interface EmailTask {
   region?: string;
   business?: string;
   successfulSendCount?: number;
+  failedSendCount?: number;
+  skippedSendCount?: number;
   intervalMinutes?: number;
   totalRuns?: number;
   startAt?: string;
@@ -336,6 +338,8 @@ export interface EmailTask {
   runsCompleted?: number;
   lastRunAt?: string;
   nextRunAt?: string;
+  lastMessage?: string;
+  errorMessage?: string;
   createdAt: string;
   updatedAt: string;
 }

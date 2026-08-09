@@ -55,6 +55,22 @@ import { CUSTOMER_JOURNEY_STAGES as JOURNEY_STAGES } from "@/contracts/crm-stage
 import { ACTIVITY_TYPE_LABELS, CUSTOMER_TIER_OPTIONS as TIERS, statusLabel } from "@/contracts/crm-terminology";
 
 const CUSTOMER_PAGE_SIZE = 50;
+const COMMON_TIMEZONES = [
+  "Asia/Bangkok",
+  "Asia/Jakarta",
+  "Asia/Kuala_Lumpur",
+  "Asia/Singapore",
+  "Asia/Manila",
+  "Asia/Ho_Chi_Minh",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Asia/Dubai",
+  "Europe/London",
+  "Europe/Berlin",
+  "America/New_York",
+  "America/Chicago",
+  "America/Los_Angeles",
+];
 const emptyCustomerFilters = () => ({
   q: "",
   tag: "",
@@ -954,6 +970,20 @@ function CustomerCreateDialog({
               />
             </div>
             <div className="space-y-2">
+              <Label>客户时区</Label>
+              <Input
+                list="create-customer-timezones"
+                placeholder="例如 Asia/Bangkok"
+                value={form.timezone}
+                onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+              />
+              <datalist id="create-customer-timezones">
+                {COMMON_TIMEZONES.map((timezone) => (
+                  <option key={timezone} value={timezone} />
+                ))}
+              </datalist>
+            </div>
+            <div className="space-y-2">
               <Label>客户分层</Label>
               <Select value={form.tier} onValueChange={(v) => setForm({ ...form, tier: v as "A" | "B" | "C" | "D" })}>
                 <SelectTrigger>
@@ -1091,6 +1121,23 @@ function CustomerEditDialog({
                 value={form.region}
                 onChange={(e) => setForm({ ...form, region: e.target.value })}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>客户时区</Label>
+              <Input
+                list="edit-customer-timezones"
+                placeholder="例如 Asia/Bangkok"
+                value={form.timezone}
+                onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+              />
+              <datalist id="edit-customer-timezones">
+                {COMMON_TIMEZONES.map((timezone) => (
+                  <option key={timezone} value={timezone} />
+                ))}
+              </datalist>
+              <p className="text-xs text-muted-foreground">
+                用于按客户当地工作时间发送邮件；留空时会尝试根据地区自动识别。
+              </p>
             </div>
             <div className="space-y-2">
               <Label>客户分层</Label>
