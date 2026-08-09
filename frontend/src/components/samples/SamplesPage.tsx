@@ -74,14 +74,17 @@ export function SamplesPage() {
     e.preventDefault();
     try {
       const product = products.find((item) => String(item.id) === form.productId);
-      if (!product) return;
+      if (!product || !form.customerId) {
+        toast.error("请选择客户和样品产品");
+        return;
+      }
       const opportunity = opportunities.find((item) => String(item.id) === form.opportunityId);
       await createSample({
         customerId: Number(form.customerId),
         opportunityId: opportunity?.opportunityId || (opportunity ? String(opportunity.id) : undefined),
         productId: product.productId || String(product.id),
         productName: product.name,
-        quantity: parseFloat(form.quantity),
+        quantity: Number(form.quantity),
         unit: form.unit,
         status: form.status,
         sentAt: form.sentAt || undefined,
@@ -152,7 +155,7 @@ export function SamplesPage() {
                   required
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="选择客户" />
+                    {customers.find((customer) => String(customer.id) === form.customerId)?.company || <SelectValue placeholder="选择客户" />}
                   </SelectTrigger>
                   <SelectContent>
                     {customers.map((customer) => (
@@ -170,7 +173,9 @@ export function SamplesPage() {
                   onValueChange={(v) => { if (v) setForm({ ...form, opportunityId: v === "none" ? "" : v }) }}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="不关联商机" />
+                    {form.opportunityId
+                      ? opportunities.find((opportunity) => String(opportunity.id) === form.opportunityId)?.name || "选择商机"
+                      : "不关联商机"}
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">不关联商机</SelectItem>
@@ -190,7 +195,7 @@ export function SamplesPage() {
                   required
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="选择产品" />
+                    {products.find((product) => String(product.id) === form.productId)?.name || <SelectValue placeholder="选择产品" />}
                   </SelectTrigger>
                   <SelectContent>
                     {products.map((product) => (
@@ -205,6 +210,7 @@ export function SamplesPage() {
                 <Label>数量 *</Label>
                 <Input
                   type="number"
+                  min="0.01"
                   step="0.01"
                   value={form.quantity}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, quantity: e.target.value })}
@@ -225,7 +231,7 @@ export function SamplesPage() {
                   onValueChange={(v) => { if (v) setForm({ ...form, status: v as Sample["status"] }) }}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    {SAMPLE_STATUSES.find((status) => status.value === form.status)?.label || "选择状态"}
                   </SelectTrigger>
                   <SelectContent>
                     {SAMPLE_STATUSES.map((status) => (
@@ -315,7 +321,7 @@ export function SamplesPage() {
             ) : (
               samples.map((sample) => (
                 <TableRow key={sample.id}>
-                  <TableCell>{sample.customer?.company || "-"}</TableCell>
+                  <TableCell>{sample.customer?.company || customers.find((customer) => String(customer.id) === String(sample.customerId))?.company || "-"}</TableCell>
                   <TableCell>{sample.productName || "-"}</TableCell>
                   <TableCell>{sample.quantity} {sample.unit}</TableCell>
                   <TableCell>

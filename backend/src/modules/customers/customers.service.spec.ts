@@ -31,6 +31,7 @@ describe('CustomersService imports', () => {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -132,6 +133,8 @@ describe('CustomersService quote contracts', () => {
     count: jest.fn(),
     create: jest.fn((value) => value),
     save: jest.fn(async (value) => value),
+    findOne: jest.fn(),
+    delete: jest.fn(),
   };
   const service = new CustomersService(
     customerRepository as any,
@@ -143,12 +146,23 @@ describe('CustomersService quote contracts', () => {
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
     customerRepository.findOne.mockResolvedValue({ id: 1, company: 'Buyer Co' });
     quoteRepository.count.mockResolvedValue(0);
+    quoteRepository.findOne.mockResolvedValue({
+      id: 1,
+      customerId: 1,
+      quoteNo: 'Q-001',
+      currency: 'USD',
+      freight: 0,
+      taxRate: 0,
+      items: [{ productName: 'Weld Neck Flange', quantity: 1, unitPrice: 100, discount: 0, subtotal: 100 }],
+    });
+    quoteRepository.delete.mockResolvedValue({ affected: 1 });
   });
 
   it('calculates line totals, tax, freight and grand total on the server', async () => {
@@ -176,6 +190,26 @@ describe('CustomersService quote contracts', () => {
       total: 218,
       items: [{ quantity: 2, unitPrice: 100, discount: 10, subtotal: 180 }],
     });
+  });
+
+  it('recalculates totals when a quote is edited', async () => {
+    const result = await service.updateQuote(1, {
+      freight: 25,
+      taxRate: 5,
+      items: [{ productName: 'Weld Neck Flange', quantity: 3, unitPrice: 80, discount: 0 }],
+    });
+
+    expect(result).toMatchObject({
+      subtotal: 240,
+      freight: 25,
+      taxAmount: 12,
+      total: 277,
+    });
+  });
+
+  it('deletes an existing quote', async () => {
+    await expect(service.deleteQuote(1)).resolves.toEqual({ deleted: true });
+    expect(quoteRepository.delete).toHaveBeenCalledWith(1);
   });
 });
 
@@ -214,6 +248,7 @@ describe('CustomersService opportunity lifecycle sync', () => {
     {} as any,
     {} as any,
     opportunityRepository as any,
+    {} as any,
     {} as any,
     {} as any,
     {} as any,
@@ -292,5 +327,177 @@ describe('CustomersService opportunity lifecycle sync', () => {
       openOpportunityCount: 0,
       openOpportunityValue: 0,
     });
+  });
+});
+
+describe('CustomersService customer summary refresh', () => {
+  let customer: any;
+  let todos: any[];
+  let nextTodoId: number;
+
+  const customerRepository = {
+    findOne: jest.fn(async () => customer),
+    save: jest.fn(async (value) => value),
+  };
+  const activityRepository = {
+    create: jest.fn((value) => ({ id: 1, type: 'note', ...value })),
+    save: jest.fn(async (value) => ({ ...value, createdAt: new Date('2026-08-09T01:00:00Z') })),
+  };
+  const todoRepository = {
+    create: jest.fn((value) => ({ id: nextTodoId++, status: 'open', ...value })),
+    save: jest.fn(async (value) => {
+      const index = todos.findIndex((todo) => todo.id === value.id);
+      if (index >= 0) todos[index] = value;
+      else todos.push(value);
+      return value;
+    }),
+    find: jest.fn(async ({ where }: any) => todos.filter((todo) => (
+      todo.customerId === where.customerId && todo.status === where.status
+    ))),
+    findOne: jest.fn(async ({ where }: any) => todos.find((todo) => todo.id === where.id) || null),
+    delete: jest.fn(async (id: number) => {
+      const before = todos.length;
+      todos = todos.filter((todo) => todo.id !== id);
+      return { affected: before - todos.length };
+    }),
+  };
+  const service = new CustomersService(
+    customerRepository as any,
+    {} as any,
+    activityRepository as any,
+    todoRepository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    nextTodoId = 1;
+    todos = [];
+    customer = {
+      id: 1,
+      customerId: 'cus_1',
+      company: 'Buyer Co',
+      health: '',
+      nextTodoAt: null,
+      nextTodoTitle: '',
+    };
+  });
+
+  it('refreshes the latest activity summary when a follow-up is recorded', async () => {
+    await service.createActivity(1, { type: 'call', subject: '确认技术参数' });
+
+    expect(customer).toMatchObject({
+      lastActivityAt: new Date('2026-08-09T01:00:00Z'),
+      lastActivityType: 'call',
+      health: 'good',
+    });
+  });
+
+  it('refreshes next todo and customer health after create, complete, reopen and delete', async () => {
+    const future = await service.createTodo({ customerId: 1, title: '发送报价', dueAt: '2099-01-02' });
+    const overdue = await service.createTodo({ customerId: 1, title: '确认询盘', dueAt: '2000-01-01' });
+
+    expect(customer).toMatchObject({ nextTodoTitle: '确认询盘', health: 'critical' });
+
+    await service.updateTodo(overdue.id, { status: 'done' });
+    expect(customer).toMatchObject({ nextTodoTitle: '发送报价', health: 'warning' });
+    expect(overdue.completedAt).toBeInstanceOf(Date);
+
+    await service.updateTodo(overdue.id, { status: 'open' });
+    expect(overdue.completedAt).toBeNull();
+    expect(customer).toMatchObject({ nextTodoTitle: '确认询盘', health: 'critical' });
+
+    await service.updateTodo(overdue.id, { status: 'done' });
+    await service.deleteTodo(future.id);
+    expect(customer).toMatchObject({ nextTodoAt: null, nextTodoTitle: '', health: 'good' });
+  });
+});
+
+describe('CustomersService sample and customer 360 contracts', () => {
+  const customer = { id: 1, customerId: 'cus_1', company: 'Buyer Co', ownerId: '7', tags: [] };
+  const customerRepository = {
+    findOne: jest.fn(async () => customer),
+  };
+  const emptyRepository = { find: jest.fn(async () => []) };
+  const sampleRepository = {
+    find: jest.fn(async () => []),
+    findOne: jest.fn(),
+    create: jest.fn((value) => ({ id: 1, status: 'pending', ...value })),
+    save: jest.fn(async (value) => value),
+  };
+  const emailLogRepository = {
+    find: jest.fn(async () => [{
+      id: 8,
+      logId: 'log_8',
+      customerId: 'cus_1',
+      customerName: 'Buyer Co',
+      recipientEmail: 'buyer@example.com',
+      subject: 'Quotation Q-001',
+      status: 'sent',
+      sentAt: new Date('2026-08-09T02:00:00Z'),
+    }]),
+  };
+  const service = new CustomersService(
+    customerRepository as any,
+    emptyRepository as any,
+    emptyRepository as any,
+    emptyRepository as any,
+    emptyRepository as any,
+    emptyRepository as any,
+    sampleRepository as any,
+    emptyRepository as any,
+    emptyRepository as any,
+    emailLogRepository as any,
+  );
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('fills sample milestone dates when its status advances', async () => {
+    const sample = await service.createSample({
+      customerId: 1,
+      productName: 'Weld Neck Flange',
+      status: 'delivered',
+    });
+
+    expect(sample.sentAt).toBeInstanceOf(Date);
+    expect(sample.deliveredAt).toBeInstanceOf(Date);
+  });
+
+  it('updates sample status and fills missing milestone dates', async () => {
+    const sample = {
+      id: 1,
+      customerId: 1,
+      productName: 'Weld Neck Flange',
+      status: 'pending',
+      sentAt: null,
+      deliveredAt: null,
+    };
+    sampleRepository.findOne.mockResolvedValue(sample);
+
+    const result = await service.updateSample(1, { status: 'delivered' });
+
+    expect(result.status).toBe('delivered');
+    expect(result.sentAt).toBeInstanceOf(Date);
+    expect(result.deliveredAt).toBeInstanceOf(Date);
+  });
+
+  it('returns normalized customer email history in the 360 view', async () => {
+    const result = await service.getCustomer360(1, '7');
+
+    expect(result.sendLogs).toEqual([expect.objectContaining({
+      id: 'log_8',
+      email: 'buyer@example.com',
+      subject: 'Quotation Q-001',
+      status: 'sent',
+      createdAt: new Date('2026-08-09T02:00:00Z'),
+    })]);
+    expect(emailLogRepository.find).toHaveBeenCalledWith(expect.objectContaining({
+      where: { customerId: 'cus_1' },
+    }));
   });
 });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AlertCircle, BarChart3, CheckSquare, DollarSign, Mail, RefreshCw, Target, TrendingUp, Users } from "lucide-react";
 import { getDashboard, type DashboardSnapshot } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +17,7 @@ import {
 interface DashboardProps { onNavigate?: (page: string) => void }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
+  const navigate = useNavigate();
   const [data, setData] = useState<DashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -47,6 +49,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   );
 
   const d = data.metrics;
+  const goTo = (page: string) => {
+    if (onNavigate) onNavigate(page);
+    else navigate(page ? `/${page}` : "/");
+  };
   const metrics = [
     { label: "客户总数", value: d.customerTotal, note: `近 7 天新增 ${d.newCustomers7d}`, icon: Users },
     { label: "潜在客户线索", value: d.leadTotal, note: `高可信线索 ${d.highConfidenceLeads}`, icon: Target },
@@ -136,7 +142,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         {!data.activeTasks.leads.length && !data.activeTasks.emails.length && <Empty text={data.scope === "owned" ? "销售账号不展示全局任务" : "暂无进行中的任务"} />}
       </CardContent></Card>
 
-      <Card><CardHeader><CardTitle className="flex items-center justify-between text-base">待办提醒<Button variant="link" size="sm" onClick={() => onNavigate?.("opportunities")}>查看商机</Button></CardTitle></CardHeader><CardContent className="space-y-3">
+      <Card><CardHeader><CardTitle className="flex items-center justify-between text-base">待办提醒<Button variant="link" size="sm" onClick={() => goTo("customers")}>进入客户管理</Button></CardTitle></CardHeader><CardContent className="space-y-3">
         {data.openTodos.slice(0, 6).map((todo) => <div key={todo.id} className="flex gap-2 text-sm">
           <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${todo.dueAt && new Date(todo.dueAt) < new Date() ? "bg-destructive" : "bg-amber-500"}`} />
           <div><p className="font-medium">{todo.title}</p><p className="text-xs text-muted-foreground">{todo.customerName || "未关联客户"}{todo.dueAt ? ` · ${new Date(todo.dueAt).toLocaleDateString()}` : ""}</p></div>
@@ -157,7 +163,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       </CardContent></Card>
 
-      <Card><CardHeader><CardTitle className="flex items-center justify-between text-base">最近发信记录<Button variant="link" size="sm" onClick={() => onNavigate?.("marketing")}>邮件发送</Button></CardTitle></CardHeader><CardContent className="space-y-3">
+      <Card><CardHeader><CardTitle className="flex items-center justify-between text-base">最近发信记录<Button variant="link" size="sm" onClick={() => goTo("marketing")}>邮件发送</Button></CardTitle></CardHeader><CardContent className="space-y-3">
         {data.recentSendLogs.slice(0, 6).map((log) => <div key={log.id} className="flex items-center gap-3 text-sm">
           <Badge variant={log.status === "sent" ? "default" : "destructive"}>{statusLabel(EMAIL_SEND_STATUS_LABELS, log.status)}</Badge>
           <div className="min-w-0"><p className="truncate font-medium">{log.email}</p><p className="text-xs text-muted-foreground">{new Date(log.createdAt).toLocaleString()} · {log.templateName || log.message || "邮件"}</p></div>

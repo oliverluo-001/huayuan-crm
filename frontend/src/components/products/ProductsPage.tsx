@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Edit, Trash2, Save, X } from "lucide-react";
+import { toast } from "sonner";
 import { getProducts, createProduct, updateProduct, deleteProduct, type Product } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
@@ -57,15 +58,21 @@ export function ProductsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const productData = { ...form, price: form.price ? parseFloat(form.price) : undefined };
+    const productData = { ...form, price: form.price === "" ? undefined : Number(form.price) };
 
-    if (editingId) {
-      await updateProduct(editingId, productData);
-    } else {
-      await createProduct(productData);
+    try {
+      if (editingId) {
+        await updateProduct(editingId, productData);
+        toast.success("产品资料已更新");
+      } else {
+        await createProduct(productData);
+        toast.success("产品资料已新增");
+      }
+      resetForm();
+      await fetchProducts();
+    } catch {
+      // Error handled by API client.
     }
-    resetForm();
-    fetchProducts();
   };
 
   const handleEdit = (product: Product) => {
@@ -83,8 +90,13 @@ export function ProductsPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm("确定删除该产品吗？")) return;
-    await deleteProduct(id);
-    fetchProducts();
+    try {
+      await deleteProduct(id);
+      toast.success("产品资料已删除");
+      await fetchProducts();
+    } catch {
+      // Error handled by API client.
+    }
   };
 
   return (
@@ -133,6 +145,7 @@ export function ProductsPage() {
                 <Label>参考单价</Label>
                 <Input
                   type="number"
+                  min="0"
                   step="0.01"
                   placeholder="0.00"
                   value={form.price}
@@ -218,7 +231,7 @@ export function ProductsPage() {
                   <TableCell>{product.category || "-"}</TableCell>
                   <TableCell>{product.unit || "pcs"}</TableCell>
                   <TableCell>
-                    {product.price
+                    {product.price !== undefined && product.price !== null
                       ? `${product.currency || "USD"} ${Number(product.price).toFixed(2)}`
                       : "-"}
                   </TableCell>

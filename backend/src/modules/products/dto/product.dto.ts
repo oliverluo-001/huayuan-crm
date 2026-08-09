@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsEnum, MaxLength, IsPositive } from 'class-validator';
+import { IsString, IsOptional, IsNumber, MaxLength, Min } from 'class-validator';
 
 export class CreateProductDto {
   @IsString()
@@ -21,7 +21,7 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsNumber()
-  @IsPositive()
+  @Min(0)
   price?: number;
 
   @IsOptional()
@@ -57,7 +57,7 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsNumber()
-  @IsPositive()
+  @Min(0)
   price?: number;
 
   @IsOptional()

@@ -11,6 +11,7 @@ import {
   Tag,
   CustomerView,
 } from './entities';
+import { EmailLog } from '../email/entities/email-log.entity';
 import {
   CustomersService,
   CustomersController,
@@ -36,6 +37,7 @@ import {
       Sample,
       Tag,
       CustomerView,
+      EmailLog,
     ]),
   ],
   controllers: [

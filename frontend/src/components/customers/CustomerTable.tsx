@@ -3,14 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   DropdownMenu,
@@ -31,7 +30,6 @@ import {
 } from "lucide-react";
 import {
   getCustomers,
-  getCustomer360,
   createCustomer,
   updateCustomer,
   deleteCustomer,
@@ -47,13 +45,13 @@ import {
   createCustomerView,
   deleteCustomerView,
   type Customer,
-  type Customer360,
   type CustomerView,
 } from "@/api/client";
+import { Customer360Dialog } from "@/components/customers/Customer360Dialog";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
-import { CUSTOMER_JOURNEY_STAGES as JOURNEY_STAGES, OPPORTUNITY_STAGES } from "@/contracts/crm-stages";
+import { CUSTOMER_JOURNEY_STAGES as JOURNEY_STAGES } from "@/contracts/crm-stages";
 import { ACTIVITY_TYPE_LABELS, CUSTOMER_TIER_OPTIONS as TIERS, statusLabel } from "@/contracts/crm-terminology";
 
 const CUSTOMER_PAGE_SIZE = 50;
@@ -390,7 +388,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                 <Label>客户分层</Label>
                 <Select value={filters.tier} onValueChange={(v) => setFilters({ ...filters, tier: v ?? "" })}>
                   <SelectTrigger>
-                    <SelectValue placeholder="全部分层" />
+                    {filters.tier ? TIERS.find((tier) => tier.value === filters.tier)?.label : <SelectValue placeholder="全部分层" />}
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">全部分层</SelectItem>
@@ -406,7 +404,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                 <Label>客户跟进阶段</Label>
                 <Select value={filters.journeyStage} onValueChange={(v) => setFilters({ ...filters, journeyStage: v ?? "" })}>
                   <SelectTrigger>
-                    <SelectValue placeholder="全部阶段" />
+                    {filters.journeyStage ? JOURNEY_STAGES.find((stage) => stage.value === filters.journeyStage)?.label : <SelectValue placeholder="全部阶段" />}
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">全部阶段</SelectItem>
@@ -518,7 +516,7 @@ export function CustomerTable(_props: CustomerTableProps) {
             <span className="text-xs text-muted-foreground whitespace-nowrap">客户分层</span>
             <Select value={bulkTier} onValueChange={(v) => v !== null && setBulkTier(v)}>
               <SelectTrigger className="h-7 text-xs w-[130px]">
-                <SelectValue placeholder="选择分层" />
+                {bulkTier ? TIERS.find((tier) => tier.value === bulkTier)?.label : <SelectValue placeholder="选择分层" />}
               </SelectTrigger>
               <SelectContent>
                 {TIERS.map((tier) => (
@@ -835,16 +833,16 @@ export function CustomerTable(_props: CustomerTableProps) {
 
       {/* Detail Dialog */}
       {detailCustomer && (
-        <CustomerDetailDialog
+        <Customer360Dialog
           customerId={detailCustomer.id}
           open={!!detailCustomer}
           onOpenChange={(open) => !open && setDetailCustomer(null)}
+          onCustomerChanged={() => void fetchCustomers()}
         />
       )}
     </div>
   );
 }
-
 // Customer Create Dialog
 function CustomerCreateDialog({
   open,
@@ -959,7 +957,7 @@ function CustomerCreateDialog({
               <Label>客户分层</Label>
               <Select value={form.tier} onValueChange={(v) => setForm({ ...form, tier: v as "A" | "B" | "C" | "D" })}>
                 <SelectTrigger>
-                  <SelectValue />
+                  {TIERS.find((tier) => tier.value === form.tier)?.label || "选择客户分层"}
                 </SelectTrigger>
                 <SelectContent>
                   {TIERS.map((tier) => (
@@ -1098,7 +1096,7 @@ function CustomerEditDialog({
               <Label>客户分层</Label>
               <Select value={form.tier} onValueChange={(v) => setForm({ ...form, tier: v as "A" | "B" | "C" | "D" })}>
                 <SelectTrigger>
-                  <SelectValue />
+                  {TIERS.find((tier) => tier.value === form.tier)?.label || "选择客户分层"}
                 </SelectTrigger>
                 <SelectContent>
                   {TIERS.map((tier) => (
@@ -1113,7 +1111,7 @@ function CustomerEditDialog({
               <Label>客户跟进阶段（与当前商机同步）</Label>
               <Select value={form.journeyStage} onValueChange={(v) => setForm({ ...form, journeyStage: v as Customer["journeyStage"] })}>
                 <SelectTrigger>
-                  <SelectValue />
+                  {JOURNEY_STAGES.find((stage) => stage.value === form.journeyStage)?.label || "选择跟进阶段"}
                 </SelectTrigger>
                 <SelectContent>
                   {JOURNEY_STAGES.map((stage) => (
@@ -1153,190 +1151,6 @@ function CustomerEditDialog({
             </Button>
           </DialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// Customer Detail Dialog (360 view)
-function CustomerDetailDialog({
-  customerId,
-  open,
-  onOpenChange,
-}: {
-  customerId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const [data, setData] = useState<Customer360 | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    if (open) {
-      setIsLoading(true);
-      getCustomer360(customerId)
-        .then(setData)
-        .finally(() => setIsLoading(false));
-    }
-  }, [open, customerId]);
-
-  if (!open) return null;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh]">
-        <DialogHeader>
-          <DialogTitle>客户详情</DialogTitle>
-        </DialogHeader>
-        {isLoading ? (
-          <div className="space-y-4">
-            <Skeleton className="h-20 w-full" />
-            <Skeleton className="h-40 w-full" />
-          </div>
-        ) : data ? (
-          <ScrollArea className="max-h-[70vh]">
-            <div className="space-y-6">
-              {/* Basic Info */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>基本信息</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div>
-                      <p className="text-sm text-muted-foreground">公司</p>
-                      <p className="font-medium">{data.customer.company}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">邮箱</p>
-                      <p className="font-medium">{data.customer.email || "-"}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">电话</p>
-                      <p className="font-medium">{data.customer.phone || "-"}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">地区</p>
-                      <p className="font-medium">{data.customer.region || "-"}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">客户分层</p>
-                      <Badge variant="outline">{TIERS.find((t) => t.value === data.customer.tier)?.label}</Badge>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">客户跟进阶段（与商机同步）</p>
-                      <Badge variant="secondary">
-                        {JOURNEY_STAGES.find((s) => s.value === data.customer.journeyStage)?.label}
-                      </Badge>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Tags */}
-              {data.customer.tags && data.customer.tags.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>标签</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-wrap gap-2">
-                      {data.customer.tags.map((tag) => (
-                        <Badge key={tag} variant="secondary">{tag}</Badge>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Opportunities */}
-              {data.opportunities.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>商机 ({data.opportunities.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {data.opportunities.map((opp, index) => (
-                        <div key={opp.id} className="flex items-center justify-between p-2 rounded-lg border">
-                          <div>
-                            <p className="font-medium flex items-center gap-2">
-                              {opp.name}
-                              {index === 0 && <Badge variant="secondary">当前</Badge>}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              {OPPORTUNITY_STAGES.find((stage) => stage.value === opp.stage)?.label || "未知阶段"} · {opp.amount ? `USD ${opp.amount}` : "-"}
-                            </p>
-                          </div>
-                          <Badge variant="outline">
-                            {OPPORTUNITY_STAGES.find((stage) => stage.value === opp.stage)?.label || "未知阶段"}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Activities */}
-              {data.activities.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>活动记录 ({data.activities.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {data.activities.slice(0, 5).map((activity) => (
-                        <div key={activity.id} className="p-2 rounded-lg border">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <p className="font-medium">{activity.subject}</p>
-                              <Badge variant="outline">{statusLabel(ACTIVITY_TYPE_LABELS, activity.type, "客户互动")}</Badge>
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(activity.createdAt).toLocaleDateString()}
-                            </span>
-                          </div>
-                          {activity.content && (
-                            <p className="text-sm text-muted-foreground mt-1">{activity.content}</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Todos */}
-              {data.todos.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>待办 ({data.todos.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {data.todos.map((todo) => (
-                        <div key={todo.id} className="flex items-center justify-between p-2 rounded-lg border">
-                          <div>
-                            <p className="font-medium">{todo.title}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {todo.dueAt ? new Date(todo.dueAt).toLocaleDateString() : "无截止日期"}
-                            </p>
-                          </div>
-                          <Badge variant={todo.status === "done" ? "default" : "secondary"}>
-                            {todo.status === "done" ? "已完成" : "待处理"}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          </ScrollArea>
-        ) : (
-          <p className="text-muted-foreground text-center py-8">加载失败</p>
-        )}
       </DialogContent>
     </Dialog>
   );

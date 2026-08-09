@@ -33,6 +33,7 @@ import {
   CreateCustomerViewDto,
   UpdateCustomerViewDto,
 } from './dto';
+import { EmailLog } from '../email/entities/email-log.entity';
 
 interface UploadedFile {
   fieldname: string;
@@ -68,6 +69,8 @@ export class CustomersService {
     private tagRepository: Repository<Tag>,
     @InjectRepository(CustomerView)
     private customerViewRepository: Repository<CustomerView>,
+    @InjectRepository(EmailLog)
+    private emailLogRepository: Repository<EmailLog>,
   ) {}
 
   // ==================== Customer CRUD ====================
@@ -185,7 +188,7 @@ export class CustomersService {
     }
     customer.lastActivityAt = new Date();
     customer.lastActivityType = 'email';
-    customer.health = 'good';
+    if (!customer.health) customer.health = 'good';
     await this.customerRepository.save(customer);
     const activity = this.activityRepository.create({
       customerId,
@@ -375,7 +378,7 @@ export class CustomersService {
 
   async getCustomer360(id: number, ownerId?: string) {
     const customer = await this.assertCustomerOwner(id, ownerId);
-    const [contacts, activities, todos, opportunities, quotes, samples] =
+    const [contacts, activities, todos, opportunities, quotes, samples, emailLogs] =
       await Promise.all([
         this.contactRepository.find({
           where: { customerId: id },
@@ -402,6 +405,11 @@ export class CustomersService {
           where: { customerId: id },
           order: { updatedAt: 'DESC' },
         }),
+        this.emailLogRepository.find({
+          where: { customerId: customer.customerId },
+          order: { sentAt: 'DESC' },
+          take: 100,
+        }),
       ]);
 
     return {
@@ -412,6 +420,21 @@ export class CustomersService {
       opportunities,
       quotes,
       samples,
+      sendLogs: emailLogs.map((log) => ({
+        id: log.logId || String(log.id),
+        email: log.recipientEmail,
+        customerId: log.customerId,
+        customerName: log.customerName || customer.company,
+        contactId: log.contactId || '',
+        templateId: log.templateId || '',
+        templateName: log.templateName || '',
+        taskId: log.emailTaskId || '',
+        taskName: log.taskName || '',
+        subject: log.subject || '',
+        status: log.status,
+        message: log.errorMessage || '',
+        createdAt: log.sentAt,
+      })),
     };
   }
 
@@ -518,7 +541,7 @@ export class CustomersService {
   }
 
   async createActivity(customerId: number, createActivityDto: CreateActivityDto, ownerId?: string) {
-    await this.assertCustomerOwner(customerId, ownerId);
+    const customer = await this.assertCustomerOwner(customerId, ownerId);
     if (!createActivityDto.subject && !createActivityDto.content) {
       throw new BadRequestException('请填写跟进内容');
     }
@@ -529,7 +552,12 @@ export class CustomersService {
       activityId: this.generateId('activity'),
     });
 
-    return this.activityRepository.save(activity);
+    const saved = await this.activityRepository.save(activity);
+    customer.lastActivityAt = saved.createdAt || new Date();
+    customer.lastActivityType = saved.type || 'note';
+    if (!customer.health) customer.health = 'good';
+    await this.customerRepository.save(customer);
+    return saved;
   }
 
   // ==================== Todos ====================
@@ -551,7 +579,9 @@ export class CustomersService {
       ...createTodoDto,
       todoId: this.generateId('todo'),
     });
-    return this.todoRepository.save(todo);
+    const saved = await this.todoRepository.save(todo);
+    await this.refreshCustomerTodoSummary(saved.customerId);
+    return saved;
   }
 
   async updateTodo(id: number, updateTodoDto: UpdateTodoDto) {
@@ -561,14 +591,44 @@ export class CustomersService {
     Object.assign(todo, updateTodoDto);
     if (updateTodoDto.status === 'done') {
       todo.completedAt = new Date();
+    } else if (updateTodoDto.status === 'open') {
+      todo.completedAt = null as any;
     }
-    return this.todoRepository.save(todo);
+    const saved = await this.todoRepository.save(todo);
+    await this.refreshCustomerTodoSummary(saved.customerId);
+    return saved;
   }
 
   async deleteTodo(id: number) {
+    const todo = await this.todoRepository.findOne({ where: { id } });
+    if (!todo) throw new NotFoundException('待办不存在');
     const result = await this.todoRepository.delete(id);
     if (result.affected === 0) throw new NotFoundException('待办不存在');
+    await this.refreshCustomerTodoSummary(todo.customerId);
     return { deleted: true };
+  }
+
+  private async refreshCustomerTodoSummary(customerId: number) {
+    const customer = await this.customerRepository.findOne({ where: { id: customerId } });
+    if (!customer) return;
+
+    const openTodos = await this.todoRepository.find({
+      where: { customerId, status: 'open' },
+      order: { createdAt: 'ASC' },
+    });
+    const withDueDate = openTodos
+      .filter((todo) => Boolean(todo.dueAt))
+      .sort((left, right) => new Date(left.dueAt).getTime() - new Date(right.dueAt).getTime());
+    const nextTodo = withDueDate[0] || openTodos[0];
+
+    customer.nextTodoAt = (nextTodo?.dueAt || null) as any;
+    customer.nextTodoTitle = nextTodo?.title || '';
+    customer.health = withDueDate.some((todo) => new Date(todo.dueAt).getTime() < Date.now())
+      ? 'critical'
+      : openTodos.length > 0
+        ? 'warning'
+        : 'good';
+    await this.customerRepository.save(customer);
   }
 
   // ==================== Opportunities ====================
@@ -840,6 +900,7 @@ export class CustomersService {
       ...createSampleDto,
       sampleId: this.generateId('sample'),
     });
+    this.applySampleStatusDates(sample);
     return this.sampleRepository.save(sample);
   }
 
@@ -847,7 +908,17 @@ export class CustomersService {
     const sample = await this.sampleRepository.findOne({ where: { id } });
     if (!sample) throw new NotFoundException('样品记录不存在');
     Object.assign(sample, updateSampleDto);
+    this.applySampleStatusDates(sample);
     return this.sampleRepository.save(sample);
+  }
+
+  private applySampleStatusDates(sample: Sample) {
+    if (['sent', 'delivered'].includes(sample.status) && !sample.sentAt) {
+      sample.sentAt = new Date();
+    }
+    if (sample.status === 'delivered' && !sample.deliveredAt) {
+      sample.deliveredAt = new Date();
+    }
   }
 
   async deleteSample(id: number) {

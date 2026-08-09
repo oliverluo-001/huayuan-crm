@@ -291,8 +291,8 @@ export async function deleteCustomerView(id: string): Promise<void> {
 
 // Contacts API
 export async function getCustomerContacts(customerId: string): Promise<Contact[]> {
-  const result = await api<{ contacts: Contact[] }>(`/api/customers/${encodeURIComponent(customerId)}/contacts`);
-  return result.contacts || [];
+  const result = await api<{ contacts: Contact[] } | Contact[]>(`/api/customers/${encodeURIComponent(customerId)}/contacts`);
+  return Array.isArray(result) ? result : result.contacts || [];
 }
 
 export async function createCustomerContact(customerId: string, data: Partial<Contact>): Promise<Contact> {
@@ -309,8 +309,8 @@ export async function deleteContact(id: string): Promise<void> {
 
 // Activities API
 export async function getCustomerActivities(customerId: string): Promise<Activity[]> {
-  const result = await api<{ activities: Activity[] }>(`/api/customers/${encodeURIComponent(customerId)}/activities`);
-  return result.activities || [];
+  const result = await api<{ activities: Activity[] } | Activity[]>(`/api/customers/${encodeURIComponent(customerId)}/activities`);
+  return Array.isArray(result) ? result : result.activities || [];
 }
 
 export async function createCustomerActivity(customerId: string, data: Partial<Activity>): Promise<Activity> {
@@ -319,8 +319,8 @@ export async function createCustomerActivity(customerId: string, data: Partial<A
 
 // Todos API
 export async function getCustomerTodos(customerId: string): Promise<Todo[]> {
-  const result = await api<{ todos: Todo[] }>(`/api/customers/${encodeURIComponent(customerId)}/todos`);
-  return result.todos || [];
+  const result = await api<{ todos: Todo[] } | Todo[]>(`/api/customers/${encodeURIComponent(customerId)}/todos`);
+  return Array.isArray(result) ? result : result.todos || [];
 }
 
 export async function createCustomerTodo(customerId: string, data: Partial<Todo>): Promise<Todo> {

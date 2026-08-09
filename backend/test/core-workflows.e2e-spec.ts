@@ -103,6 +103,7 @@ describe('core CRM workflows (HTTP e2e)', () => {
       unusedRepository(),
       unusedRepository(),
       unusedRepository(),
+      emailLogRepository as any,
     );
     leadsService = new LeadsService(
       leadRepository as any,

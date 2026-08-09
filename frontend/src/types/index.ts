@@ -117,6 +117,7 @@ export interface Todo {
   customerId: string;
   customerName?: string;
   title: string;
+  description?: string;
   status: "open" | "done";
   dueAt?: string;
   createdAt: string;
@@ -301,6 +302,8 @@ export interface SendLog {
   templateName?: string;
   taskId?: string;
   taskName?: string;
+  contactId?: string;
+  subject?: string;
   status: "sent" | "failed" | "bounced";
   message?: string;
   createdAt: string;
