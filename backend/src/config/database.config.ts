@@ -2,6 +2,15 @@ import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 
+export function parseBooleanConfig(value: unknown, fallback: boolean): boolean {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
 export const getTypeOrmConfig = (
   configService: ConfigService,
 ): TypeOrmModuleOptions => ({
@@ -12,8 +21,8 @@ export const getTypeOrmConfig = (
   password: configService.get<string>('DB_PASSWORD', ''),
   database: configService.get<string>('DB_DATABASE', 'international_trade_crm'),
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-  synchronize: configService.get<boolean>('DB_SYNCHRONIZE', false),
-  logging: configService.get<boolean>('DB_LOGGING', true),
+  synchronize: parseBooleanConfig(configService.get<string | boolean>('DB_SYNCHRONIZE'), false),
+  logging: parseBooleanConfig(configService.get<string | boolean>('DB_LOGGING'), true),
   timezone: '+08:00',
   charset: 'utf8mb4',
 });
