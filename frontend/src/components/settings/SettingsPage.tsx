@@ -15,6 +15,7 @@ import {
   getAiProfile,
   getSearchProfiles,
   saveSmtpProfile,
+  testSmtpProfile,
   saveImapProfile,
   changePassword,
   saveAiProfile,
@@ -113,6 +114,7 @@ export function SettingsPage() {
     apiKey: "",
   });
   const [aiTesting, setAiTesting] = useState(false);
+  const [smtpTesting, setSmtpTesting] = useState(false);
   const [searchTestingId, setSearchTestingId] = useState<string | null>(null);
 
   // Email policy
@@ -221,6 +223,32 @@ export function SettingsPage() {
       fetchData();
     } catch {
       // Error handled by API client
+    }
+  };
+
+  const handleTestSmtp = async () => {
+    setSmtpTesting(true);
+    try {
+      await saveSmtpProfile({
+        smtpProvider: smtpForm.smtpProvider,
+        smtpHost: smtpForm.smtpHost,
+        smtpPort: parseInt(smtpForm.smtpPort),
+        smtpSecure: smtpForm.smtpSecure,
+        smtpUser: smtpForm.smtpUser,
+        smtpFrom: smtpForm.smtpFrom,
+        pass: smtpForm.smtpPass || undefined,
+      } as any);
+      const result = await testSmtpProfile();
+      toast.success(result.message || "SMTP 连接测试成功");
+      setSmtpForm((current) => ({
+        ...current,
+        smtpPass: "",
+        credentialStatus: "saved",
+      }));
+    } catch {
+      // Error handled by API client
+    } finally {
+      setSmtpTesting(false);
     }
   };
 
@@ -906,7 +934,7 @@ export function SettingsPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>密码</Label>
+                    <Label>密码 / SMTP 授权码</Label>
                     <Input
                       type="password"
                       placeholder={smtpForm.credentialStatus === "saved" ? "已保存，留空则不修改" : "输入邮箱密码"}
@@ -919,6 +947,9 @@ export function SettingsPage() {
                     {smtpForm.credentialStatus === "reentry_required" && (
                       <p className="text-xs text-amber-500">当前部署环境无法读取原有加密密码，请重新输入并保存。</p>
                     )}
+                    <p className="text-xs text-muted-foreground">
+                      QQ、163、126、Gmail 和部分企业邮箱通常需要填写 SMTP 授权码或应用专用密码，不是网页登录密码。
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <Label>发件人地址 *</Label>
@@ -931,10 +962,25 @@ export function SettingsPage() {
                     />
                   </div>
                 </div>
-                <Button type="submit">
-                  <Save className="mr-2 h-4 w-4" />
-                  保存 SMTP 配置
-                </Button>
+                <div className="flex gap-2">
+                  <Button type="submit">
+                    <Save className="mr-2 h-4 w-4" />
+                    保存 SMTP 配置
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleTestSmtp}
+                    disabled={smtpTesting}
+                  >
+                    {smtpTesting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <TestTube className="mr-2 h-4 w-4" />
+                    )}
+                    保存并测试连接
+                  </Button>
+                </div>
               </form>
             </CardContent>
           </Card>

@@ -622,7 +622,11 @@ export async function deleteSample(id: string): Promise<void> {
 // Email Templates API
 export async function getTemplates(): Promise<EmailTemplate[]> {
   const result = await api<{ templates: EmailTemplate[] }>("/api/templates");
-  return result.templates || [];
+  return (result.templates || []).map((template) => ({
+    ...template,
+    id: String(template.id),
+    templateId: template.templateId ? String(template.templateId) : undefined,
+  }));
 }
 
 export async function createTemplate(
@@ -846,6 +850,13 @@ export async function saveSmtpProfile(
   data: Partial<SmtpProfile>,
 ): Promise<void> {
   await api("/api/settings/smtp-profile", { method: "POST", body: data });
+}
+
+export async function testSmtpProfile(): Promise<{
+  ok: boolean;
+  message?: string;
+}> {
+  return api("/api/settings/smtp-profile/test", { method: "POST" });
 }
 
 // IMAP Profile API

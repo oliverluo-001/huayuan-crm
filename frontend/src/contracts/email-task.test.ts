@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildCreateEmailTaskInput } from "./email-task";
+import {
+  buildCreateEmailTaskInput,
+  readableEmailTaskMessage,
+  resolveEmailTaskTemplateName,
+} from "./email-task";
 
 describe("email task creation contract", () => {
   it("does not send server-managed delivery counters", () => {
@@ -40,5 +44,25 @@ describe("email task creation contract", () => {
       totalRuns: 1,
     });
     expect(input).not.toHaveProperty("startAt");
+  });
+
+  it("resolves both historical numeric and stable template identifiers", () => {
+    const templates = [
+      { id: "1", templateId: "tmpl_welcome", name: "欢迎邮件" },
+    ];
+    expect(resolveEmailTaskTemplateName("1", undefined, templates)).toBe(
+      "欢迎邮件",
+    );
+    expect(
+      resolveEmailTaskTemplateName("tmpl_welcome", undefined, templates),
+    ).toBe("欢迎邮件");
+    expect(resolveEmailTaskTemplateName("missing", undefined, templates)).toBe(
+      "模板不可用",
+    );
+  });
+
+  it("turns historical SMTP 535 messages into actionable guidance", () => {
+    expect(readableEmailTaskMessage("任务失败：535 Authentication Failed"))
+      .toContain("邮箱授权码");
   });
 });

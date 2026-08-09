@@ -302,6 +302,7 @@ export type UpdateSampleInput = Partial<CreateSampleInput>;
 // Email template types
 export interface EmailTemplate {
   id: string;
+  templateId?: string;
   name: string;
   subject: string;
   body: string;

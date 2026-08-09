@@ -37,3 +37,28 @@ export function buildCreateEmailTaskInput(
 
   return input;
 }
+
+export function resolveEmailTaskTemplateName(
+  templateId: string,
+  templateName: string | undefined,
+  templates: Array<{ id: string; templateId?: string; name: string }>,
+) {
+  if (templateName) return templateName;
+  return templates.find(
+    (template) =>
+      String(template.id) === String(templateId) ||
+      Boolean(template.templateId && template.templateId === templateId),
+  )?.name || "模板不可用";
+}
+
+export function readableEmailTaskMessage(value: unknown) {
+  const message = String(value || "");
+  if (
+    /\b535\b|authentication failed|invalid login|bad credentials|username and password not accepted/i.test(
+      message,
+    )
+  ) {
+    return "任务失败：SMTP 认证失败，请到“设置”重新填写邮箱授权码并测试连接";
+  }
+  return message;
+}

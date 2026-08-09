@@ -11,6 +11,7 @@ import {
   SmtpProfileDto,
 } from './dto';
 import { CredentialCrypto, EncryptedSecret } from './credential-crypto';
+import { formatSmtpError } from '../email/smtp-error';
 
 type StoredProfile = Record<string, any>;
 
@@ -211,8 +212,12 @@ export class SettingsService {
       secure: Boolean(profile.smtpSecure),
       auth: { user: profile.smtpUser, pass: profile.pass },
     });
-    await transport.verify();
-    return { ok: true, message: 'SMTP 连接成功' };
+    try {
+      await transport.verify();
+      return { ok: true, message: 'SMTP 连接和身份认证成功' };
+    } catch (error) {
+      throw new BadRequestException(formatSmtpError(error));
+    }
   }
 
   // ==================== SMTP Profile ====================

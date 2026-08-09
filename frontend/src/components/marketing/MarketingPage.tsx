@@ -32,7 +32,11 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
 import { CUSTOMER_JOURNEY_STAGES } from "@/contracts/crm-stages";
-import { buildCreateEmailTaskInput } from "@/contracts/email-task";
+import {
+  buildCreateEmailTaskInput,
+  readableEmailTaskMessage,
+  resolveEmailTaskTemplateName,
+} from "@/contracts/email-task";
 import {
   CUSTOMER_TIER_OPTIONS,
   EMAIL_SEND_STATUS_LABELS,
@@ -559,7 +563,10 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                   </SelectTrigger>
                   <SelectContent>
                     {templates.map((template) => (
-                      <SelectItem key={template.id} value={template.id}>
+                      <SelectItem
+                        key={template.id}
+                        value={template.templateId || String(template.id)}
+                      >
                         {template.name}
                       </SelectItem>
                     ))}
@@ -717,7 +724,11 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
               </TableRow>
             ) : (
               tasks.map((task) => {
-                const templateName = templates.find((t) => t.id === task.templateId)?.name || "模板已删除";
+                const templateName = resolveEmailTaskTemplateName(
+                  task.templateId,
+                  task.templateName,
+                  templates,
+                );
                 const modeText = task.taskMode === "scheduled" ? "定时" : "单批";
                 const scheduledInfo = task.taskMode === "once"
                   ? `指定客户 ${task.customerIds?.length || 0} 人`
@@ -727,7 +738,9 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                     <TableCell>
                       <div className="font-medium">{task.name}</div>
                       {(task as any).lastMessage && (
-                        <div className="text-xs text-muted-foreground truncate max-w-[200px]">{(task as any).lastMessage}</div>
+                        <div className="text-xs text-muted-foreground max-w-[320px]">
+                          {readableEmailTaskMessage((task as any).lastMessage)}
+                        </div>
                       )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{templateName}</TableCell>
@@ -754,8 +767,13 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                     </TableCell>
                     {canManage && <TableCell>
                       <div className="flex gap-1">
-                        {task.status === "pending" && (
-                          <Button variant="ghost" size="sm" onClick={() => handleRun(task.id)} title="运行">
+                        {(task.status === "pending" || task.status === "failed") && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRun(task.id)}
+                            title={task.status === "failed" ? "修正 SMTP 配置后重新运行" : "运行"}
+                          >
                             <Play className="h-4 w-4" />
                           </Button>
                         )}

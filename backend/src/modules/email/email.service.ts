@@ -33,6 +33,7 @@ import {
   normalizeEmail,
   renderTemplate,
 } from './email-utils';
+import { formatSmtpError } from './smtp-error';
 
 const MAX_SEND_ATTEMPTS = 3;
 const SCHEDULER_INTERVAL_MS = 15_000;
@@ -696,7 +697,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
   }
 
   private errorMessage(error: any) {
-    return String(error?.response || error?.message || error || '未知错误').slice(0, 2000);
+    return formatSmtpError(error);
   }
 
   private generateId(prefix: string) {

@@ -452,7 +452,7 @@ describe("core CRM workflows (HTTP e2e)", () => {
       },
       body: JSON.stringify({
         name: "First outreach",
-        templateId: "9",
+        templateId: "tmpl_9",
         customerIds: ["101", "102"],
         batchSize: 20,
       }),
@@ -463,6 +463,7 @@ describe("core CRM workflows (HTTP e2e)", () => {
       id: 1,
       ownerId: "7",
       status: "pending",
+      templateId: "tmpl_9",
       customerIds: ["101", "102"],
     });
 
