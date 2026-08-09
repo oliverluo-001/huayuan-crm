@@ -26,10 +26,10 @@ DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}"
 
 RELEASES_DIR="$APP_ROOT/releases"
 RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
-CURRENT_LINK="$APP_ROOT/current"
+CURRENT_LINK="$APP_ROOT/app-current"
 WEB_ROOT="${WEB_ROOT:-/var/www/huayuan-crm}"
 WEB_RELEASE_DIR="$WEB_ROOT/web-releases/$RELEASE_ID"
-WEB_CURRENT_LINK="$WEB_ROOT/current"
+WEB_ROLLBACK_DIR="$WEB_ROOT/web-releases/previous-$RELEASE_ID"
 NGINX_CONF="${NGINX_CONF:-/etc/nginx/conf.d/huayuan-crm.conf}"
 BACKUP_FILE="$BACKUP_DIR/pre-deploy-$RELEASE_ID.sql.gz"
 
@@ -104,14 +104,14 @@ sudo chown -R nginx:nginx "$WEB_RELEASE_DIR"
 PREVIOUS_BACKEND=""
 if [ -L "$CURRENT_LINK" ]; then
   PREVIOUS_BACKEND="$(readlink -f "$CURRENT_LINK")"
+elif [ -L "$APP_ROOT/current" ] && [ -f "$(readlink -f "$APP_ROOT/current")/ecosystem.config.js" ]; then
+  PREVIOUS_BACKEND="$(readlink -f "$APP_ROOT/current")"
 elif [ -f "$APP_ROOT/ecosystem.config.js" ]; then
   PREVIOUS_BACKEND="$APP_ROOT"
 fi
 
 PREVIOUS_WEB=""
-if [ -L "$WEB_CURRENT_LINK" ]; then
-  PREVIOUS_WEB="$(readlink -f "$WEB_CURRENT_LINK")"
-elif sudo test -d "$WEB_ROOT/html"; then
+if sudo test -d "$WEB_ROOT/html"; then
   PREVIOUS_WEB="$WEB_ROOT/html"
 fi
 
@@ -127,8 +127,11 @@ fi
 MIGRATION_STARTED=0
 APP_SWITCHED=0
 WEB_SWITCHED=0
+OLD_WEB_MOVED=0
 NGINX_CHANGED=0
 NGINX_HAD_CONF=0
+NGINX_ACTIVATED=0
+PREVIOUS_NGINX_USES_LEGACY_LINK=0
 MAINTENANCE_ENABLED=0
 
 switch_symlink() {
@@ -164,13 +167,20 @@ rollback() {
   if [ "$APP_SWITCHED" -eq 1 ] && [ -n "$PREVIOUS_BACKEND" ]; then
     switch_symlink "$PREVIOUS_BACKEND" "$CURRENT_LINK"
   fi
-  if [ "$WEB_SWITCHED" -eq 1 ] && [ -n "$PREVIOUS_WEB" ]; then
-    switch_symlink "$PREVIOUS_WEB" "$WEB_CURRENT_LINK"
+  if [ "$WEB_SWITCHED" -eq 1 ] && sudo test -d "$WEB_ROOT/html"; then
+    sudo mv -T "$WEB_ROOT/html" "$WEB_RELEASE_DIR"
+  fi
+  if [ "$OLD_WEB_MOVED" -eq 1 ] && sudo test -d "$WEB_ROLLBACK_DIR"; then
+    sudo mv -T "$WEB_ROLLBACK_DIR" "$WEB_ROOT/html"
   fi
 
   if [ "$NGINX_CHANGED" -eq 1 ]; then
     if [ "$NGINX_HAD_CONF" -eq 1 ]; then
-      sudo cp "$RELEASE_DIR/nginx.previous.conf" "$NGINX_CONF"
+      if [ "$NGINX_ACTIVATED" -eq 1 ] && [ "$PREVIOUS_NGINX_USES_LEGACY_LINK" -eq 1 ]; then
+        sudo cp "$RELEASE_DIR/nginx-huayuan-crm.conf" "$NGINX_CONF"
+      else
+        sudo cp "$RELEASE_DIR/nginx.previous.conf" "$NGINX_CONF"
+      fi
     else
       sudo rm -f "$NGINX_CONF"
     fi
@@ -190,17 +200,18 @@ rollback() {
 }
 trap rollback ERR
 
-if [ ! -L "$WEB_CURRENT_LINK" ] && [ -n "$PREVIOUS_WEB" ]; then
-  switch_symlink "$PREVIOUS_WEB" "$WEB_CURRENT_LINK"
-fi
 if sudo test -f "$NGINX_CONF"; then
   sudo cp "$NGINX_CONF" "$RELEASE_DIR/nginx.previous.conf"
   NGINX_HAD_CONF=1
+  if sudo grep -Fq "root $WEB_ROOT/current;" "$NGINX_CONF"; then
+    PREVIOUS_NGINX_USES_LEGACY_LINK=1
+  fi
 fi
 sudo cp "$RELEASE_DIR/nginx-huayuan-crm.conf" "$NGINX_CONF"
 NGINX_CHANGED=1
 sudo nginx -t
 sudo systemctl reload nginx
+NGINX_ACTIVATED=1
 sudo touch "$WEB_ROOT/deploying"
 MAINTENANCE_ENABLED=1
 
@@ -229,7 +240,11 @@ curl --retry 15 --retry-delay 2 --retry-connrefused --fail --silent --show-error
 
 switch_symlink "$RELEASE_DIR" "$CURRENT_LINK"
 APP_SWITCHED=1
-switch_symlink "$WEB_RELEASE_DIR" "$WEB_CURRENT_LINK"
+if [ -n "$PREVIOUS_WEB" ]; then
+  sudo mv -T "$WEB_ROOT/html" "$WEB_ROLLBACK_DIR"
+  OLD_WEB_MOVED=1
+fi
+sudo mv -T "$WEB_RELEASE_DIR" "$WEB_ROOT/html"
 WEB_SWITCHED=1
 
 sudo nginx -t
