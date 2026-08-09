@@ -51,6 +51,23 @@ describe('CustomersService imports', () => {
     expect(result.duplicateUploadCount).toBe(1);
   });
 
+  it('preserves international company names exactly as imported', async () => {
+    customerRepository.find.mockResolvedValue([]);
+
+    const result = await service.parseAndImport(upload([
+      { Company: 'PT. Batam Pratama Mandiri', Email: 'sales@bpm.co.id' },
+      { Company: 'Sun Hydraulics (Thailand) Co., Ltd.', Email: 'sales@sunhydraulics.co.th' },
+    ]));
+
+    expect(result).toEqual({ created: 2, updated: 0, skipped: 0, total: 2 });
+    expect(customerRepository.create).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      company: 'PT. Batam Pratama Mandiri',
+    }));
+    expect(customerRepository.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      company: 'Sun Hydraulics (Thailand) Co., Ltd.',
+    }));
+  });
+
   it('merges non-empty imported profile data without resetting CRM state', async () => {
     const existing = {
       id: 1,
