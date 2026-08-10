@@ -10,8 +10,11 @@ import {
   Sample,
   Tag,
   CustomerView,
+  CustomerMergeHistory,
 } from './entities';
-import { EmailLog } from '../email/entities/email-log.entity';
+import { EmailLog, EmailTaskRecipient } from '../email/entities';
+import { CustomerAttachment } from '../attachments/customer-attachment.entity';
+import { Lead } from '../leads/entities';
 import {
   CustomersService,
   CustomersController,
@@ -23,6 +26,8 @@ import {
   CustomerTagsController,
   ImportController,
   ContactsController,
+  CustomerDuplicatesController,
+  CustomerDuplicatesService,
 } from './';
 
 @Module({
@@ -37,7 +42,11 @@ import {
       Sample,
       Tag,
       CustomerView,
+      CustomerMergeHistory,
       EmailLog,
+      EmailTaskRecipient,
+      CustomerAttachment,
+      Lead,
     ]),
   ],
   controllers: [
@@ -50,8 +59,9 @@ import {
     CustomerTagsController,
     ImportController,
     ContactsController,
+    CustomerDuplicatesController,
   ],
-  providers: [CustomersService],
-  exports: [CustomersService],
+  providers: [CustomersService, CustomerDuplicatesService],
+  exports: [CustomersService, CustomerDuplicatesService],
 })
 export class CustomersModule {}

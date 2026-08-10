@@ -1,4 +1,8 @@
-import { ensureInitialAdmin, normalizeLegacyUserEmails } from './migrate';
+import {
+  ensureInitialAdmin,
+  migrateCustomerDuplicateManagement,
+  normalizeLegacyUserEmails,
+} from './migrate';
 
 describe('database migration', () => {
   it('allows null user emails before normalizing legacy empty values', async () => {
@@ -50,5 +54,38 @@ describe('database migration', () => {
     expect(result).toEqual({ configured: true, created: false });
     expect(query).toHaveBeenCalledTimes(2);
     expect(query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO users'))).toBe(false);
+  });
+
+  it('can repeat the duplicate-management migration without adding columns or indexes twice', async () => {
+    const columns = new Set<string>();
+    const indexes = new Set<string>();
+    const query = jest.fn(async (rawSql: string, params: any[] = []) => {
+      const sql = String(rawSql);
+      if (sql.includes('information_schema.TABLES')) {
+        return [[{ TABLE_NAME: params[1] }], []];
+      }
+      if (sql.includes('information_schema.COLUMNS')) {
+        return [columns.has(String(params[2])) ? [{ COLUMN_NAME: params[2] }] : [], []];
+      }
+      if (sql.includes('information_schema.STATISTICS')) {
+        return [indexes.has(String(params[2])) ? [{ INDEX_NAME: params[2] }] : [], []];
+      }
+      const columnMatch = sql.match(/ADD COLUMN `([^`]+)`/);
+      if (columnMatch) columns.add(columnMatch[1]);
+      if (sql.includes('CREATE TABLE IF NOT EXISTS customer_merge_history')) {
+        columns.add('primary_contact_selection');
+      }
+      const indexMatch = sql.match(/ADD INDEX `([^`]+)`/);
+      if (indexMatch) indexes.add(indexMatch[1]);
+      return [{ affectedRows: 1 }, []];
+    });
+
+    await migrateCustomerDuplicateManagement({ query } as any);
+    await migrateCustomerDuplicateManagement({ query } as any);
+
+    expect(columns).toEqual(new Set(['source_history', 'merged_into_id', 'merged_at', 'primary_contact_selection']));
+    expect(indexes).toEqual(new Set(['idx_customers_merged_into']));
+    expect(query.mock.calls.filter(([sql]) => String(sql).includes('ADD COLUMN'))).toHaveLength(3);
+    expect(query.mock.calls.filter(([sql]) => String(sql).includes('ADD INDEX'))).toHaveLength(1);
   });
 });

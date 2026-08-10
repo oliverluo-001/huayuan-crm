@@ -42,6 +42,10 @@ import type {
   BackupSettings,
   Backup,
   AuditEntry,
+  DuplicateCustomerGroupsResult,
+  DuplicateCustomerGroup,
+  DuplicateMergePreview,
+  DuplicateMergeResult,
 } from "@/types";
 
 export type {
@@ -88,6 +92,10 @@ export type {
   BackupSettings,
   Backup,
   AuditEntry,
+  DuplicateCustomerGroupsResult,
+  DuplicateCustomerGroup,
+  DuplicateMergePreview,
+  DuplicateMergeResult,
 };
 
 interface ApiOptions {
@@ -328,6 +336,34 @@ export async function bulkUpdateCustomerTier(
   await api("/api/customers/bulk-tier", {
     method: "POST",
     body: { ids, tier },
+  });
+}
+
+export async function getDuplicateCustomerGroups(): Promise<DuplicateCustomerGroupsResult> {
+  return api<DuplicateCustomerGroupsResult>("/api/customer-duplicates");
+}
+
+export async function previewDuplicateCustomerMerge(data: {
+  primaryCustomerId: number;
+  duplicateCustomerIds: number[];
+}): Promise<DuplicateMergePreview> {
+  return api<DuplicateMergePreview>("/api/customer-duplicates/preview", {
+    method: "POST",
+    body: data,
+  });
+}
+
+export async function mergeDuplicateCustomers(data: {
+  primaryCustomerId: number;
+  duplicateCustomerIds: number[];
+  previewToken: string;
+  fieldSelections: Record<string, number>;
+  primaryContactSelection: string;
+  acknowledgeConflicts: boolean;
+}): Promise<DuplicateMergeResult> {
+  return api<DuplicateMergeResult>("/api/customer-duplicates/merge", {
+    method: "POST",
+    body: data,
   });
 }
 

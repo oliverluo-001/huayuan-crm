@@ -113,11 +113,25 @@ export class Customer {
   @Column({ type: 'varchar', length: 100, default: '' })
   source: string;
 
+  @Column({ name: 'source_history', type: 'json', nullable: true })
+  sourceHistory: Array<{
+    customerId: string;
+    company: string;
+    source: string;
+    mergedAt: string;
+  }>;
+
   @Column({ name: 'owner_id', type: 'varchar', length: 32, default: '' })
   ownerId: string;
 
   @Column({ name: 'collaborator_ids', type: 'json', nullable: true })
   collaboratorIds: string[];
+
+  @Column({ name: 'merged_into_id', type: 'int', nullable: true })
+  mergedIntoId: number | null;
+
+  @Column({ name: 'merged_at', type: 'timestamp', nullable: true })
+  mergedAt: Date | null;
 
   @Column({ type: 'varchar', length: 10, default: '' })
   health: CustomerHealth;

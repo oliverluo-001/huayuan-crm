@@ -84,6 +84,12 @@ export interface Customer {
   preferredIncoterm?: string;
   product?: string;
   source?: string;
+  sourceHistory?: Array<{
+    customerId: string;
+    company: string;
+    source: string;
+    mergedAt: string;
+  }>;
   ownerId?: string;
   ownerName?: string;
   collaboratorIds?: string[];
@@ -106,6 +112,92 @@ export interface Customer {
 export interface CustomerListResult {
   customers: Customer[];
   total: number;
+}
+
+export interface DuplicateCustomerSummary {
+  id: number;
+  customerId: string;
+  company: string;
+  contact?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  source?: string;
+  ownerId?: string;
+  collaboratorIds?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DuplicateCustomerMatch {
+  type: "email" | "domain" | "phone" | "company";
+  label: string;
+  value: string;
+  confidence: number;
+  customerIds: number[];
+}
+
+export interface DuplicateCustomerGroup {
+  id: string;
+  confidence: number;
+  matches: DuplicateCustomerMatch[];
+  members: DuplicateCustomerSummary[];
+}
+
+export interface DuplicateCustomerGroupsResult {
+  groups: DuplicateCustomerGroup[];
+  summary: {
+    scannedCustomers: number;
+    duplicateGroups: number;
+    duplicateCustomers: number;
+  };
+}
+
+export interface DuplicateMergeFieldValue {
+  customerId: number;
+  customerKey: string;
+  company: string;
+  value: unknown;
+  isPrimary: boolean;
+}
+
+export interface DuplicateMergePreview {
+  primary: DuplicateCustomerSummary;
+  duplicates: DuplicateCustomerSummary[];
+  matches: DuplicateCustomerMatch[];
+  fields: Array<{
+    key: string;
+    label: string;
+    values: DuplicateMergeFieldValue[];
+    conflict: boolean;
+    recommendedCustomerId: number;
+  }>;
+  contactOptions: Array<{
+    key: string;
+    contactId: number | null;
+    customerId: number;
+    customerKey: string;
+    company: string;
+    name: string;
+    email: string;
+    phone: string;
+    isPrimary: boolean;
+    synthetic: boolean;
+  }>;
+  defaultPrimaryContactSelection: string;
+  defaultFieldSelections: Record<string, number>;
+  relationCounts: Record<string, Record<string, number>>;
+  accessPlan: { ownerId: string; collaboratorIds: string[] };
+  mergeAllowed: boolean;
+  warnings: string[];
+  previewToken: string;
+}
+
+export interface DuplicateMergeResult {
+  mergeId: string;
+  customer: Customer;
+  mergedCustomerIds: string[];
+  movedRelations: Record<string, number>;
 }
 
 export interface Customer360 {

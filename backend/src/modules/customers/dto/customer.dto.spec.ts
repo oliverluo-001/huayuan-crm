@@ -9,6 +9,8 @@ import {
   UpdateOpportunityDto,
   UpdateQuoteDto,
   UpdateSampleDto,
+  DuplicateCustomerPreviewDto,
+  MergeDuplicateCustomersDto,
 } from './customer.dto';
 
 async function contractErrors<T extends object>(type: new () => T, payload: object) {
@@ -83,6 +85,29 @@ describe('CRM API contracts', () => {
     await expect(contractErrors(CreateCustomerDto, {
       company: 'Acme Piping',
       annualPurchaseAmount: -1,
+    })).resolves.not.toHaveLength(0);
+  });
+
+  it('validates duplicate preview and explicit merge confirmation contracts', async () => {
+    await expect(contractErrors(DuplicateCustomerPreviewDto, {
+      primaryCustomerId: 1,
+      duplicateCustomerIds: [2, 3],
+    })).resolves.toHaveLength(0);
+    await expect(contractErrors(MergeDuplicateCustomersDto, {
+      primaryCustomerId: 1,
+      duplicateCustomerIds: [2],
+      previewToken: 'preview-token',
+      fieldSelections: { company: 1, email: 2 },
+      primaryContactSelection: 'contact:8',
+      acknowledgeConflicts: true,
+    })).resolves.toHaveLength(0);
+    await expect(contractErrors(MergeDuplicateCustomersDto, {
+      primaryCustomerId: 1,
+      duplicateCustomerIds: [],
+      previewToken: 'preview-token',
+      fieldSelections: {},
+      primaryContactSelection: 'none',
+      acknowledgeConflicts: false,
     })).resolves.not.toHaveLength(0);
   });
 });

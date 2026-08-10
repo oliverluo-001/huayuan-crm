@@ -69,7 +69,7 @@ describe('CustomersService imports', () => {
     }));
   });
 
-  it('merges non-empty imported profile data without resetting CRM state', async () => {
+  it('fills blank imported profile data without silently overwriting existing business fields', async () => {
     const existing = {
       id: 1,
       customerId: 'cus_1',
@@ -95,7 +95,7 @@ describe('CustomersService imports', () => {
 
     expect(result).toEqual({ created: 0, updated: 1, skipped: 0, total: 1 });
     expect(existing).toMatchObject({
-      company: 'Updated Company',
+      company: 'Original Company',
       contact: 'Original Contact',
       phone: '123',
       website: 'https://example.com',

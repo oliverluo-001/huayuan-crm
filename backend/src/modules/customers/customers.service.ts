@@ -316,7 +316,7 @@ export class CustomersService {
   async findTrash() {
     const customers = await this.customerRepository.find({
       withDeleted: true,
-      where: { deletedAt: Not(IsNull()) } as any,
+      where: { deletedAt: Not(IsNull()), mergedIntoId: IsNull() } as any,
       order: { deletedAt: "DESC" },
     });
     return customers.map((c) => ({
@@ -337,6 +337,8 @@ export class CustomersService {
     if (!customer) throw new NotFoundException("客户不存在");
     if (!customer.deletedAt)
       throw new BadRequestException("该客户不在回收站中");
+    if (customer.mergedIntoId)
+      throw new BadRequestException("已合并客户不能从回收站恢复，请查看合并审计记录");
     await this.customerRepository.restore(id);
     return { restored: true };
   }
@@ -1303,7 +1305,7 @@ export class CustomersService {
           skipped++;
           continue;
         }
-        Object.assign(existing, this.mergeImportedCustomer(data));
+        Object.assign(existing, this.mergeImportedCustomer(data, existing));
         await this.customerRepository.save(existing);
         updated++;
       } else {
@@ -1352,7 +1354,7 @@ export class CustomersService {
           "该邮箱已存在于其他负责人客户中，请联系管理员调整归属",
         );
       }
-      Object.assign(existing, profile);
+      Object.assign(existing, this.mergeImportedCustomer(profile, existing));
       return {
         customer: await this.customerRepository.save(existing),
         created: false,
@@ -1480,9 +1482,16 @@ export class CustomersService {
 
   private mergeImportedCustomer(
     incoming: Record<string, unknown>,
+    existing?: object,
   ) {
     const merged: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(incoming)) {
+      if (
+        existing &&
+        this.hasImportedProfileValue(
+          (existing as Record<string, unknown>)[key],
+        )
+      ) continue;
       if (Array.isArray(value)) {
         if (value.length) merged[key] = value;
       } else if (typeof value === "number") {
@@ -1491,9 +1500,17 @@ export class CustomersService {
         merged[key] = value;
       }
     }
-    // Profile fields merge in place, so ownership, lifecycle, email health,
-    // tags, activities and historical email logs remain untouched.
+    // A duplicate import may fill missing profile data, but it never replaces
+    // an existing non-empty business value. Conflicts must go through the
+    // duplicate-customer preview and explicit field selection workflow.
     return merged;
+  }
+
+  private hasImportedProfileValue(value: unknown) {
+    if (value === null || value === undefined || value === "") return false;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "number") return value > 0;
+    return Boolean(String(value).trim());
   }
 
   private normalizeEmail(value: string) {

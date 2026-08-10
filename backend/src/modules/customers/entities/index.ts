@@ -7,3 +7,4 @@ export * from './opportunity.entity';
 export * from './quote.entity';
 export * from './sample.entity';
 export * from './customer-view.entity';
+export * from './customer-merge-history.entity';

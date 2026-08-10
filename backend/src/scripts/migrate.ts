@@ -98,6 +98,7 @@ export async function runDatabaseMigrations() {
     await migrateCustomer360Workspace(connection);
     await migrateCustomerMasterData(connection);
     await migrateSalesDataOwnership(connection);
+    await migrateCustomerDuplicateManagement(connection);
     const p03Report = await migrateP03DataIntegrity(connection, database);
     await migrateOpportunityLifecycle(connection);
     await connection.beginTransaction();
@@ -253,6 +254,65 @@ export async function migrateSalesDataOwnership(connection: Connection) {
       "owner_id",
     );
   }
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+}
+
+export async function migrateCustomerDuplicateManagement(connection: Connection) {
+  const id = "20260810_customer_duplicate_management";
+  if (await tableExists(connection, "customers")) {
+    await addColumnToTable(
+      connection,
+      "customers",
+      "source_history",
+      "JSON NULL",
+    );
+    await addColumnToTable(
+      connection,
+      "customers",
+      "merged_into_id",
+      "INT NULL",
+    );
+    await addColumnToTable(
+      connection,
+      "customers",
+      "merged_at",
+      "DATETIME NULL",
+    );
+    await addIndexIfMissing(
+      connection,
+      "customers",
+      "idx_customers_merged_into",
+      "merged_into_id",
+    );
+  }
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS customer_merge_history (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      merge_id VARCHAR(40) NOT NULL,
+      primary_customer_id INT NOT NULL,
+      primary_customer_key VARCHAR(32) NOT NULL,
+      merged_customer_ids JSON NOT NULL,
+      merged_customer_keys JSON NOT NULL,
+      source_snapshots JSON NOT NULL,
+      primary_snapshot_before JSON NOT NULL,
+      primary_snapshot_after JSON NOT NULL,
+      detection_reasons JSON NOT NULL,
+      field_selections JSON NOT NULL,
+      primary_contact_selection VARCHAR(64) NOT NULL DEFAULT '',
+      moved_relations JSON NOT NULL,
+      performed_by_id VARCHAR(32) NOT NULL DEFAULT '',
+      performed_by_name VARCHAR(100) NOT NULL DEFAULT '',
+      created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uq_customer_merge_history_merge_id (merge_id),
+      KEY idx_customer_merge_history_primary (primary_customer_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await addColumnToTable(
+    connection,
+    "customer_merge_history",
+    "primary_contact_selection",
+    "VARCHAR(64) NOT NULL DEFAULT ''",
+  );
   await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
 }
 

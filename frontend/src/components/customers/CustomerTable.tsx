@@ -27,6 +27,7 @@ import {
   Upload,
   ChevronDown,
   ChevronRight,
+  GitMerge,
 } from "lucide-react";
 import {
   getCustomers,
@@ -51,6 +52,7 @@ import {
 } from "@/api/client";
 import { Customer360Dialog } from "@/components/customers/Customer360Dialog";
 import { CustomerMasterDataFields } from "@/components/customers/CustomerMasterDataFields";
+import { CustomerDuplicatesDialog } from "@/components/customers/CustomerDuplicatesDialog";
 import {
   EMPTY_CUSTOMER_MASTER_FORM,
   type CustomerMasterForm,
@@ -111,6 +113,7 @@ export function CustomerTable(_props: CustomerTableProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [detailCustomer, setDetailCustomer] = useState<Customer | null>(null);
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false);
 
   // Expanded rows for inline detail
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -141,7 +144,7 @@ export function CustomerTable(_props: CustomerTableProps) {
       const duplicateCount = preview.duplicateCount + preview.duplicateUploadCount;
       if (duplicateCount > 0) {
         const confirmed = window.confirm(
-          `检测到 ${duplicateCount} 条重复邮箱。继续后将合并资料：新文件中的非空内容优先，空白字段和原有邮件记录会保留。是否继续？`,
+          `检测到 ${duplicateCount} 条重复邮箱。继续后只会补齐现有客户的空白字段，不会覆盖已有公司名称、联系方式或业务资料；如需选择冲突值，请导入后使用“重复客户”合并预览。是否继续？`,
         );
         if (!confirmed) return;
       }
@@ -620,12 +623,23 @@ export function CustomerTable(_props: CustomerTableProps) {
             <Upload className="mr-1 h-4 w-4" />
             {isImporting ? "导入中..." : "导入 Excel/CSV"}
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setDuplicatesOpen(true)}>
+            <GitMerge className="mr-1 h-4 w-4" />
+            重复客户
+          </Button>
           <Button onClick={() => setCreateOpen(true)} size="sm">
             <Plus className="mr-1 h-4 w-4" />
             新增客户
           </Button>
         </div>
       </div> : <Badge variant="outline">只读查看：当前角色不能导入、创建、编辑或删除客户</Badge>}
+
+      <CustomerDuplicatesDialog
+        open={duplicatesOpen}
+        onOpenChange={setDuplicatesOpen}
+        onMerged={() => fetchCustomers(1, filters)}
+        users={userDirectory}
+      />
 
       {/* Table */}
       <Card>

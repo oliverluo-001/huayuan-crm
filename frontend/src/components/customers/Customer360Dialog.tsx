@@ -1910,6 +1910,12 @@ function OverviewWorkspace({
           <Summary label="首选贸易条款" value={data.customer.preferredIncoterm} />
           <Summary label="客户来源" value={masterOptionLabel(CUSTOMER_SOURCE_OPTIONS, data.customer.source)} />
           <Summary
+            label="合并来源记录"
+            value={(data.customer.sourceHistory || [])
+              .map((item) => `${item.company || item.customerId}：${masterOptionLabel(CUSTOMER_SOURCE_OPTIONS, item.source)}`)
+              .join("；") || "暂无合并来源"}
+          />
+          <Summary
             label="负责人"
             value={users.find((user) => user.id === data.customer.ownerId)?.displayName || "未分配"}
           />

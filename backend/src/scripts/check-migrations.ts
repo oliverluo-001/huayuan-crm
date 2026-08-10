@@ -56,6 +56,13 @@ async function seedLegacyFixture(connection: Connection) {
       DROP COLUMN marketing_allowed
   `);
   await connection.query("ALTER TABLE email_templates DROP COLUMN owner_id");
+  await connection.query(`
+    ALTER TABLE customers
+      DROP COLUMN source_history,
+      DROP COLUMN merged_into_id,
+      DROP COLUMN merged_at
+  `);
+  await connection.query("DROP TABLE IF EXISTS customer_merge_history");
   await connection.query(
     "ALTER TABLE products ADD COLUMN base_price VARCHAR(64) NULL",
   );
@@ -180,6 +187,27 @@ async function verifyMigratedData(connection: Connection) {
     [database],
   );
   assert.equal(Number(ownershipColumns[0].count), 1, "邮件模板归属字段迁移不完整");
+
+  const [duplicateColumns] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'customers'
+       AND COLUMN_NAME IN ('source_history', 'merged_into_id', 'merged_at')`,
+    [database],
+  );
+  assert.equal(Number(duplicateColumns[0].count), 3, "重复客户管理字段迁移不完整");
+  const [mergeHistoryTable] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'customer_merge_history'`,
+    [database],
+  );
+  assert.equal(Number(mergeHistoryTable[0].count), 1, "客户合并审计表迁移不完整");
+  const [mergeHistoryColumns] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'customer_merge_history'
+       AND COLUMN_NAME IN ('merge_id', 'primary_customer_id', 'source_snapshots', 'field_selections', 'primary_contact_selection', 'moved_relations', 'performed_by_id')`,
+    [database],
+  );
+  assert.equal(Number(mergeHistoryColumns[0].count), 7, "客户合并审计字段迁移不完整");
 
   const [contacts] = await connection.query<CheckRow[]>(
     "SELECT contact_status, marketing_allowed FROM contacts WHERE contact_id = 'CONTACT-CI-1'",

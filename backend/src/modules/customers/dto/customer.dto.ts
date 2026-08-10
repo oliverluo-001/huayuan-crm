@@ -7,12 +7,37 @@ import {
   IsEmail,
   IsEnum,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Max,
   Min,
   ValidateNested,
 } from "class-validator";
+
+export class DuplicateCustomerPreviewDto {
+  @IsNumber()
+  primaryCustomerId: number;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsNumber({}, { each: true })
+  duplicateCustomerIds: number[];
+}
+
+export class MergeDuplicateCustomersDto extends DuplicateCustomerPreviewDto {
+  @IsString()
+  previewToken: string;
+
+  @IsObject()
+  fieldSelections: Record<string, number>;
+
+  @IsString()
+  primaryContactSelection: string;
+
+  @IsBoolean()
+  acknowledgeConflicts: boolean;
+}
 
 export class CreateCustomerDto {
   @IsString()
