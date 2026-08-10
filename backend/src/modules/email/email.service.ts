@@ -44,6 +44,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EmailService.name);
   private readonly processingTasks = new Set<number>();
   private scheduler?: NodeJS.Timeout;
+  private schedulerRun?: Promise<void>;
   private lastSendAt = 0;
   private sendLock: Promise<void> = Promise.resolve();
 
@@ -63,14 +64,27 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     this.scheduler = setInterval(() => {
-      void this.processDueTasks();
+      this.runScheduler();
     }, SCHEDULER_INTERVAL_MS);
     this.scheduler.unref?.();
-    void this.processDueTasks();
+    this.runScheduler();
   }
 
-  onModuleDestroy() {
+  async onModuleDestroy() {
     if (this.scheduler) clearInterval(this.scheduler);
+    await this.schedulerRun;
+  }
+
+  private runScheduler() {
+    if (this.schedulerRun) return;
+    const execution = this.processDueTasks()
+      .catch((error: any) => {
+        this.logger.error('邮件任务调度检查失败', error?.stack || error);
+      })
+      .finally(() => {
+        if (this.schedulerRun === execution) this.schedulerRun = undefined;
+      });
+    this.schedulerRun = execution;
   }
 
   // ==================== Templates ====================

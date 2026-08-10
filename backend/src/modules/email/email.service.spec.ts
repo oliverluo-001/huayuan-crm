@@ -37,6 +37,29 @@ describe('EmailService ownership', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
+  it('waits for an in-flight scheduler check before module shutdown', async () => {
+    let finishScheduler: (() => void) | undefined;
+    const schedulerPending = new Promise<void>((resolve) => {
+      finishScheduler = resolve;
+    });
+    const processDueTasks = jest
+      .spyOn(service as any, 'processDueTasks')
+      .mockReturnValue(schedulerPending);
+
+    service.onModuleInit();
+    let shutdownFinished = false;
+    const shutdown = service.onModuleDestroy().then(() => {
+      shutdownFinished = true;
+    });
+    await Promise.resolve();
+    expect(shutdownFinished).toBe(false);
+
+    finishScheduler?.();
+    await shutdown;
+    expect(shutdownFinished).toBe(true);
+    processDueTasks.mockRestore();
+  });
+
   it('returns a task to its owner', async () => {
     taskRepository.findOne.mockResolvedValue({ id: 1, emailTaskId: 'task_1', ownerId: '7', customerIds: '[]' });
     await expect(service.findOneTask('1', '7')).resolves.toEqual(expect.objectContaining({ id: 1 }));
