@@ -227,6 +227,24 @@ async function verifyMigratedData(connection: Connection) {
   );
 }
 
+async function verifyApplicationStartup() {
+  process.env.DB_SYNCHRONIZE = "false";
+  process.env.DB_LOGGING = "false";
+  process.env.JWT_SECRET = process.env.JWT_SECRET || "ci-startup-smoke-secret";
+  process.env.CREDENTIAL_ENCRYPTION_KEY =
+    process.env.CREDENTIAL_ENCRYPTION_KEY || process.env.JWT_SECRET;
+
+  const [{ NestFactory }, { AppModule }] = await Promise.all([
+    import("@nestjs/core"),
+    import("../app.module"),
+  ]);
+  const app = await NestFactory.createApplicationContext(AppModule, {
+    logger: ["error"],
+  });
+  await app.close();
+  console.log("Backend application startup check passed");
+}
+
 async function main() {
   const admin = await mysql.createConnection({ host, port, user, password });
   let fixture: Connection | undefined;
@@ -268,6 +286,7 @@ async function main() {
       assert.equal(count, 0, `迁移第二次执行仍产生变更: ${name}=${count}`);
     }
     await verifyMigratedData(fixture);
+    await verifyApplicationStartup();
     console.log(`Database migration check passed: ${database}`);
   } finally {
     if (fixture) await fixture.end();

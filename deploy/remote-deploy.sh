@@ -240,8 +240,17 @@ MIGRATION_STARTED=1
 )
 
 start_backend "$RELEASE_DIR"
-curl --retry 15 --retry-delay 2 --retry-connrefused --fail --silent --show-error \
-  "http://127.0.0.1:$PORT/api/health/$RELEASE_ID" >/dev/null
+if ! curl --retry 15 --retry-delay 2 --retry-connrefused --fail --silent --show-error \
+  "http://127.0.0.1:$PORT/api/health/$RELEASE_ID" >/dev/null; then
+  echo "New backend failed its release health check; collecting diagnostics" >&2
+  pm2 describe huayuan-crm-backend || true
+  pm2 logs huayuan-crm-backend --lines 120 --nostream || true
+  if [ -f "$RELEASE_DIR/backend/logs/error.log" ]; then
+    echo "--- release error.log ---" >&2
+    tail -n 120 "$RELEASE_DIR/backend/logs/error.log" >&2 || true
+  fi
+  false
+fi
 
 switch_symlink "$RELEASE_DIR" "$CURRENT_LINK"
 APP_SWITCHED=1

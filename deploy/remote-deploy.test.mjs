@@ -55,6 +55,13 @@ test('only activates the new frontend and backend after the new backend passes h
   assert.equal(script.includes('rm -rf /var/www/huayuan-crm'), false, '不得删除正在使用的前端目录');
 });
 
+test('prints new backend diagnostics before rollback when its health check fails', () => {
+  const health = position('if ! curl --retry 15');
+  const diagnostics = position('pm2 logs huayuan-crm-backend --lines 120 --nostream');
+  const fail = script.indexOf('  false\n', diagnostics);
+  assert.ok(health < diagnostics && diagnostics < fail, '健康检查失败时必须先输出新版本日志再触发回滚');
+});
+
 test('uses independent backend and frontend live paths', () => {
   position('CURRENT_LINK="$APP_ROOT/app-current"');
   assert.match(nginx, /root \/var\/www\/huayuan-crm\/html;/);
