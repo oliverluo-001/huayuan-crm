@@ -231,7 +231,14 @@ export interface Contact {
   name: string;
   title?: string;
   department?: string;
-  decisionRole?: "" | "decision_maker" | "influencer" | "champion" | "user" | "gatekeeper" | "other";
+  decisionRole?:
+    | ""
+    | "decision_maker"
+    | "influencer"
+    | "champion"
+    | "user"
+    | "gatekeeper"
+    | "other";
   purchasingInfluence?: "" | "high" | "medium" | "low";
   preferredLanguage?: string;
   email?: string;
@@ -280,10 +287,48 @@ export interface Opportunity {
     | "lost";
   amount?: number;
   probability?: number;
+  ownerId?: string;
+  ownerName?: string;
+  collaboratorIds?: string[];
+  productName?: string;
+  productSpecification?: string;
+  expectedQuantity?: number;
+  quantityUnit?: string;
+  targetPrice?: number;
+  currency?: string;
+  budget?: number;
+  purchaseTime?: string;
+  decisionProcess?: string;
+  nextStepAction?: string;
+  nextStepDueDate?: string;
   expectedCloseDate?: string;
+  forecastCategory?: "pipeline" | "best_case" | "commit" | "closed" | "omitted";
+  winReason?: string;
+  lossReason?: string;
+  competitors?: string;
+  stageEnteredAt?: string;
+  closedAt?: string;
+  stageDurationHours?: number;
+  stageDurationDays?: number;
+  isOverdue?: boolean;
+  missingNextStep?: boolean;
+  alerts?: Array<"overdue" | "missing_next_step">;
   description?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface OpportunityStageHistory {
+  id: string;
+  opportunityPk: number;
+  opportunityKey: string;
+  fromStage?: Opportunity["stage"] | null;
+  toStage: Opportunity["stage"];
+  durationHours: number;
+  changedById?: string;
+  changedByName?: string;
+  changeNote?: string;
+  changedAt: string;
 }
 
 // Product types
@@ -361,7 +406,25 @@ export interface CreateOpportunityInput {
   name: string;
   amount?: number;
   stage?: Opportunity["stage"];
+  probability?: number;
+  ownerId?: string;
+  collaboratorIds?: string[];
+  productName?: string;
+  productSpecification?: string;
+  expectedQuantity?: number;
+  quantityUnit?: string;
+  targetPrice?: number;
+  currency?: string;
+  budget?: number;
+  purchaseTime?: string;
+  decisionProcess?: string;
+  nextStepAction?: string;
+  nextStepDueDate?: string;
   expectedCloseDate?: string;
+  forecastCategory?: Opportunity["forecastCategory"];
+  winReason?: string;
+  lossReason?: string;
+  competitors?: string;
   description?: string;
 }
 

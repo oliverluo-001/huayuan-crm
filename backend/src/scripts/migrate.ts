@@ -101,6 +101,7 @@ export async function runDatabaseMigrations() {
     await migrateCustomerDuplicateManagement(connection);
     const p03Report = await migrateP03DataIntegrity(connection, database);
     await migrateOpportunityLifecycle(connection);
+    await migrateOpportunityManagement(connection);
     await connection.beginTransaction();
     try {
       await ensureInitialAdmin(connection);
@@ -219,23 +220,86 @@ export async function migrateCustomerMasterData(connection: Connection) {
 
   await addColumnToTable(connection, "customers", "address", "TEXT NULL");
   await addColumnToTable(connection, "customers", "main_markets", "JSON NULL");
-  await addColumnToTable(connection, "customers", "annual_purchase_amount", "DECIMAL(15,2) NOT NULL DEFAULT 0");
-  await addColumnToTable(connection, "customers", "preferred_currency", "VARCHAR(3) NOT NULL DEFAULT 'USD'");
-  await addColumnToTable(connection, "customers", "preferred_incoterm", "VARCHAR(20) NOT NULL DEFAULT ''");
-  await addColumnToTable(connection, "customers", "collaborator_ids", "JSON NULL");
+  await addColumnToTable(
+    connection,
+    "customers",
+    "annual_purchase_amount",
+    "DECIMAL(15,2) NOT NULL DEFAULT 0",
+  );
+  await addColumnToTable(
+    connection,
+    "customers",
+    "preferred_currency",
+    "VARCHAR(3) NOT NULL DEFAULT 'USD'",
+  );
+  await addColumnToTable(
+    connection,
+    "customers",
+    "preferred_incoterm",
+    "VARCHAR(20) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "customers",
+    "collaborator_ids",
+    "JSON NULL",
+  );
 
   if (await tableExists(connection, "contacts")) {
-    await addColumnToTable(connection, "contacts", "department", "VARCHAR(100) NOT NULL DEFAULT ''");
-    await addColumnToTable(connection, "contacts", "decision_role", "VARCHAR(30) NOT NULL DEFAULT ''");
-    await addColumnToTable(connection, "contacts", "purchasing_influence", "VARCHAR(20) NOT NULL DEFAULT ''");
-    await addColumnToTable(connection, "contacts", "preferred_language", "VARCHAR(50) NOT NULL DEFAULT ''");
-    await addColumnToTable(connection, "contacts", "whatsapp", "VARCHAR(100) NOT NULL DEFAULT ''");
-    await addColumnToTable(connection, "contacts", "linkedin", "VARCHAR(500) NOT NULL DEFAULT ''");
-    await addColumnToTable(connection, "contacts", "contact_status", "VARCHAR(20) NOT NULL DEFAULT 'unknown'");
-    await addColumnToTable(connection, "contacts", "marketing_allowed", "TINYINT(1) NOT NULL DEFAULT 1");
+    await addColumnToTable(
+      connection,
+      "contacts",
+      "department",
+      "VARCHAR(100) NOT NULL DEFAULT ''",
+    );
+    await addColumnToTable(
+      connection,
+      "contacts",
+      "decision_role",
+      "VARCHAR(30) NOT NULL DEFAULT ''",
+    );
+    await addColumnToTable(
+      connection,
+      "contacts",
+      "purchasing_influence",
+      "VARCHAR(20) NOT NULL DEFAULT ''",
+    );
+    await addColumnToTable(
+      connection,
+      "contacts",
+      "preferred_language",
+      "VARCHAR(50) NOT NULL DEFAULT ''",
+    );
+    await addColumnToTable(
+      connection,
+      "contacts",
+      "whatsapp",
+      "VARCHAR(100) NOT NULL DEFAULT ''",
+    );
+    await addColumnToTable(
+      connection,
+      "contacts",
+      "linkedin",
+      "VARCHAR(500) NOT NULL DEFAULT ''",
+    );
+    await addColumnToTable(
+      connection,
+      "contacts",
+      "contact_status",
+      "VARCHAR(20) NOT NULL DEFAULT 'unknown'",
+    );
+    await addColumnToTable(
+      connection,
+      "contacts",
+      "marketing_allowed",
+      "TINYINT(1) NOT NULL DEFAULT 1",
+    );
   }
 
-  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
 }
 
 export async function migrateSalesDataOwnership(connection: Connection) {
@@ -254,10 +318,15 @@ export async function migrateSalesDataOwnership(connection: Connection) {
       "owner_id",
     );
   }
-  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
 }
 
-export async function migrateCustomerDuplicateManagement(connection: Connection) {
+export async function migrateCustomerDuplicateManagement(
+  connection: Connection,
+) {
   const id = "20260810_customer_duplicate_management";
   if (await tableExists(connection, "customers")) {
     await addColumnToTable(
@@ -313,7 +382,10 @@ export async function migrateCustomerDuplicateManagement(connection: Connection)
     "primary_contact_selection",
     "VARCHAR(64) NOT NULL DEFAULT ''",
   );
-  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
 }
 
 async function migrateOpportunityLifecycle(connection: Connection) {
@@ -370,6 +442,199 @@ async function migrateOpportunityLifecycle(connection: Connection) {
         WHEN 'lost' THEN 'lost'
         ELSE c.journey_stage
       END)
+  `);
+
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
+}
+
+export async function migrateOpportunityManagement(connection: Connection) {
+  const id = "20260811_opportunity_management";
+  if (!(await tableExists(connection, "opportunities"))) return;
+
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "owner_id",
+    "VARCHAR(32) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "collaborator_ids",
+    "JSON NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "product_name",
+    "VARCHAR(255) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "product_specification",
+    "TEXT NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "expected_quantity",
+    "DECIMAL(15,3) NOT NULL DEFAULT 0",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "quantity_unit",
+    "VARCHAR(30) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "target_price",
+    "DECIMAL(15,2) NOT NULL DEFAULT 0",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "currency",
+    "VARCHAR(3) NOT NULL DEFAULT 'USD'",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "budget",
+    "DECIMAL(15,2) NOT NULL DEFAULT 0",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "purchase_time",
+    "VARCHAR(100) NOT NULL DEFAULT ''",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "decision_process",
+    "TEXT NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "next_step_action",
+    "TEXT NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "next_step_due_date",
+    "DATE NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "forecast_category",
+    "ENUM('pipeline','best_case','commit','closed','omitted') NOT NULL DEFAULT 'pipeline'",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "win_reason",
+    "TEXT NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "loss_reason",
+    "TEXT NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "competitors",
+    "TEXT NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "stage_entered_at",
+    "DATETIME(6) NULL",
+  );
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "closed_at",
+    "DATETIME(6) NULL",
+  );
+
+  await connection.query(`
+    UPDATE opportunities o
+    JOIN customers c ON c.id = o.customer_id
+    SET o.owner_id = CASE WHEN o.owner_id = '' THEN c.owner_id ELSE o.owner_id END,
+        o.collaborator_ids = COALESCE(o.collaborator_ids, c.collaborator_ids),
+        o.currency = CASE WHEN o.currency = '' THEN COALESCE(NULLIF(c.preferred_currency, ''), 'USD') ELSE o.currency END,
+        o.stage_entered_at = COALESCE(o.stage_entered_at, o.updated_at, o.created_at),
+        o.closed_at = CASE
+          WHEN o.stage IN ('won', 'lost') THEN COALESCE(o.closed_at, o.updated_at, o.created_at)
+          ELSE NULL
+        END,
+        o.forecast_category = CASE
+          WHEN o.stage IN ('won', 'lost') THEN 'closed'
+          WHEN o.forecast_category = 'closed' THEN 'pipeline'
+          ELSE o.forecast_category
+        END
+  `);
+
+  await addIndexIfMissing(
+    connection,
+    "opportunities",
+    "idx_opportunities_owner",
+    "owner_id",
+  );
+  await addIndexIfMissing(
+    connection,
+    "opportunities",
+    "idx_opportunities_forecast",
+    "forecast_category",
+  );
+  await addIndexIfMissing(
+    connection,
+    "opportunities",
+    "idx_opportunities_stage_entered",
+    "stage_entered_at",
+  );
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS opportunity_stage_history (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      opportunity_id INT NOT NULL,
+      opportunity_key VARCHAR(32) NOT NULL,
+      from_stage VARCHAR(20) NULL,
+      to_stage VARCHAR(20) NOT NULL,
+      duration_hours INT UNSIGNED NOT NULL DEFAULT 0,
+      changed_by_id VARCHAR(32) NOT NULL DEFAULT '',
+      changed_by_name VARCHAR(100) NOT NULL DEFAULT '',
+      change_note TEXT NULL,
+      changed_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      KEY idx_opportunity_stage_history_opportunity (opportunity_id, changed_at),
+      CONSTRAINT fk_opportunity_stage_history_opportunity
+        FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await connection.query(`
+    INSERT INTO opportunity_stage_history (
+      opportunity_id, opportunity_key, from_stage, to_stage, duration_hours,
+      changed_by_id, changed_by_name, change_note, changed_at
+    )
+    SELECT o.id, o.opportunity_id, NULL, o.stage, 0, '', '历史数据迁移',
+           'P1.4 初始化阶段记录', COALESCE(o.stage_entered_at, o.created_at)
+    FROM opportunities o
+    WHERE NOT EXISTS (
+      SELECT 1 FROM opportunity_stage_history h WHERE h.opportunity_id = o.id
+    )
   `);
 
   await connection.query(

@@ -46,6 +46,7 @@ import { canManageCrmData } from "@/auth/permissions";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   CUSTOMER_JOURNEY_STAGES,
+  OPPORTUNITY_FORECAST_CATEGORIES,
   OPPORTUNITY_STAGES,
 } from "@/contracts/crm-stages";
 import {
@@ -180,7 +181,24 @@ export function Customer360Dialog({
     name: "",
     amount: "",
     stage: "prospecting" as Opportunity["stage"],
+    productName: "",
+    productSpecification: "",
+    expectedQuantity: "",
+    quantityUnit: "件",
+    targetPrice: "",
+    currency: "USD",
+    budget: "",
+    purchaseTime: "",
+    decisionProcess: "",
+    nextStepAction: "",
+    nextStepDueDate: "",
     expectedCloseDate: "",
+    forecastCategory: "pipeline" as NonNullable<
+      Opportunity["forecastCategory"]
+    >,
+    winReason: "",
+    lossReason: "",
+    competitors: "",
     description: "",
   });
   const [quoteForm, setQuoteForm] = useState({
@@ -214,8 +232,12 @@ export function Customer360Dialog({
     async (showLoading = false) => {
       if (showLoading) setIsLoading(true);
       try {
-        const [customerResult, attachmentResult, productResult, directoryResult] =
-          await Promise.allSettled([
+        const [
+          customerResult,
+          attachmentResult,
+          productResult,
+          directoryResult,
+        ] = await Promise.allSettled([
           getCustomer360(customerId),
           getCustomerAttachments(customerId),
           getProducts(),
@@ -234,8 +256,12 @@ export function Customer360Dialog({
               : "附件服务暂时不可用",
           );
         }
-        setProducts(productResult.status === "fulfilled" ? productResult.value : []);
-        setUserDirectory(directoryResult.status === "fulfilled" ? directoryResult.value : []);
+        setProducts(
+          productResult.status === "fulfilled" ? productResult.value : [],
+        );
+        setUserDirectory(
+          directoryResult.status === "fulfilled" ? directoryResult.value : [],
+        );
         setError("");
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "客户详情加载失败");
@@ -374,13 +400,39 @@ export function Customer360Dialog({
   const submitOpportunity = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!opportunityForm.name.trim()) return;
+    if (opportunityForm.stage === "won" && !opportunityForm.winReason.trim()) {
+      toast.error("商机关闭为赢单前必须填写赢单原因");
+      return;
+    }
+    if (
+      opportunityForm.stage === "lost" &&
+      !opportunityForm.lossReason.trim()
+    ) {
+      toast.error("商机关闭为输单前必须填写输单原因");
+      return;
+    }
     const succeeded = await mutate(
       () =>
         createCustomerOpportunity(customerId, {
           name: opportunityForm.name.trim(),
           amount: Number(opportunityForm.amount || 0),
           stage: opportunityForm.stage,
+          productName: opportunityForm.productName.trim(),
+          productSpecification: opportunityForm.productSpecification.trim(),
+          expectedQuantity: Number(opportunityForm.expectedQuantity || 0),
+          quantityUnit: opportunityForm.quantityUnit.trim(),
+          targetPrice: Number(opportunityForm.targetPrice || 0),
+          currency: opportunityForm.currency.trim().toUpperCase() || "USD",
+          budget: Number(opportunityForm.budget || 0),
+          purchaseTime: opportunityForm.purchaseTime.trim(),
+          decisionProcess: opportunityForm.decisionProcess.trim(),
+          nextStepAction: opportunityForm.nextStepAction.trim(),
+          nextStepDueDate: opportunityForm.nextStepDueDate || undefined,
           expectedCloseDate: opportunityForm.expectedCloseDate || undefined,
+          forecastCategory: opportunityForm.forecastCategory,
+          winReason: opportunityForm.winReason.trim(),
+          lossReason: opportunityForm.lossReason.trim(),
+          competitors: opportunityForm.competitors.trim(),
           description: opportunityForm.description.trim() || undefined,
         }),
       "商机已创建，客户跟进阶段已同步",
@@ -390,7 +442,22 @@ export function Customer360Dialog({
         name: "",
         amount: "",
         stage: "prospecting",
+        productName: "",
+        productSpecification: "",
+        expectedQuantity: "",
+        quantityUnit: "件",
+        targetPrice: "",
+        currency: "USD",
+        budget: "",
+        purchaseTime: "",
+        decisionProcess: "",
+        nextStepAction: "",
+        nextStepDueDate: "",
         expectedCloseDate: "",
+        forecastCategory: "pipeline",
+        winReason: "",
+        lossReason: "",
+        competitors: "",
         description: "",
       });
   };
@@ -639,7 +706,8 @@ export function Customer360Dialog({
                             附件服务暂时不可用
                           </p>
                           <p className="mt-1 text-muted-foreground">
-                            {attachmentError}。联系人、跟进、待办、商机等其他工作区仍可正常使用。
+                            {attachmentError}
+                            。联系人、跟进、待办、商机等其他工作区仍可正常使用。
                           </p>
                         </div>
                         <Button
@@ -653,7 +721,7 @@ export function Customer360Dialog({
                     )}
                     {canManage && (
                       <form
-                        className="grid gap-3 rounded-xl border bg-muted/20 p-4 md:grid-cols-2"
+                        className="grid gap-3 rounded-xl border bg-muted/20 p-4 md:grid-cols-3"
                         onSubmit={submitContact}
                       >
                         <Input
@@ -680,26 +748,73 @@ export function Customer360Dialog({
                         <Input
                           placeholder="部门"
                           value={contactForm.department}
-                          onChange={(event) => setContactForm((current) => ({ ...current, department: event.target.value }))}
+                          onChange={(event) =>
+                            setContactForm((current) => ({
+                              ...current,
+                              department: event.target.value,
+                            }))
+                          }
                         />
                         <Select
                           value={contactForm.decisionRole || "__none__"}
-                          onValueChange={(value) => setContactForm((current) => ({ ...current, decisionRole: value === "__none__" ? "" : (value || "") as NonNullable<Contact["decisionRole"]> }))}
+                          onValueChange={(value) =>
+                            setContactForm((current) => ({
+                              ...current,
+                              decisionRole:
+                                value === "__none__"
+                                  ? ""
+                                  : ((value || "") as NonNullable<
+                                      Contact["decisionRole"]
+                                    >),
+                            }))
+                          }
                         >
-                          <SelectTrigger><SelectValue placeholder="决策角色" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="决策角色" />
+                          </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">未设置决策角色</SelectItem>
-                            {DECISION_ROLE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                            <SelectItem value="__none__">
+                              未设置决策角色
+                            </SelectItem>
+                            {DECISION_ROLE_OPTIONS.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <Select
                           value={contactForm.purchasingInfluence || "__none__"}
-                          onValueChange={(value) => setContactForm((current) => ({ ...current, purchasingInfluence: value === "__none__" ? "" : (value || "") as NonNullable<Contact["purchasingInfluence"]> }))}
+                          onValueChange={(value) =>
+                            setContactForm((current) => ({
+                              ...current,
+                              purchasingInfluence:
+                                value === "__none__"
+                                  ? ""
+                                  : ((value || "") as NonNullable<
+                                      Contact["purchasingInfluence"]
+                                    >),
+                            }))
+                          }
                         >
-                          <SelectTrigger><SelectValue placeholder="采购影响力" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="采购影响力" />
+                          </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">未设置采购影响力</SelectItem>
-                            {PURCHASING_INFLUENCE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                            <SelectItem value="__none__">
+                              未设置采购影响力
+                            </SelectItem>
+                            {PURCHASING_INFLUENCE_OPTIONS.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <Input
@@ -726,38 +841,84 @@ export function Customer360Dialog({
                         <Input
                           placeholder="WhatsApp"
                           value={contactForm.whatsapp}
-                          onChange={(event) => setContactForm((current) => ({ ...current, whatsapp: event.target.value }))}
+                          onChange={(event) =>
+                            setContactForm((current) => ({
+                              ...current,
+                              whatsapp: event.target.value,
+                            }))
+                          }
                         />
                         <Input
                           type="url"
                           placeholder="LinkedIn 个人主页"
                           value={contactForm.linkedin}
-                          onChange={(event) => setContactForm((current) => ({ ...current, linkedin: event.target.value }))}
+                          onChange={(event) =>
+                            setContactForm((current) => ({
+                              ...current,
+                              linkedin: event.target.value,
+                            }))
+                          }
                         />
                         <Select
                           value={contactForm.preferredLanguage || "__none__"}
-                          onValueChange={(value) => setContactForm((current) => ({ ...current, preferredLanguage: value === "__none__" ? "" : value || "" }))}
+                          onValueChange={(value) =>
+                            setContactForm((current) => ({
+                              ...current,
+                              preferredLanguage:
+                                value === "__none__" ? "" : value || "",
+                            }))
+                          }
                         >
-                          <SelectTrigger><SelectValue placeholder="首选语言" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="首选语言" />
+                          </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">未设置首选语言</SelectItem>
-                            {PREFERRED_LANGUAGE_OPTIONS.map((language) => <SelectItem key={language} value={language}>{language}</SelectItem>)}
+                            <SelectItem value="__none__">
+                              未设置首选语言
+                            </SelectItem>
+                            {PREFERRED_LANGUAGE_OPTIONS.map((language) => (
+                              <SelectItem key={language} value={language}>
+                                {language}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <Select
                           value={contactForm.contactStatus}
-                          onValueChange={(value) => setContactForm((current) => ({ ...current, contactStatus: (value || "unknown") as NonNullable<Contact["contactStatus"]> }))}
+                          onValueChange={(value) =>
+                            setContactForm((current) => ({
+                              ...current,
+                              contactStatus: (value ||
+                                "unknown") as NonNullable<
+                                Contact["contactStatus"]
+                              >,
+                            }))
+                          }
                         >
-                          <SelectTrigger><SelectValue placeholder="联系状态" /></SelectTrigger>
+                          <SelectTrigger>
+                            <SelectValue placeholder="联系状态" />
+                          </SelectTrigger>
                           <SelectContent>
-                            {CONTACT_STATUS_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                            {CONTACT_STATUS_OPTIONS.map((option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <label className="flex items-center gap-2 text-sm">
                           <input
                             type="checkbox"
                             checked={contactForm.marketingAllowed}
-                            onChange={(event) => setContactForm((current) => ({ ...current, marketingAllowed: event.target.checked }))}
+                            onChange={(event) =>
+                              setContactForm((current) => ({
+                                ...current,
+                                marketingAllowed: event.target.checked,
+                              }))
+                            }
                           />
                           允许发送营销邮件
                         </label>
@@ -851,26 +1012,66 @@ export function Customer360Dialog({
                             )}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {[contact.department, contact.title, contact.email, contact.phone, contact.whatsapp && `WhatsApp ${contact.whatsapp}`]
+                            {[
+                              contact.department,
+                              contact.title,
+                              contact.email,
+                              contact.phone,
+                              contact.whatsapp &&
+                                `WhatsApp ${contact.whatsapp}`,
+                            ]
                               .filter(Boolean)
                               .join(" · ") || "未填写联系方式"}
                           </p>
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <Badge variant="outline">
-                              {masterOptionLabel(CONTACT_STATUS_OPTIONS, contact.contactStatus || "unknown")}
+                              {masterOptionLabel(
+                                CONTACT_STATUS_OPTIONS,
+                                contact.contactStatus || "unknown",
+                              )}
                             </Badge>
                             {contact.decisionRole && (
-                              <Badge variant="outline">{masterOptionLabel(DECISION_ROLE_OPTIONS, contact.decisionRole)}</Badge>
+                              <Badge variant="outline">
+                                {masterOptionLabel(
+                                  DECISION_ROLE_OPTIONS,
+                                  contact.decisionRole,
+                                )}
+                              </Badge>
                             )}
                             {contact.purchasingInfluence && (
-                              <Badge variant="outline">采购影响力：{masterOptionLabel(PURCHASING_INFLUENCE_OPTIONS, contact.purchasingInfluence)}</Badge>
+                              <Badge variant="outline">
+                                采购影响力：
+                                {masterOptionLabel(
+                                  PURCHASING_INFLUENCE_OPTIONS,
+                                  contact.purchasingInfluence,
+                                )}
+                              </Badge>
                             )}
-                            {contact.preferredLanguage && <Badge variant="outline">{contact.preferredLanguage}</Badge>}
-                            <Badge variant={contact.marketingAllowed === false ? "destructive" : "secondary"}>
-                              {contact.marketingAllowed === false ? "禁止营销邮件" : "允许营销邮件"}
+                            {contact.preferredLanguage && (
+                              <Badge variant="outline">
+                                {contact.preferredLanguage}
+                              </Badge>
+                            )}
+                            <Badge
+                              variant={
+                                contact.marketingAllowed === false
+                                  ? "destructive"
+                                  : "secondary"
+                              }
+                            >
+                              {contact.marketingAllowed === false
+                                ? "禁止营销邮件"
+                                : "允许营销邮件"}
                             </Badge>
                             {contact.linkedin && (
-                              <a className="text-xs text-primary underline" href={contact.linkedin} target="_blank" rel="noreferrer">LinkedIn</a>
+                              <a
+                                className="text-xs text-primary underline"
+                                href={contact.linkedin}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                LinkedIn
+                              </a>
                             )}
                           </div>
                         </RecordRow>
@@ -1147,6 +1348,12 @@ export function Customer360Dialog({
                             setOpportunityForm((current) => ({
                               ...current,
                               stage: value as Opportunity["stage"],
+                              forecastCategory:
+                                value === "won" || value === "lost"
+                                  ? "closed"
+                                  : current.forecastCategory === "closed"
+                                    ? "pipeline"
+                                    : current.forecastCategory,
                             }))
                           }
                         >
@@ -1166,18 +1373,186 @@ export function Customer360Dialog({
                           </SelectContent>
                         </Select>
                         <Input
-                          type="date"
-                          value={opportunityForm.expectedCloseDate}
+                          placeholder="产品名称"
+                          value={opportunityForm.productName}
                           onChange={(event) =>
                             setOpportunityForm((current) => ({
                               ...current,
-                              expectedCloseDate: event.target.value,
+                              productName: event.target.value,
+                            }))
+                          }
+                        />
+                        <Input
+                          placeholder="产品规格（材质、口径、压力等级等）"
+                          value={opportunityForm.productSpecification}
+                          onChange={(event) =>
+                            setOpportunityForm((current) => ({
+                              ...current,
+                              productSpecification: event.target.value,
+                            }))
+                          }
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.001"
+                            placeholder="预计数量"
+                            value={opportunityForm.expectedQuantity}
+                            onChange={(event) =>
+                              setOpportunityForm((current) => ({
+                                ...current,
+                                expectedQuantity: event.target.value,
+                              }))
+                            }
+                          />
+                          <Input
+                            placeholder="单位"
+                            value={opportunityForm.quantityUnit}
+                            onChange={(event) =>
+                              setOpportunityForm((current) => ({
+                                ...current,
+                                quantityUnit: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="目标单价"
+                            value={opportunityForm.targetPrice}
+                            onChange={(event) =>
+                              setOpportunityForm((current) => ({
+                                ...current,
+                                targetPrice: event.target.value,
+                              }))
+                            }
+                          />
+                          <Input
+                            maxLength={3}
+                            placeholder="币种"
+                            value={opportunityForm.currency}
+                            onChange={(event) =>
+                              setOpportunityForm((current) => ({
+                                ...current,
+                                currency: event.target.value.toUpperCase(),
+                              }))
+                            }
+                          />
+                        </div>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="客户预算"
+                          value={opportunityForm.budget}
+                          onChange={(event) =>
+                            setOpportunityForm((current) => ({
+                              ...current,
+                              budget: event.target.value,
+                            }))
+                          }
+                        />
+                        <Input
+                          placeholder="采购时间（例如：2026 年第四季度）"
+                          value={opportunityForm.purchaseTime}
+                          onChange={(event) =>
+                            setOpportunityForm((current) => ({
+                              ...current,
+                              purchaseTime: event.target.value,
+                            }))
+                          }
+                        />
+                        <Select
+                          value={opportunityForm.forecastCategory}
+                          onValueChange={(value) =>
+                            value &&
+                            setOpportunityForm((current) => ({
+                              ...current,
+                              forecastCategory: value as NonNullable<
+                                Opportunity["forecastCategory"]
+                              >,
+                            }))
+                          }
+                        >
+                          <SelectTrigger>
+                            {optionLabel(
+                              OPPORTUNITY_FORECAST_CATEGORIES,
+                              opportunityForm.forecastCategory,
+                              "预测分类",
+                            )}
+                          </SelectTrigger>
+                          <SelectContent>
+                            {OPPORTUNITY_FORECAST_CATEGORIES.map((item) => (
+                              <SelectItem key={item.value} value={item.value}>
+                                {item.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <div className="space-y-1">
+                          <Label className="text-xs">预计成交日期</Label>
+                          <Input
+                            type="date"
+                            value={opportunityForm.expectedCloseDate}
+                            onChange={(event) =>
+                              setOpportunityForm((current) => ({
+                                ...current,
+                                expectedCloseDate: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">下一步行动日期</Label>
+                          <Input
+                            type="date"
+                            value={opportunityForm.nextStepDueDate}
+                            onChange={(event) =>
+                              setOpportunityForm((current) => ({
+                                ...current,
+                                nextStepDueDate: event.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <Input
+                          placeholder="竞争对手"
+                          value={opportunityForm.competitors}
+                          onChange={(event) =>
+                            setOpportunityForm((current) => ({
+                              ...current,
+                              competitors: event.target.value,
                             }))
                           }
                         />
                         <Textarea
                           className="md:col-span-2"
-                          placeholder="需求、竞争情况和下一步"
+                          placeholder="下一步行动（建议包含责任人和预期结果）"
+                          value={opportunityForm.nextStepAction}
+                          onChange={(event) =>
+                            setOpportunityForm((current) => ({
+                              ...current,
+                              nextStepAction: event.target.value,
+                            }))
+                          }
+                        />
+                        <Textarea
+                          placeholder="客户决策流程"
+                          value={opportunityForm.decisionProcess}
+                          onChange={(event) =>
+                            setOpportunityForm((current) => ({
+                              ...current,
+                              decisionProcess: event.target.value,
+                            }))
+                          }
+                        />
+                        <Textarea
+                          className="md:col-span-3"
+                          placeholder="商机背景和补充说明"
                           value={opportunityForm.description}
                           onChange={(event) =>
                             setOpportunityForm((current) => ({
@@ -1186,7 +1561,33 @@ export function Customer360Dialog({
                             }))
                           }
                         />
-                        <div className="flex justify-end md:col-span-2">
+                        {opportunityForm.stage === "won" && (
+                          <Textarea
+                            className="md:col-span-3"
+                            placeholder="赢单原因 *"
+                            value={opportunityForm.winReason}
+                            onChange={(event) =>
+                              setOpportunityForm((current) => ({
+                                ...current,
+                                winReason: event.target.value,
+                              }))
+                            }
+                          />
+                        )}
+                        {opportunityForm.stage === "lost" && (
+                          <Textarea
+                            className="md:col-span-3"
+                            placeholder="输单原因 *"
+                            value={opportunityForm.lossReason}
+                            onChange={(event) =>
+                              setOpportunityForm((current) => ({
+                                ...current,
+                                lossReason: event.target.value,
+                              }))
+                            }
+                          />
+                        )}
+                        <div className="flex justify-end md:col-span-3">
                           <Button type="submit" disabled={isSaving}>
                             创建商机
                           </Button>
@@ -1201,16 +1602,23 @@ export function Customer360Dialog({
                             canManage && (
                               <Select
                                 value={opportunity.stage}
-                                onValueChange={(value) =>
-                                  value &&
+                                onValueChange={(value) => {
+                                  if (!value) return;
+                                  if (value === "won" || value === "lost") {
+                                    toast.info(
+                                      "关闭商机前必须填写赢单或输单原因，请在完整商机管理中操作",
+                                    );
+                                    goTo("/opportunities");
+                                    return;
+                                  }
                                   void mutate(
                                     () =>
                                       updateOpportunity(opportunity.id, {
                                         stage: value as Opportunity["stage"],
                                       }),
                                     "商机阶段与客户跟进阶段已同步",
-                                  )
-                                }
+                                  );
+                                }}
                               >
                                 <SelectTrigger className="w-32">
                                   {optionLabel(
@@ -1241,7 +1649,7 @@ export function Customer360Dialog({
                             )}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            USD{" "}
+                            {opportunity.currency || "USD"}{" "}
                             {Number(opportunity.amount || 0).toLocaleString(
                               "en-US",
                               { minimumFractionDigits: 2 },
@@ -1251,6 +1659,39 @@ export function Customer360Dialog({
                               ? ` · 预计 ${formatDate(opportunity.expectedCloseDate)}`
                               : ""}
                           </p>
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            <Badge variant="outline">
+                              {optionLabel(
+                                OPPORTUNITY_FORECAST_CATEGORIES,
+                                opportunity.forecastCategory,
+                                "销售管道",
+                              )}
+                            </Badge>
+                            <Badge variant="outline">
+                              本阶段 {opportunity.stageDurationDays || 0} 天
+                            </Badge>
+                            {opportunity.isOverdue && (
+                              <Badge variant="destructive">已超期</Badge>
+                            )}
+                            {opportunity.missingNextStep && (
+                              <Badge className="bg-amber-100 text-amber-800">
+                                缺少下一步
+                              </Badge>
+                            )}
+                          </div>
+                          {opportunity.productName && (
+                            <p className="mt-2 text-sm">
+                              产品：{opportunity.productName}
+                              {opportunity.productSpecification
+                                ? ` · ${opportunity.productSpecification}`
+                                : ""}
+                            </p>
+                          )}
+                          {opportunity.nextStepAction && (
+                            <p className="mt-2 rounded bg-muted p-2 text-sm">
+                              下一步：{opportunity.nextStepAction}
+                            </p>
+                          )}
                         </RecordRow>
                       ))}
                     </RecordList>
@@ -1898,38 +2339,73 @@ function OverviewWorkspace({
           <CardTitle>{data.customer.company}</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <Summary label="公司类型" value={masterOptionLabel(CUSTOMER_TYPE_OPTIONS, data.customer.customerType)} />
+          <Summary
+            label="公司类型"
+            value={masterOptionLabel(
+              CUSTOMER_TYPE_OPTIONS,
+              data.customer.customerType,
+            )}
+          />
           <Summary label="详细地址" value={data.customer.address} />
-          <Summary label="主要市场" value={data.customer.mainMarkets?.join("、")} />
+          <Summary
+            label="主要市场"
+            value={data.customer.mainMarkets?.join("、")}
+          />
           <Summary
             label="年采购金额"
-            value={data.customer.annualPurchaseAmount
-              ? `${data.customer.preferredCurrency || "USD"} ${Number(data.customer.annualPurchaseAmount).toLocaleString("en-US")}`
-              : "未填写"}
+            value={
+              data.customer.annualPurchaseAmount
+                ? `${data.customer.preferredCurrency || "USD"} ${Number(data.customer.annualPurchaseAmount).toLocaleString("en-US")}`
+                : "未填写"
+            }
           />
-          <Summary label="首选贸易条款" value={data.customer.preferredIncoterm} />
-          <Summary label="客户来源" value={masterOptionLabel(CUSTOMER_SOURCE_OPTIONS, data.customer.source)} />
+          <Summary
+            label="首选贸易条款"
+            value={data.customer.preferredIncoterm}
+          />
+          <Summary
+            label="客户来源"
+            value={masterOptionLabel(
+              CUSTOMER_SOURCE_OPTIONS,
+              data.customer.source,
+            )}
+          />
           <Summary
             label="合并来源记录"
-            value={(data.customer.sourceHistory || [])
-              .map((item) => `${item.company || item.customerId}：${masterOptionLabel(CUSTOMER_SOURCE_OPTIONS, item.source)}`)
-              .join("；") || "暂无合并来源"}
+            value={
+              (data.customer.sourceHistory || [])
+                .map(
+                  (item) =>
+                    `${item.company || item.customerId}：${masterOptionLabel(CUSTOMER_SOURCE_OPTIONS, item.source)}`,
+                )
+                .join("；") || "暂无合并来源"
+            }
           />
           <Summary
             label="负责人"
-            value={users.find((user) => user.id === data.customer.ownerId)?.displayName || "未分配"}
+            value={
+              users.find((user) => user.id === data.customer.ownerId)
+                ?.displayName || "未分配"
+            }
           />
           <Summary
             label="协作者"
-            value={(data.customer.collaboratorIds || [])
-              .map((id) => users.find((user) => user.id === id)?.displayName || id)
-              .join("、") || "未设置"}
+            value={
+              (data.customer.collaboratorIds || [])
+                .map(
+                  (id) =>
+                    users.find((user) => user.id === id)?.displayName || id,
+                )
+                .join("、") || "未设置"
+            }
           />
           <Summary
             label="下次跟进"
-            value={data.customer.nextTodoAt
-              ? `${data.customer.nextTodoTitle || "待办"} · ${formatDateTime(data.customer.nextTodoAt)}`
-              : "暂无待办"}
+            value={
+              data.customer.nextTodoAt
+                ? `${data.customer.nextTodoTitle || "待办"} · ${formatDateTime(data.customer.nextTodoAt)}`
+                : "暂无待办"
+            }
           />
           <Summary label="主营业务" value={data.customer.business} />
           <Summary label="主联系人" value={data.customer.contact} />

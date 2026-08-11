@@ -3,12 +3,17 @@ import { CustomersService } from './customers.service';
 
 function upload(rows: Record<string, unknown>[]) {
   const workbook = xlsx.utils.book_new();
-  xlsx.utils.book_append_sheet(workbook, xlsx.utils.json_to_sheet(rows), 'Customers');
+  xlsx.utils.book_append_sheet(
+    workbook,
+    xlsx.utils.json_to_sheet(rows),
+    'Customers',
+  );
   return {
     fieldname: 'file',
     originalname: 'customers.xlsx',
     encoding: '7bit',
-    mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    mimetype:
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     buffer: xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' }),
     size: 1,
   } as any;
@@ -41,10 +46,12 @@ describe('CustomersService imports', () => {
       { id: 1, company: 'Existing Co', email: 'sales@example.com' },
     ]);
 
-    const result = await service.parseAndPreview(upload([
-      { 公司名称: '新公司', 邮箱: ' SALES@EXAMPLE.COM ' },
-      { Company: 'Second row', Email: 'sales@example.com' },
-    ]));
+    const result = await service.parseAndPreview(
+      upload([
+        { 公司名称: '新公司', 邮箱: ' SALES@EXAMPLE.COM ' },
+        { Company: 'Second row', Email: 'sales@example.com' },
+      ]),
+    );
 
     expect(result.total).toBe(2);
     expect(result.withEmail).toBe(2);
@@ -55,18 +62,29 @@ describe('CustomersService imports', () => {
   it('preserves international company names exactly as imported', async () => {
     customerRepository.find.mockResolvedValue([]);
 
-    const result = await service.parseAndImport(upload([
-      { Company: 'PT. Batam Pratama Mandiri', Email: 'sales@bpm.co.id' },
-      { Company: 'Sun Hydraulics (Thailand) Co., Ltd.', Email: 'sales@sunhydraulics.co.th' },
-    ]));
+    const result = await service.parseAndImport(
+      upload([
+        { Company: 'PT. Batam Pratama Mandiri', Email: 'sales@bpm.co.id' },
+        {
+          Company: 'Sun Hydraulics (Thailand) Co., Ltd.',
+          Email: 'sales@sunhydraulics.co.th',
+        },
+      ]),
+    );
 
     expect(result).toEqual({ created: 2, updated: 0, skipped: 0, total: 2 });
-    expect(customerRepository.create).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      company: 'PT. Batam Pratama Mandiri',
-    }));
-    expect(customerRepository.create).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      company: 'Sun Hydraulics (Thailand) Co., Ltd.',
-    }));
+    expect(customerRepository.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        company: 'PT. Batam Pratama Mandiri',
+      }),
+    );
+    expect(customerRepository.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        company: 'Sun Hydraulics (Thailand) Co., Ltd.',
+      }),
+    );
   });
 
   it('fills blank imported profile data without silently overwriting existing business fields', async () => {
@@ -84,14 +102,16 @@ describe('CustomersService imports', () => {
     };
     customerRepository.find.mockResolvedValue([existing]);
 
-    const result = await service.parseAndImport(upload([
-      {
-        Company: 'Updated Company',
-        Email: ' SALES@EXAMPLE.COM ',
-        Phone: '',
-        Website: 'https://example.com',
-      },
-    ]));
+    const result = await service.parseAndImport(
+      upload([
+        {
+          Company: 'Updated Company',
+          Email: ' SALES@EXAMPLE.COM ',
+          Phone: '',
+          Website: 'https://example.com',
+        },
+      ]),
+    );
 
     expect(result).toEqual({ created: 0, updated: 1, skipped: 0, total: 1 });
     expect(existing).toMatchObject({
@@ -115,9 +135,10 @@ describe('CustomersService imports', () => {
     };
     customerRepository.find.mockResolvedValue([existing]);
 
-    const result = await service.parseAndImport(upload([
-      { Company: 'Incoming Override', Email: 'buyer@example.com' },
-    ]), '7');
+    const result = await service.parseAndImport(
+      upload([{ Company: 'Incoming Override', Email: 'buyer@example.com' }]),
+      '7',
+    );
 
     expect(result).toEqual({ created: 0, updated: 0, skipped: 1, total: 1 });
     expect(existing.company).toBe('Protected Account');
@@ -151,7 +172,10 @@ describe('CustomersService quote contracts', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    customerRepository.findOne.mockResolvedValue({ id: 1, company: 'Buyer Co' });
+    customerRepository.findOne.mockResolvedValue({
+      id: 1,
+      company: 'Buyer Co',
+    });
     quoteRepository.count.mockResolvedValue(0);
     quoteRepository.findOne.mockResolvedValue({
       id: 1,
@@ -160,7 +184,15 @@ describe('CustomersService quote contracts', () => {
       currency: 'USD',
       freight: 0,
       taxRate: 0,
-      items: [{ productName: 'Weld Neck Flange', quantity: 1, unitPrice: 100, discount: 0, subtotal: 100 }],
+      items: [
+        {
+          productName: 'Weld Neck Flange',
+          quantity: 1,
+          unitPrice: 100,
+          discount: 0,
+          subtotal: 100,
+        },
+      ],
     });
     quoteRepository.delete.mockResolvedValue({ affected: 1 });
   });
@@ -174,12 +206,14 @@ describe('CustomersService quote contracts', () => {
       total: 999999,
       freight: 20,
       taxRate: 10,
-      items: [{
-        productName: 'Weld Neck Flange',
-        quantity: 2,
-        unitPrice: 100,
-        discount: 10,
-      }],
+      items: [
+        {
+          productName: 'Weld Neck Flange',
+          quantity: 2,
+          unitPrice: 100,
+          discount: 10,
+        },
+      ],
     });
 
     expect(quote).toMatchObject({
@@ -196,7 +230,14 @@ describe('CustomersService quote contracts', () => {
     const result = await service.updateQuote(1, {
       freight: 25,
       taxRate: 5,
-      items: [{ productName: 'Weld Neck Flange', quantity: 3, unitPrice: 80, discount: 0 }],
+      items: [
+        {
+          productName: 'Weld Neck Flange',
+          quantity: 3,
+          unitPrice: 80,
+          discount: 0,
+        },
+      ],
     });
 
     expect(result).toMatchObject({
@@ -216,6 +257,7 @@ describe('CustomersService quote contracts', () => {
 describe('CustomersService opportunity lifecycle sync', () => {
   let customer: any;
   let opportunities: any[];
+  let stageHistory: any[];
   let nextId: number;
   let clock: number;
 
@@ -224,11 +266,23 @@ describe('CustomersService opportunity lifecycle sync', () => {
     save: jest.fn(async (value) => value),
   };
   const opportunityRepository = {
-    find: jest.fn(async () => [...opportunities].sort((a, b) =>
-      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || b.id - a.id
-    )),
-    findOne: jest.fn(async ({ where }: any) => opportunities.find((item) => item.id === where.id) || null),
-    create: jest.fn((value) => ({ id: nextId++, amount: 0, ...value, updatedAt: new Date(clock++) })),
+    find: jest.fn(async () =>
+      [...opportunities].sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() ||
+          b.id - a.id,
+      ),
+    ),
+    findOne: jest.fn(
+      async ({ where }: any) =>
+        opportunities.find((item) => item.id === where.id) || null,
+    ),
+    create: jest.fn((value) => ({
+      id: nextId++,
+      amount: 0,
+      ...value,
+      updatedAt: new Date(clock++),
+    })),
     save: jest.fn(async (value) => {
       value.updatedAt = new Date(clock++);
       const index = opportunities.findIndex((item) => item.id === value.id);
@@ -242,6 +296,16 @@ describe('CustomersService opportunity lifecycle sync', () => {
       return { affected: before - opportunities.length };
     }),
   };
+  const opportunityStageHistoryRepository = {
+    create: jest.fn((value) => ({ id: stageHistory.length + 1, ...value })),
+    save: jest.fn(async (value) => {
+      stageHistory.push(value);
+      return value;
+    }),
+    find: jest.fn(async ({ where }: any) =>
+      stageHistory.filter((item) => item.opportunityPk === where.opportunityPk),
+    ),
+  };
   const service = new CustomersService(
     customerRepository as any,
     {} as any,
@@ -253,6 +317,7 @@ describe('CustomersService opportunity lifecycle sync', () => {
     {} as any,
     {} as any,
     {} as any,
+    opportunityStageHistoryRepository as any,
   );
 
   beforeEach(() => {
@@ -260,6 +325,7 @@ describe('CustomersService opportunity lifecycle sync', () => {
     nextId = 1;
     clock = Date.parse('2026-08-08T00:00:00Z');
     opportunities = [];
+    stageHistory = [];
     customer = {
       id: 1,
       customerId: 'cus_1',
@@ -272,7 +338,11 @@ describe('CustomersService opportunity lifecycle sync', () => {
   });
 
   it('moves the customer into opportunity stage and refreshes metrics when an opportunity is created', async () => {
-    await service.createOpportunity({ customerId: 1, name: 'First order', amount: 2500 });
+    await service.createOpportunity({
+      customerId: 1,
+      name: 'First order',
+      amount: 2500,
+    });
 
     expect(customer).toMatchObject({
       journeyStage: 'opportunity',
@@ -282,15 +352,75 @@ describe('CustomersService opportunity lifecycle sync', () => {
   });
 
   it('updates customer 360 when the current opportunity stage changes', async () => {
-    const opportunity = await service.createOpportunity({ customerId: 1, name: 'First order', amount: 2500 });
+    const opportunity = await service.createOpportunity({
+      customerId: 1,
+      name: 'First order',
+      amount: 2500,
+    });
     await service.updateOpportunity(opportunity.id, { stage: 'negotiation' });
 
-    expect(opportunity).toMatchObject({ stage: 'negotiation', probability: 80 });
+    expect(opportunity).toMatchObject({
+      stage: 'negotiation',
+      probability: 80,
+    });
     expect(customer.journeyStage).toBe('negotiation');
+    expect(stageHistory.map((item) => item.toStage)).toEqual([
+      'prospecting',
+      'negotiation',
+    ]);
+  });
+
+  it('requires a result reason before closing and updates the customer after a valid win', async () => {
+    const opportunity = await service.createOpportunity(
+      { customerId: 1, name: 'First order' },
+      { userId: '7', displayName: '销售甲' },
+    );
+
+    await expect(
+      service.updateOpportunity(opportunity.id, { stage: 'won' }),
+    ).rejects.toThrow('必须填写赢单原因');
+
+    await service.updateOpportunity(
+      opportunity.id,
+      { stage: 'won', winReason: '客户确认价格与交期' },
+      { userId: '7', displayName: '销售甲' },
+    );
+
+    expect(opportunity).toMatchObject({
+      stage: 'won',
+      probability: 100,
+      forecastCategory: 'closed',
+      winReason: '客户确认价格与交期',
+    });
+    expect(opportunity.closedAt).toBeInstanceOf(Date);
+    expect(customer.journeyStage).toBe('won');
+    expect(stageHistory.at(-1)).toMatchObject({
+      fromStage: 'prospecting',
+      toStage: 'won',
+      changedById: '7',
+      changedByName: '销售甲',
+      changeNote: '客户确认价格与交期',
+    });
+  });
+
+  it('requires a loss reason and blocks closing from the customer status field', async () => {
+    const opportunity = await service.createOpportunity({
+      customerId: 1,
+      name: 'First order',
+    });
+    await expect(
+      service.updateOpportunity(opportunity.id, { stage: 'lost' }),
+    ).rejects.toThrow('必须填写输单原因');
+    await expect(service.update(1, { journeyStage: 'lost' })).rejects.toThrow(
+      '请在商机中填写输单原因',
+    );
   });
 
   it('updates the current opportunity when the customer journey stage changes', async () => {
-    const opportunity = await service.createOpportunity({ customerId: 1, name: 'First order' });
+    const opportunity = await service.createOpportunity({
+      customerId: 1,
+      name: 'First order',
+    });
     await service.update(1, { journeyStage: 'proposal' });
 
     expect(opportunity).toMatchObject({ stage: 'proposal', probability: 60 });
@@ -313,13 +443,17 @@ describe('CustomersService opportunity lifecycle sync', () => {
 
   it('prevents an early customer stage from silently diverging from an existing opportunity', async () => {
     await service.createOpportunity({ customerId: 1, name: 'First order' });
-    await expect(service.update(1, { journeyStage: 'contacted' })).rejects.toThrow(
-      '该客户已有商机，请在商机看板调整阶段',
-    );
+    await expect(
+      service.update(1, { journeyStage: 'contacted' }),
+    ).rejects.toThrow('该客户已有商机，请在商机看板调整阶段');
   });
 
   it('clears opportunity metrics and returns to qualified when the final opportunity is deleted', async () => {
-    const opportunity = await service.createOpportunity({ customerId: 1, name: 'First order', amount: 2500 });
+    const opportunity = await service.createOpportunity({
+      customerId: 1,
+      name: 'First order',
+      amount: 2500,
+    });
     await service.deleteOpportunity(opportunity.id);
 
     expect(customer).toMatchObject({
@@ -341,20 +475,33 @@ describe('CustomersService customer summary refresh', () => {
   };
   const activityRepository = {
     create: jest.fn((value) => ({ id: 1, type: 'note', ...value })),
-    save: jest.fn(async (value) => ({ ...value, createdAt: new Date('2026-08-09T01:00:00Z') })),
+    save: jest.fn(async (value) => ({
+      ...value,
+      createdAt: new Date('2026-08-09T01:00:00Z'),
+    })),
   };
   const todoRepository = {
-    create: jest.fn((value) => ({ id: nextTodoId++, status: 'open', ...value })),
+    create: jest.fn((value) => ({
+      id: nextTodoId++,
+      status: 'open',
+      ...value,
+    })),
     save: jest.fn(async (value) => {
       const index = todos.findIndex((todo) => todo.id === value.id);
       if (index >= 0) todos[index] = value;
       else todos.push(value);
       return value;
     }),
-    find: jest.fn(async ({ where }: any) => todos.filter((todo) => (
-      todo.customerId === where.customerId && todo.status === where.status
-    ))),
-    findOne: jest.fn(async ({ where }: any) => todos.find((todo) => todo.id === where.id) || null),
+    find: jest.fn(async ({ where }: any) =>
+      todos.filter(
+        (todo) =>
+          todo.customerId === where.customerId && todo.status === where.status,
+      ),
+    ),
+    findOne: jest.fn(
+      async ({ where }: any) =>
+        todos.find((todo) => todo.id === where.id) || null,
+    ),
     delete: jest.fn(async (id: number) => {
       const before = todos.length;
       todos = todos.filter((todo) => todo.id !== id);
@@ -399,27 +546,54 @@ describe('CustomersService customer summary refresh', () => {
   });
 
   it('refreshes next todo and customer health after create, complete, reopen and delete', async () => {
-    const future = await service.createTodo({ customerId: 1, title: '发送报价', dueAt: '2099-01-02' });
-    const overdue = await service.createTodo({ customerId: 1, title: '确认询盘', dueAt: '2000-01-01' });
+    const future = await service.createTodo({
+      customerId: 1,
+      title: '发送报价',
+      dueAt: '2099-01-02',
+    });
+    const overdue = await service.createTodo({
+      customerId: 1,
+      title: '确认询盘',
+      dueAt: '2000-01-01',
+    });
 
-    expect(customer).toMatchObject({ nextTodoTitle: '确认询盘', health: 'critical' });
+    expect(customer).toMatchObject({
+      nextTodoTitle: '确认询盘',
+      health: 'critical',
+    });
 
     await service.updateTodo(overdue.id, { status: 'done' });
-    expect(customer).toMatchObject({ nextTodoTitle: '发送报价', health: 'warning' });
+    expect(customer).toMatchObject({
+      nextTodoTitle: '发送报价',
+      health: 'warning',
+    });
     expect(overdue.completedAt).toBeInstanceOf(Date);
 
     await service.updateTodo(overdue.id, { status: 'open' });
     expect(overdue.completedAt).toBeNull();
-    expect(customer).toMatchObject({ nextTodoTitle: '确认询盘', health: 'critical' });
+    expect(customer).toMatchObject({
+      nextTodoTitle: '确认询盘',
+      health: 'critical',
+    });
 
     await service.updateTodo(overdue.id, { status: 'done' });
     await service.deleteTodo(future.id);
-    expect(customer).toMatchObject({ nextTodoAt: null, nextTodoTitle: '', health: 'good' });
+    expect(customer).toMatchObject({
+      nextTodoAt: null,
+      nextTodoTitle: '',
+      health: 'good',
+    });
   });
 });
 
 describe('CustomersService sample and customer 360 contracts', () => {
-  const customer = { id: 1, customerId: 'cus_1', company: 'Buyer Co', ownerId: '7', tags: [] };
+  const customer = {
+    id: 1,
+    customerId: 'cus_1',
+    company: 'Buyer Co',
+    ownerId: '7',
+    tags: [],
+  };
   const customerRepository = {
     findOne: jest.fn(async () => customer),
   };
@@ -431,16 +605,18 @@ describe('CustomersService sample and customer 360 contracts', () => {
     save: jest.fn(async (value) => value),
   };
   const emailLogRepository = {
-    find: jest.fn(async () => [{
-      id: 8,
-      logId: 'log_8',
-      customerId: 'cus_1',
-      customerName: 'Buyer Co',
-      recipientEmail: 'buyer@example.com',
-      subject: 'Quotation Q-001',
-      status: 'sent',
-      sentAt: new Date('2026-08-09T02:00:00Z'),
-    }]),
+    find: jest.fn(async () => [
+      {
+        id: 8,
+        logId: 'log_8',
+        customerId: 'cus_1',
+        customerName: 'Buyer Co',
+        recipientEmail: 'buyer@example.com',
+        subject: 'Quotation Q-001',
+        status: 'sent',
+        sentAt: new Date('2026-08-09T02:00:00Z'),
+      },
+    ]),
   };
   const service = new CustomersService(
     customerRepository as any,
@@ -489,16 +665,20 @@ describe('CustomersService sample and customer 360 contracts', () => {
   it('returns normalized customer email history in the 360 view', async () => {
     const result = await service.getCustomer360(1, '7');
 
-    expect(result.sendLogs).toEqual([expect.objectContaining({
-      id: 'log_8',
-      email: 'buyer@example.com',
-      subject: 'Quotation Q-001',
-      status: 'sent',
-      createdAt: new Date('2026-08-09T02:00:00Z'),
-    })]);
-    expect(emailLogRepository.find).toHaveBeenCalledWith(expect.objectContaining({
-      where: { customerId: 'cus_1' },
-    }));
+    expect(result.sendLogs).toEqual([
+      expect.objectContaining({
+        id: 'log_8',
+        email: 'buyer@example.com',
+        subject: 'Quotation Q-001',
+        status: 'sent',
+        createdAt: new Date('2026-08-09T02:00:00Z'),
+      }),
+    ]);
+    expect(emailLogRepository.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { customerId: 'cus_1' },
+      }),
+    );
   });
 });
 
@@ -520,14 +700,23 @@ describe('CustomersService contact summary synchronization', () => {
       return value;
     }),
     update: jest.fn(async (where, update) => {
-      contacts.filter((item) => item.customerId === where.customerId).forEach((item) => Object.assign(item, update));
+      contacts
+        .filter((item) => item.customerId === where.customerId)
+        .forEach((item) => Object.assign(item, update));
       return { affected: contacts.length };
     }),
     findOne: jest.fn(async ({ where, order }: any) => {
-      if (where.id) return contacts.find((item) => item.id === where.id) || null;
-      let matches = contacts.filter((item) => item.customerId === where.customerId);
-      if (where.isPrimary !== undefined) matches = matches.filter((item) => item.isPrimary === where.isPrimary);
-      if (order?.createdAt === 'ASC') matches = [...matches].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      if (where.id)
+        return contacts.find((item) => item.id === where.id) || null;
+      let matches = contacts.filter(
+        (item) => item.customerId === where.customerId,
+      );
+      if (where.isPrimary !== undefined)
+        matches = matches.filter((item) => item.isPrimary === where.isPrimary);
+      if (order?.createdAt === 'ASC')
+        matches = [...matches].sort(
+          (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+        );
       return matches[0] || null;
     }),
     delete: jest.fn(async (id) => {
@@ -553,30 +742,56 @@ describe('CustomersService contact summary synchronization', () => {
     jest.clearAllMocks();
     nextId = 1;
     contacts = [];
-    customer = { id: 1, customerId: 'cus_1', company: 'Buyer Co', ownerId: '7', tags: [] };
+    customer = {
+      id: 1,
+      customerId: 'cus_1',
+      company: 'Buyer Co',
+      ownerId: '7',
+      tags: [],
+    };
   });
 
   it('keeps customer summary aligned when the primary contact changes or is deleted', async () => {
-    const first = await service.createContact(1, {
-      name: 'Anna',
+    const first = await service.createContact(
+      1,
+      {
+        name: 'Anna',
+        email: 'anna@example.com',
+        phone: '+1 100',
+        isPrimary: true,
+      },
+      '7',
+    );
+    const second = await service.createContact(
+      1,
+      {
+        name: 'Ben',
+        email: 'ben@example.com',
+        phone: '+1 200',
+      },
+      '7',
+    );
+    expect(customer).toMatchObject({
+      contact: 'Anna',
       email: 'anna@example.com',
       phone: '+1 100',
-      isPrimary: true,
-    }, '7');
-    const second = await service.createContact(1, {
-      name: 'Ben',
-      email: 'ben@example.com',
-      phone: '+1 200',
-    }, '7');
-    expect(customer).toMatchObject({ contact: 'Anna', email: 'anna@example.com', phone: '+1 100' });
+    });
 
     await service.updateContact(second.id, { isPrimary: true }, '7');
     expect(first.isPrimary).toBe(false);
-    expect(customer).toMatchObject({ contact: 'Ben', email: 'ben@example.com', phone: '+1 200' });
+    expect(customer).toMatchObject({
+      contact: 'Ben',
+      email: 'ben@example.com',
+      phone: '+1 200',
+    });
 
     await service.deleteContact(second.id, '7');
     expect(first.isPrimary).toBe(true);
-    expect(customer).toMatchObject({ contact: 'Anna', email: 'anna@example.com', phone: '+1 100' });
+    expect(customer).toMatchObject({
+      contact: 'Anna',
+      email: 'anna@example.com',
+      phone: '+1 100',
+    });
   });
 });
 

@@ -63,6 +63,29 @@ async function seedLegacyFixture(connection: Connection) {
       DROP COLUMN merged_at
   `);
   await connection.query("DROP TABLE IF EXISTS customer_merge_history");
+  await connection.query("DROP TABLE IF EXISTS opportunity_stage_history");
+  await connection.query(`
+    ALTER TABLE opportunities
+      DROP COLUMN owner_id,
+      DROP COLUMN collaborator_ids,
+      DROP COLUMN product_name,
+      DROP COLUMN product_specification,
+      DROP COLUMN expected_quantity,
+      DROP COLUMN quantity_unit,
+      DROP COLUMN target_price,
+      DROP COLUMN currency,
+      DROP COLUMN budget,
+      DROP COLUMN purchase_time,
+      DROP COLUMN decision_process,
+      DROP COLUMN next_step_action,
+      DROP COLUMN next_step_due_date,
+      DROP COLUMN forecast_category,
+      DROP COLUMN win_reason,
+      DROP COLUMN loss_reason,
+      DROP COLUMN competitors,
+      DROP COLUMN stage_entered_at,
+      DROP COLUMN closed_at
+  `);
   await connection.query(
     "ALTER TABLE products ADD COLUMN base_price VARCHAR(64) NULL",
   );
@@ -179,14 +202,22 @@ async function verifyMigratedData(connection: Connection) {
      )`,
     [database],
   );
-  assert.equal(Number(masterColumns[0].count), 14, "P1.2 客户主数据字段迁移不完整");
+  assert.equal(
+    Number(masterColumns[0].count),
+    14,
+    "P1.2 客户主数据字段迁移不完整",
+  );
 
   const [ownershipColumns] = await connection.query<CheckRow[]>(
     `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'email_templates' AND COLUMN_NAME = 'owner_id'`,
     [database],
   );
-  assert.equal(Number(ownershipColumns[0].count), 1, "邮件模板归属字段迁移不完整");
+  assert.equal(
+    Number(ownershipColumns[0].count),
+    1,
+    "邮件模板归属字段迁移不完整",
+  );
 
   const [duplicateColumns] = await connection.query<CheckRow[]>(
     `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
@@ -194,26 +225,82 @@ async function verifyMigratedData(connection: Connection) {
        AND COLUMN_NAME IN ('source_history', 'merged_into_id', 'merged_at')`,
     [database],
   );
-  assert.equal(Number(duplicateColumns[0].count), 3, "重复客户管理字段迁移不完整");
+  assert.equal(
+    Number(duplicateColumns[0].count),
+    3,
+    "重复客户管理字段迁移不完整",
+  );
   const [mergeHistoryTable] = await connection.query<CheckRow[]>(
     `SELECT COUNT(*) AS count FROM information_schema.TABLES
      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'customer_merge_history'`,
     [database],
   );
-  assert.equal(Number(mergeHistoryTable[0].count), 1, "客户合并审计表迁移不完整");
+  assert.equal(
+    Number(mergeHistoryTable[0].count),
+    1,
+    "客户合并审计表迁移不完整",
+  );
   const [mergeHistoryColumns] = await connection.query<CheckRow[]>(
     `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'customer_merge_history'
        AND COLUMN_NAME IN ('merge_id', 'primary_customer_id', 'source_snapshots', 'field_selections', 'primary_contact_selection', 'moved_relations', 'performed_by_id')`,
     [database],
   );
-  assert.equal(Number(mergeHistoryColumns[0].count), 7, "客户合并审计字段迁移不完整");
+  assert.equal(
+    Number(mergeHistoryColumns[0].count),
+    7,
+    "客户合并审计字段迁移不完整",
+  );
+
+  const [opportunityColumns] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'opportunities'
+       AND COLUMN_NAME IN (
+         'owner_id','collaborator_ids','product_name','product_specification',
+         'expected_quantity','quantity_unit','target_price','currency','budget',
+         'purchase_time','decision_process','next_step_action','next_step_due_date',
+         'forecast_category','win_reason','loss_reason','competitors',
+         'stage_entered_at','closed_at'
+       )`,
+    [database],
+  );
+  assert.equal(
+    Number(opportunityColumns[0].count),
+    19,
+    "P1.4 商机字段迁移不完整",
+  );
+  const [opportunityRows] = await connection.query<CheckRow[]>(
+    "SELECT owner_id, forecast_category, stage_entered_at FROM opportunities WHERE opportunity_id = 'OPP-CI-1'",
+  );
+  assert.equal(opportunityRows[0].owner_id, "7", "历史商机负责人未从客户补齐");
+  assert.equal(
+    opportunityRows[0].forecast_category,
+    "pipeline",
+    "历史商机预测分类不正确",
+  );
+  assert.ok(opportunityRows[0].stage_entered_at, "历史商机缺少阶段进入时间");
+  const [opportunityHistory] = await connection.query<CheckRow[]>(
+    "SELECT COUNT(*) AS count FROM opportunity_stage_history WHERE opportunity_key = 'OPP-CI-1'",
+  );
+  assert.equal(
+    Number(opportunityHistory[0].count),
+    1,
+    "历史商机阶段记录未初始化或重复写入",
+  );
 
   const [contacts] = await connection.query<CheckRow[]>(
     "SELECT contact_status, marketing_allowed FROM contacts WHERE contact_id = 'CONTACT-CI-1'",
   );
-  assert.equal(contacts[0].contact_status, "unknown", "历史联系人状态默认值不正确");
-  assert.equal(Number(contacts[0].marketing_allowed), 1, "历史联系人营销许可默认值不正确");
+  assert.equal(
+    contacts[0].contact_status,
+    "unknown",
+    "历史联系人状态默认值不正确",
+  );
+  assert.equal(
+    Number(contacts[0].marketing_allowed),
+    1,
+    "历史联系人营销许可默认值不正确",
+  );
 
   const [activityColumn] = await connection.query<CheckRow[]>(
     `SELECT COLUMN_TYPE FROM information_schema.COLUMNS

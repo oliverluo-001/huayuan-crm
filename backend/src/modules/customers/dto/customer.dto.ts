@@ -336,7 +336,15 @@ export class CreateContactDto {
   @IsOptional()
   department?: string;
 
-  @IsEnum(["", "decision_maker", "influencer", "champion", "user", "gatekeeper", "other"])
+  @IsEnum([
+    "",
+    "decision_maker",
+    "influencer",
+    "champion",
+    "user",
+    "gatekeeper",
+    "other",
+  ])
   @IsOptional()
   decisionRole?: string;
 
@@ -390,7 +398,15 @@ export class UpdateContactDto {
   @IsOptional()
   department?: string;
 
-  @IsEnum(["", "decision_maker", "influencer", "champion", "user", "gatekeeper", "other"])
+  @IsEnum([
+    "",
+    "decision_maker",
+    "influencer",
+    "champion",
+    "user",
+    "gatekeeper",
+    "other",
+  ])
   @IsOptional()
   decisionRole?: string;
 
@@ -514,9 +530,81 @@ export class CreateOpportunityDto {
   @IsOptional()
   probability?: number;
 
+  @IsString()
+  @IsOptional()
+  ownerId?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  collaboratorIds?: string[];
+
+  @IsString()
+  @IsOptional()
+  productName?: string;
+
+  @IsString()
+  @IsOptional()
+  productSpecification?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  expectedQuantity?: number;
+
+  @IsString()
+  @IsOptional()
+  quantityUnit?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  targetPrice?: number;
+
+  @IsString()
+  @IsOptional()
+  currency?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  budget?: number;
+
+  @IsString()
+  @IsOptional()
+  purchaseTime?: string;
+
+  @IsString()
+  @IsOptional()
+  decisionProcess?: string;
+
+  @IsString()
+  @IsOptional()
+  nextStepAction?: string;
+
+  @IsDateString()
+  @IsOptional()
+  nextStepDueDate?: string;
+
   @IsDateString()
   @IsOptional()
   expectedCloseDate?: string;
+
+  @IsEnum(["pipeline", "best_case", "commit", "closed", "omitted"])
+  @IsOptional()
+  forecastCategory?: "pipeline" | "best_case" | "commit" | "closed" | "omitted";
+
+  @IsString()
+  @IsOptional()
+  winReason?: string;
+
+  @IsString()
+  @IsOptional()
+  lossReason?: string;
+
+  @IsString()
+  @IsOptional()
+  competitors?: string;
 
   @IsString()
   @IsOptional()
@@ -560,9 +648,81 @@ export class UpdateOpportunityDto {
   @IsOptional()
   probability?: number;
 
+  @IsString()
+  @IsOptional()
+  ownerId?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  collaboratorIds?: string[];
+
+  @IsString()
+  @IsOptional()
+  productName?: string;
+
+  @IsString()
+  @IsOptional()
+  productSpecification?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  expectedQuantity?: number;
+
+  @IsString()
+  @IsOptional()
+  quantityUnit?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  targetPrice?: number;
+
+  @IsString()
+  @IsOptional()
+  currency?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  budget?: number;
+
+  @IsString()
+  @IsOptional()
+  purchaseTime?: string;
+
+  @IsString()
+  @IsOptional()
+  decisionProcess?: string;
+
+  @IsString()
+  @IsOptional()
+  nextStepAction?: string;
+
+  @IsDateString()
+  @IsOptional()
+  nextStepDueDate?: string;
+
   @IsDateString()
   @IsOptional()
   expectedCloseDate?: string;
+
+  @IsEnum(["pipeline", "best_case", "commit", "closed", "omitted"])
+  @IsOptional()
+  forecastCategory?: "pipeline" | "best_case" | "commit" | "closed" | "omitted";
+
+  @IsString()
+  @IsOptional()
+  winReason?: string;
+
+  @IsString()
+  @IsOptional()
+  lossReason?: string;
+
+  @IsString()
+  @IsOptional()
+  competitors?: string;
 
   @IsString()
   @IsOptional()

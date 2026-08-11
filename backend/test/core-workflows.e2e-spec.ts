@@ -570,6 +570,19 @@ describe("core CRM workflows (HTTP e2e)", () => {
         name: "Acme annual order",
         amount: 10000,
         stage: "qualification",
+        productName: "Weld neck flange",
+        productSpecification: "ASTM A105, DN50, PN16",
+        expectedQuantity: 500,
+        quantityUnit: "pcs",
+        targetPrice: 25,
+        currency: "USD",
+        budget: 15000,
+        purchaseTime: "2026 Q4",
+        decisionProcess: "Engineering approval, then purchasing director",
+        nextStepAction: "Confirm drawing and material certificate",
+        nextStepDueDate: "2026-08-20",
+        forecastCategory: "best_case",
+        competitors: "Competitor A",
       }),
     });
     expect(opportunityResponse.status).toBe(201);
@@ -596,6 +609,16 @@ describe("core CRM workflows (HTTP e2e)", () => {
       stage: "proposal",
       probability: 60,
       description: "Two flange specifications",
+      productName: "Weld neck flange",
+      productSpecification: "ASTM A105, DN50, PN16",
+      expectedQuantity: 500,
+      targetPrice: 25,
+      budget: 15000,
+      purchaseTime: "2026 Q4",
+      decisionProcess: "Engineering approval, then purchasing director",
+      nextStepAction: "Confirm drawing and material certificate",
+      forecastCategory: "best_case",
+      competitors: "Competitor A",
     });
 
     const sampleResponse = await fetch(`${baseUrl}/api/samples`, {
@@ -731,6 +754,36 @@ describe("core CRM workflows (HTTP e2e)", () => {
       total: 718.05,
       notes: "Updated commercial terms",
     });
+
+    const invalidCloseResponse = await fetch(
+      `${baseUrl}/api/opportunities/${opportunity.id}`,
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ stage: "won" }),
+      },
+    );
+    expect(invalidCloseResponse.status).toBe(400);
+
+    const wonResponse = await fetch(
+      `${baseUrl}/api/opportunities/${opportunity.id}`,
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          stage: "won",
+          winReason: "Customer approved price, quality and delivery schedule",
+        }),
+      },
+    );
+    expect(wonResponse.status).toBe(200);
+    await expect(wonResponse.json()).resolves.toMatchObject({
+      stage: "won",
+      probability: 100,
+      forecastCategory: "closed",
+      winReason: "Customer approved price, quality and delivery schedule",
+    });
+    expect(customerRepository.items[0].journeyStage).toBe("won");
   });
 
   it("completes the foreign-trade CRM main chain through real HTTP endpoints", async () => {

@@ -12,6 +12,7 @@ import {
   Activity,
   Todo,
   Opportunity,
+  OpportunityStageHistory,
   Quote,
   Sample,
   Tag,
@@ -38,6 +39,11 @@ import {
   UpdateCustomerViewDto,
 } from "./dto";
 import { EmailLog } from "../email/entities/email-log.entity";
+
+export interface OpportunityActor {
+  userId: string;
+  displayName: string;
+}
 
 interface UploadedFile {
   fieldname: string;
@@ -75,6 +81,8 @@ export class CustomersService {
     private customerViewRepository: Repository<CustomerView>,
     @InjectRepository(EmailLog)
     private emailLogRepository: Repository<EmailLog>,
+    @InjectRepository(OpportunityStageHistory)
+    private opportunityStageHistoryRepository?: Repository<OpportunityStageHistory>,
   ) {}
 
   // ==================== Customer CRUD ====================
@@ -128,11 +136,24 @@ export class CustomersService {
         .leftJoinAndSelect("customer.tags", "tag")
         .orderBy("customer.createdAt", "DESC");
       this.applyCustomerAccess(qb, queryFilters.ownerId);
-      if (queryFilters.region) qb.andWhere("customer.region LIKE :region", { region: `%${queryFilters.region}%` });
-      if (queryFilters.tier) qb.andWhere("customer.tier = :tier", { tier: queryFilters.tier });
-      if (queryFilters.journeyStage) qb.andWhere("customer.journeyStage = :journeyStage", { journeyStage: queryFilters.journeyStage });
-      if (queryFilters.emailStatus) qb.andWhere("customer.emailStatus = :emailStatus", { emailStatus: queryFilters.emailStatus });
-      if (queryFilters.health) qb.andWhere("customer.health = :health", { health: queryFilters.health });
+      if (queryFilters.region)
+        qb.andWhere("customer.region LIKE :region", {
+          region: `%${queryFilters.region}%`,
+        });
+      if (queryFilters.tier)
+        qb.andWhere("customer.tier = :tier", { tier: queryFilters.tier });
+      if (queryFilters.journeyStage)
+        qb.andWhere("customer.journeyStage = :journeyStage", {
+          journeyStage: queryFilters.journeyStage,
+        });
+      if (queryFilters.emailStatus)
+        qb.andWhere("customer.emailStatus = :emailStatus", {
+          emailStatus: queryFilters.emailStatus,
+        });
+      if (queryFilters.health)
+        qb.andWhere("customer.health = :health", {
+          health: queryFilters.health,
+        });
       if (take > 0) qb.skip(skip).take(take);
       const [customers, total] = await qb.getManyAndCount();
       return { customers, total };
@@ -338,7 +359,9 @@ export class CustomersService {
     if (!customer.deletedAt)
       throw new BadRequestException("该客户不在回收站中");
     if (customer.mergedIntoId)
-      throw new BadRequestException("已合并客户不能从回收站恢复，请查看合并审计记录");
+      throw new BadRequestException(
+        "已合并客户不能从回收站恢复，请查看合并审计记录",
+      );
     await this.customerRepository.restore(id);
     return { restored: true };
   }
@@ -420,12 +443,12 @@ export class CustomersService {
 
   async bulkDelete(bulkDeleteDto: BulkDeleteDto, ownerId?: string) {
     const ids = ownerId
-      ? (await this.findAccessibleCustomers(bulkDeleteDto.ids, ownerId)).map((customer) => customer.id)
+      ? (await this.findAccessibleCustomers(bulkDeleteDto.ids, ownerId)).map(
+          (customer) => customer.id,
+        )
       : bulkDeleteDto.ids;
     if (!ids.length) return { deleted: 0 };
-    const result = await this.customerRepository.softDelete(
-      { id: In(ids) },
-    );
+    const result = await this.customerRepository.softDelete({ id: In(ids) });
     return { deleted: result.affected || 0 };
   }
 
@@ -458,7 +481,9 @@ export class CustomersService {
 
   async bulkTier(bulkTierDto: BulkTierDto, ownerId?: string) {
     const ids = ownerId
-      ? (await this.findAccessibleCustomers(bulkTierDto.ids, ownerId)).map((customer) => customer.id)
+      ? (await this.findAccessibleCustomers(bulkTierDto.ids, ownerId)).map(
+          (customer) => customer.id,
+        )
       : bulkTierDto.ids;
     if (!ids.length) return { updated: 0, tier: bulkTierDto.tier };
     const result = await this.customerRepository.update(
@@ -468,11 +493,17 @@ export class CustomersService {
     return { updated: result.affected || 0, tier: bulkTierDto.tier };
   }
 
-  private async findAccessibleCustomers(ids: number[], userId: string, withTags = false) {
+  private async findAccessibleCustomers(
+    ids: number[],
+    userId: string,
+    withTags = false,
+  ) {
     if (!ids.length) return [];
     const qb = this.customerRepository
       .createQueryBuilder("customer")
-      .where("customer.id IN (:...customerAccessIds)", { customerAccessIds: ids });
+      .where("customer.id IN (:...customerAccessIds)", {
+        customerAccessIds: ids,
+      });
     if (withTags) qb.leftJoinAndSelect("customer.tags", "tag");
     this.applyCustomerAccess(qb, userId);
     return qb.getMany();
@@ -718,8 +749,14 @@ export class CustomersService {
         .leftJoinAndSelect("todo.customer", "customer")
         .orderBy("todo.status", "ASC")
         .addOrderBy("todo.dueAt", "ASC");
-      if (filters.status) qb.andWhere("todo.status = :todoStatus", { todoStatus: filters.status });
-      if (filters.customerId) qb.andWhere("todo.customerId = :todoCustomerId", { todoCustomerId: filters.customerId });
+      if (filters.status)
+        qb.andWhere("todo.status = :todoStatus", {
+          todoStatus: filters.status,
+        });
+      if (filters.customerId)
+        qb.andWhere("todo.customerId = :todoCustomerId", {
+          todoCustomerId: filters.customerId,
+        });
       this.applyCustomerAccess(qb, filters.ownerId);
       return qb.getMany();
     }
@@ -805,7 +842,10 @@ export class CustomersService {
         .createQueryBuilder("opportunity")
         .leftJoinAndSelect("opportunity.customer", "customer")
         .orderBy("opportunity.updatedAt", "DESC");
-      if (filters.customerId) qb.andWhere("opportunity.customerId = :opportunityCustomerId", { opportunityCustomerId: filters.customerId });
+      if (filters.customerId)
+        qb.andWhere("opportunity.customerId = :opportunityCustomerId", {
+          opportunityCustomerId: filters.customerId,
+        });
       this.applyCustomerAccess(qb, filters.ownerId);
       return qb.getMany();
     }
@@ -818,17 +858,45 @@ export class CustomersService {
     });
   }
 
-  async createOpportunity(createOpportunityDto: CreateOpportunityDto) {
-    await this.findOne(createOpportunityDto.customerId);
+  async createOpportunity(
+    createOpportunityDto: CreateOpportunityDto,
+    actor: OpportunityActor = { userId: "", displayName: "系统" },
+  ) {
+    const customer = await this.findOne(createOpportunityDto.customerId);
     const stage = createOpportunityDto.stage || "prospecting";
+    this.assertOpportunityCanClose(
+      stage,
+      createOpportunityDto.winReason,
+      createOpportunityDto.lossReason,
+    );
+    const ownerId = String(
+      createOpportunityDto.ownerId || customer.ownerId || "",
+    );
+    const now = new Date();
     const opportunity = this.opportunityRepository.create({
       ...createOpportunityDto,
       stage,
-      probability:
-        createOpportunityDto.probability ?? this.defaultProbability(stage),
+      ownerId,
+      collaboratorIds: this.normalizeCollaboratorIds(
+        createOpportunityDto.collaboratorIds ?? customer.collaboratorIds,
+        ownerId,
+      ),
+      currency: String(
+        createOpportunityDto.currency || customer.preferredCurrency || "USD",
+      ).toUpperCase(),
+      probability: ["won", "lost"].includes(stage)
+        ? this.defaultProbability(stage)
+        : (createOpportunityDto.probability ?? this.defaultProbability(stage)),
+      forecastCategory: this.forecastCategoryForStage(
+        stage,
+        createOpportunityDto.forecastCategory,
+      ),
+      stageEnteredAt: now,
+      closedAt: ["won", "lost"].includes(stage) ? now : null,
       opportunityId: this.generateId("opp"),
     });
     const saved = await this.opportunityRepository.save(opportunity);
+    await this.recordOpportunityStage(saved, null, actor, 0);
     await this.refreshCustomerOpportunityState(saved.customerId, saved);
     return saved;
   }
@@ -836,12 +904,44 @@ export class CustomersService {
   async updateOpportunity(
     id: number,
     updateOpportunityDto: UpdateOpportunityDto,
+    actor: OpportunityActor = { userId: "", displayName: "系统" },
   ) {
     const opportunity = await this.opportunityRepository.findOne({
       where: { id },
     });
     if (!opportunity) throw new NotFoundException("商机不存在");
     const previousCustomerId = opportunity.customerId;
+    const previousStage = opportunity.stage;
+    const previousStageEnteredAt =
+      opportunity.stageEnteredAt ||
+      opportunity.updatedAt ||
+      opportunity.createdAt ||
+      new Date();
+    const nextStage = updateOpportunityDto.stage || previousStage;
+    this.assertOpportunityCanClose(
+      nextStage,
+      updateOpportunityDto.winReason ?? opportunity.winReason,
+      updateOpportunityDto.lossReason ?? opportunity.lossReason,
+    );
+
+    const nextOwnerId = String(
+      updateOpportunityDto.ownerId ?? opportunity.ownerId ?? "",
+    );
+    if (
+      updateOpportunityDto.collaboratorIds !== undefined ||
+      updateOpportunityDto.ownerId !== undefined
+    ) {
+      updateOpportunityDto.collaboratorIds = this.normalizeCollaboratorIds(
+        updateOpportunityDto.collaboratorIds ?? opportunity.collaboratorIds,
+        nextOwnerId,
+      );
+    }
+    if (updateOpportunityDto.currency !== undefined) {
+      updateOpportunityDto.currency = String(
+        updateOpportunityDto.currency || "USD",
+      ).toUpperCase();
+    }
+
     Object.assign(opportunity, updateOpportunityDto);
     if (
       updateOpportunityDto.stage &&
@@ -851,12 +951,56 @@ export class CustomersService {
         updateOpportunityDto.stage,
       );
     }
+    if (["won", "lost"].includes(nextStage)) {
+      opportunity.probability = this.defaultProbability(nextStage);
+    }
+    if (nextStage !== previousStage) {
+      const now = new Date();
+      opportunity.stageEnteredAt = now;
+      opportunity.closedAt = ["won", "lost"].includes(nextStage) ? now : null;
+      opportunity.forecastCategory = this.forecastCategoryForStage(
+        nextStage,
+        updateOpportunityDto.forecastCategory || opportunity.forecastCategory,
+      );
+    } else if (["won", "lost"].includes(nextStage)) {
+      opportunity.closedAt = opportunity.closedAt || new Date();
+      opportunity.forecastCategory = "closed";
+    }
+
     const saved = await this.opportunityRepository.save(opportunity);
+    if (nextStage !== previousStage) {
+      const durationHours = Math.max(
+        0,
+        Math.floor(
+          (saved.stageEnteredAt.getTime() -
+            new Date(previousStageEnteredAt).getTime()) /
+            3_600_000,
+        ),
+      );
+      await this.recordOpportunityStage(
+        saved,
+        previousStage,
+        actor,
+        durationHours,
+      );
+    }
     await this.refreshCustomerOpportunityState(saved.customerId, saved);
     if (previousCustomerId !== saved.customerId) {
       await this.refreshCustomerOpportunityState(previousCustomerId);
     }
     return saved;
+  }
+
+  async findOpportunityStageHistory(id: number) {
+    const opportunity = await this.opportunityRepository.findOne({
+      where: { id },
+    });
+    if (!opportunity) throw new NotFoundException("商机不存在");
+    if (!this.opportunityStageHistoryRepository) return [];
+    return this.opportunityStageHistoryRepository.find({
+      where: { opportunityPk: id },
+      order: { changedAt: "DESC", id: "DESC" },
+    });
   }
 
   async deleteOpportunity(id: number) {
@@ -889,6 +1033,14 @@ export class CustomersService {
       return;
     }
 
+    if (["won", "lost"].includes(targetStage)) {
+      throw new BadRequestException(
+        targetStage === "won"
+          ? "请在商机中填写赢单原因后再关闭商机，客户状态会自动更新"
+          : "请在商机中填写输单原因后再关闭商机，客户状态会自动更新",
+      );
+    }
+
     if (!current) {
       // Qualified customers do not become opportunities until the user explicitly
       // selects "opportunity" or a later sales stage.
@@ -903,12 +1055,53 @@ export class CustomersService {
         name: `${customer.company || customer.contact || "客户"} - 商机`,
         stage: targetStage,
         probability: this.defaultProbability(targetStage),
+        forecastCategory: this.forecastCategoryForStage(targetStage),
+        ownerId: customer.ownerId || "",
+        collaboratorIds: this.normalizeCollaboratorIds(
+          customer.collaboratorIds,
+          customer.ownerId,
+        ),
+        currency: customer.preferredCurrency || "USD",
+        stageEnteredAt: new Date(),
       });
-      opportunities.unshift(await this.opportunityRepository.save(opportunity));
+      const saved = await this.opportunityRepository.save(opportunity);
+      await this.recordOpportunityStage(
+        saved,
+        null,
+        { userId: "", displayName: "客户 360°" },
+        0,
+      );
+      opportunities.unshift(saved);
     } else {
+      const previousStage = current.stage;
+      const previousStageEnteredAt =
+        current.stageEnteredAt ||
+        current.updatedAt ||
+        current.createdAt ||
+        new Date();
       current.stage = targetStage;
       current.probability = this.defaultProbability(targetStage);
-      await this.opportunityRepository.save(current);
+      current.forecastCategory = this.forecastCategoryForStage(
+        targetStage,
+        current.forecastCategory,
+      );
+      if (previousStage !== targetStage) current.stageEnteredAt = new Date();
+      const saved = await this.opportunityRepository.save(current);
+      if (previousStage !== targetStage) {
+        await this.recordOpportunityStage(
+          saved,
+          previousStage,
+          { userId: "", displayName: "客户 360°" },
+          Math.max(
+            0,
+            Math.floor(
+              (saved.stageEnteredAt.getTime() -
+                new Date(previousStageEnteredAt).getTime()) /
+                3_600_000,
+            ),
+          ),
+        );
+      }
     }
 
     this.assignOpportunityMetrics(customer, opportunities);
@@ -997,6 +1190,54 @@ export class CustomersService {
     }[stage];
   }
 
+  private forecastCategoryForStage(
+    stage: Opportunity["stage"],
+    requested?: Opportunity["forecastCategory"],
+  ): Opportunity["forecastCategory"] {
+    if (["won", "lost"].includes(stage)) return "closed";
+    if (!requested || requested === "closed") return "pipeline";
+    return requested;
+  }
+
+  private assertOpportunityCanClose(
+    stage: Opportunity["stage"],
+    winReason?: string | null,
+    lossReason?: string | null,
+  ) {
+    if (stage === "won" && !String(winReason || "").trim()) {
+      throw new BadRequestException("商机关闭为赢单前必须填写赢单原因");
+    }
+    if (stage === "lost" && !String(lossReason || "").trim()) {
+      throw new BadRequestException("商机关闭为输单前必须填写输单原因");
+    }
+  }
+
+  private async recordOpportunityStage(
+    opportunity: Opportunity,
+    fromStage: Opportunity["stage"] | null,
+    actor: OpportunityActor,
+    durationHours: number,
+  ) {
+    if (!this.opportunityStageHistoryRepository) return;
+    const changeNote =
+      opportunity.stage === "won"
+        ? opportunity.winReason
+        : opportunity.stage === "lost"
+          ? opportunity.lossReason
+          : opportunity.nextStepAction;
+    const history = this.opportunityStageHistoryRepository.create({
+      opportunityPk: opportunity.id,
+      opportunityKey: opportunity.opportunityId,
+      fromStage,
+      toStage: opportunity.stage,
+      durationHours,
+      changedById: actor.userId || "",
+      changedByName: actor.displayName || "系统",
+      changeNote: changeNote || "",
+    });
+    await this.opportunityStageHistoryRepository.save(history);
+  }
+
   // ==================== Quotes ====================
 
   async findQuotes(filters: Record<string, any> = {}) {
@@ -1006,8 +1247,14 @@ export class CustomersService {
         .leftJoinAndSelect("quote.customer", "customer")
         .leftJoinAndSelect("quote.items", "item")
         .orderBy("quote.updatedAt", "DESC");
-      if (filters.customerId) qb.andWhere("quote.customerId = :quoteCustomerId", { quoteCustomerId: filters.customerId });
-      if (filters.status) qb.andWhere("quote.status = :quoteStatus", { quoteStatus: filters.status });
+      if (filters.customerId)
+        qb.andWhere("quote.customerId = :quoteCustomerId", {
+          quoteCustomerId: filters.customerId,
+        });
+      if (filters.status)
+        qb.andWhere("quote.status = :quoteStatus", {
+          quoteStatus: filters.status,
+        });
       this.applyCustomerAccess(qb, filters.ownerId);
       return qb.getMany();
     }
@@ -1141,8 +1388,14 @@ export class CustomersService {
         .createQueryBuilder("sample")
         .leftJoinAndSelect("sample.customer", "customer")
         .orderBy("sample.updatedAt", "DESC");
-      if (filters.customerId) qb.andWhere("sample.customerId = :sampleCustomerId", { sampleCustomerId: filters.customerId });
-      if (filters.status) qb.andWhere("sample.status = :sampleStatus", { sampleStatus: filters.status });
+      if (filters.customerId)
+        qb.andWhere("sample.customerId = :sampleCustomerId", {
+          sampleCustomerId: filters.customerId,
+        });
+      if (filters.status)
+        qb.andWhere("sample.status = :sampleStatus", {
+          sampleStatus: filters.status,
+        });
       this.applyCustomerAccess(qb, filters.ownerId);
       return qb.getMany();
     }
@@ -1200,7 +1453,9 @@ export class CustomersService {
   async isCustomerEmailMarketingAllowed(customerId: number, email: string) {
     const normalized = this.normalizeEmail(email);
     if (!normalized) return false;
-    const contacts = await this.contactRepository.find({ where: { customerId } });
+    const contacts = await this.contactRepository.find({
+      where: { customerId },
+    });
     const matching = contacts.find(
       (contact) => this.normalizeEmail(contact.email) === normalized,
     );
@@ -1239,7 +1494,9 @@ export class CustomersService {
 
   async parseAndPreview(file: UploadedFile) {
     const rows = await this.parseExcelFile(file);
-    const normalizedRows = rows.map((row) => this.normalizeImportedMasterRow(row));
+    const normalizedRows = rows.map((row) =>
+      this.normalizeImportedMasterRow(row),
+    );
     const customers = await this.customerRepository.find();
     const existingEmails = new Set(
       customers.filter((c) => c.email).map((c) => this.normalizeEmail(c.email)),
@@ -1406,7 +1663,11 @@ export class CustomersService {
     const value = (...keys: string[]) => {
       for (const key of keys) {
         const candidate = row[key];
-        if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+        if (
+          candidate !== undefined &&
+          candidate !== null &&
+          String(candidate).trim()
+        ) {
           return String(candidate).trim();
         }
       }
@@ -1423,7 +1684,9 @@ export class CustomersService {
     return {
       company: value("company", "Company", "公司", "公司名称", "客户名称"),
       contact: value("contact", "Contact", "联系人", "联系人姓名", "姓名"),
-      email: this.normalizeEmail(value("email", "Email", "邮箱", "电子邮箱", "E-mail", "E-Mail")),
+      email: this.normalizeEmail(
+        value("email", "Email", "邮箱", "电子邮箱", "E-mail", "E-Mail"),
+      ),
       phone: value("phone", "Phone", "电话", "手机号", "联系电话"),
       website: value("website", "Website", "官网", "网站", "网址"),
       region: value("region", "Region", "地区", "城市", "市场区域"),
@@ -1431,7 +1694,12 @@ export class CustomersService {
       address: value("address", "Address", "详细地址", "公司地址"),
       business: value("business", "Business", "主营业务", "行业", "业务"),
       product: value("product", "Product", "产品", "主营产品"),
-      customerType: value("customerType", "Customer Type", "公司类型", "客户类型"),
+      customerType: value(
+        "customerType",
+        "Customer Type",
+        "公司类型",
+        "客户类型",
+      ),
       mainMarkets: list("mainMarkets", "Main Markets", "主要市场"),
       annualPurchaseAmount: amount(
         "annualPurchaseAmount",
@@ -1439,8 +1707,14 @@ export class CustomersService {
         "年采购金额",
         "年采购规模",
       ),
-      preferredCurrency: value("preferredCurrency", "Preferred Currency", "首选币种") || "USD",
-      preferredIncoterm: value("preferredIncoterm", "Preferred Incoterm", "首选贸易条款", "贸易条款"),
+      preferredCurrency:
+        value("preferredCurrency", "Preferred Currency", "首选币种") || "USD",
+      preferredIncoterm: value(
+        "preferredIncoterm",
+        "Preferred Incoterm",
+        "首选贸易条款",
+        "贸易条款",
+      ),
       timezone: value("timezone", "Timezone", "时区", "客户时区"),
       notes: value("notes", "Notes", "备注"),
       source: value("source", "Source", "客户来源") || "import",
@@ -1488,10 +1762,9 @@ export class CustomersService {
     for (const [key, value] of Object.entries(incoming)) {
       if (
         existing &&
-        this.hasImportedProfileValue(
-          (existing as Record<string, unknown>)[key],
-        )
-      ) continue;
+        this.hasImportedProfileValue((existing as Record<string, unknown>)[key])
+      )
+        continue;
       if (Array.isArray(value)) {
         if (value.length) merged[key] = value;
       } else if (typeof value === "number") {

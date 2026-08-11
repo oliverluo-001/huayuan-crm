@@ -10,6 +10,7 @@ import type {
   Activity,
   Todo,
   Opportunity,
+  OpportunityStageHistory,
   CreateOpportunityInput,
   UpdateOpportunityInput,
   Product,
@@ -60,6 +61,7 @@ export type {
   Activity,
   Todo,
   Opportunity,
+  OpportunityStageHistory,
   CreateOpportunityInput,
   UpdateOpportunityInput,
   Product,
@@ -579,6 +581,14 @@ export async function updateOpportunity(
   });
 }
 
+export async function getOpportunityStageHistory(
+  id: string,
+): Promise<OpportunityStageHistory[]> {
+  return api<OpportunityStageHistory[]>(
+    `/api/opportunities/${encodeURIComponent(id)}/history`,
+  );
+}
+
 export async function deleteOpportunity(id: string): Promise<void> {
   await api(`/api/opportunities/${encodeURIComponent(id)}`, {
     method: "DELETE",
@@ -913,9 +923,7 @@ export async function checkMailboxBounces(): Promise<void> {
 }
 
 // Import API
-export async function importCustomers(
-  file: File,
-): Promise<{
+export async function importCustomers(file: File): Promise<{
   total: number;
   created: number;
   updated: number;
@@ -926,9 +934,7 @@ export async function importCustomers(
   return api("/api/import", { method: "POST", rawBody: formData });
 }
 
-export async function previewImport(
-  file: File,
-): Promise<{
+export async function previewImport(file: File): Promise<{
   total: number;
   withEmail: number;
   duplicateCount: number;
@@ -1022,9 +1028,7 @@ export async function verifyBackup(
   });
 }
 
-export async function drillBackup(
-  id: string,
-): Promise<{
+export async function drillBackup(id: string): Promise<{
   valid: boolean;
   restorable: boolean;
   tableCount: number;
@@ -1034,9 +1038,7 @@ export async function drillBackup(
   return api(`/api/backup/${encodeURIComponent(id)}/drill`, { method: "POST" });
 }
 
-export async function restoreBackup(
-  id: string,
-): Promise<{
+export async function restoreBackup(id: string): Promise<{
   restored: boolean;
   backupId: string;
   rollbackBackupId: string;

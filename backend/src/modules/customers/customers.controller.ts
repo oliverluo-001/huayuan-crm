@@ -42,8 +42,15 @@ import { Roles } from '../../common/decorators/roles.decorator';
 interface RequestUser {
   sub: number;
   role: 'admin' | 'sales' | 'viewer';
+  username?: string;
+  displayName?: string;
 }
-const requestOwnerId = (user: RequestUser) => user.role === 'sales' ? String(user.sub) : undefined;
+const requestOwnerId = (user: RequestUser) =>
+  user.role === 'sales' ? String(user.sub) : undefined;
+const opportunityActor = (user: RequestUser) => ({
+  userId: String(user.sub),
+  displayName: user.displayName || user.username || String(user.sub),
+});
 
 @Controller('customers')
 export class CustomersController {
@@ -52,25 +59,38 @@ export class CustomersController {
   // ==================== Customer CRUD ====================
 
   @Get()
-  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
+  async findAll(
+    @Query() query: Record<string, any>,
+    @CurrentUser() user: RequestUser,
+  ) {
     const scoped = { ...query };
-    if (user.role === 'sales' || query.ownerId === 'me') scoped.ownerId = String(user.sub);
+    if (user.role === 'sales' || query.ownerId === 'me')
+      scoped.ownerId = String(user.sub);
     return this.customersService.findAll(scoped);
   }
 
   @Post()
   @Roles('admin', 'sales')
-  create(@Body() createCustomerDto: CreateCustomerDto, @CurrentUser() user: RequestUser) {
+  create(
+    @Body() createCustomerDto: CreateCustomerDto,
+    @CurrentUser() user: RequestUser,
+  ) {
     return this.customersService.create({
       ...createCustomerDto,
-      ownerId: user.role === 'sales' ? String(user.sub) : createCustomerDto.ownerId,
-      collaboratorIds: user.role === 'sales' ? [] : createCustomerDto.collaboratorIds,
+      ownerId:
+        user.role === 'sales' ? String(user.sub) : createCustomerDto.ownerId,
+      collaboratorIds:
+        user.role === 'sales' ? [] : createCustomerDto.collaboratorIds,
     });
   }
 
   @Put(':id')
   @Roles('admin', 'sales')
-  async update(@Param('id') id: string, @Body() updateCustomerDto: UpdateCustomerDto, @CurrentUser() user: RequestUser) {
+  async update(
+    @Param('id') id: string,
+    @Body() updateCustomerDto: UpdateCustomerDto,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.assertSalesOwnership(+id, user);
     const update = { ...updateCustomerDto };
     if (user.role === 'sales') {
@@ -89,8 +109,14 @@ export class CustomersController {
 
   @Post('bulk-delete')
   @Roles('admin', 'sales')
-  bulkDelete(@Body() bulkDeleteDto: BulkDeleteDto, @CurrentUser() user: RequestUser) {
-    return this.customersService.bulkDelete(bulkDeleteDto, this.salesOwnerId(user));
+  bulkDelete(
+    @Body() bulkDeleteDto: BulkDeleteDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.customersService.bulkDelete(
+      bulkDeleteDto,
+      this.salesOwnerId(user),
+    );
   }
 
   @Post('bulk-tags')
@@ -154,8 +180,14 @@ export class CustomersController {
   }
 
   @Get('ids')
-  findAllIds(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
-    return this.customersService.findAllIds({ ...query, ownerId: this.salesOwnerId(user) });
+  findAllIds(
+    @Query() query: Record<string, any>,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.customersService.findAllIds({
+      ...query,
+      ownerId: this.salesOwnerId(user),
+    });
   }
 
   @Get(':id')
@@ -174,7 +206,10 @@ export class CustomersController {
 
   @Post(':id/clear-email-exception')
   @Roles('admin', 'sales')
-  async clearEmailException(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+  async clearEmailException(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.assertSalesOwnership(+id, user);
     return this.customersService.clearEmailException(+id);
   }
@@ -184,20 +219,30 @@ export class CustomersController {
   }
 
   private async assertSalesOwnership(id: number, user: RequestUser) {
-    await this.customersService.assertCustomerOwner(id, this.salesOwnerId(user));
+    await this.customersService.assertCustomerOwner(
+      id,
+      this.salesOwnerId(user),
+    );
   }
 
   // ==================== Nested Todos (frontend compatibility) ====================
 
   @Get(':id/todos')
-  async findCustomerTodos(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+  async findCustomerTodos(
+    @Param('id') id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.assertSalesOwnership(+id, user);
     return this.customersService.findTodos({ customerId: +id });
   }
 
   @Post(':id/todos')
   @Roles('admin', 'sales')
-  async createCustomerTodo(@Param('id') id: string, @Body() body: any, @CurrentUser() user: RequestUser) {
+  async createCustomerTodo(
+    @Param('id') id: string,
+    @Body() body: any,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.assertSalesOwnership(+id, user);
     return this.customersService.createTodo({ ...body, customerId: +id });
   }
@@ -206,18 +251,42 @@ export class CustomersController {
 
   @Post(':id/opportunities')
   @Roles('admin', 'sales')
-  async createCustomerOpportunity(@Param('id') id: string, @Body() body: any, @CurrentUser() user: RequestUser) {
+  async createCustomerOpportunity(
+    @Param('id') id: string,
+    @Body() body: any,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.assertSalesOwnership(+id, user);
     // Map frontend field names to backend DTO
-    return this.customersService.createOpportunity({
-      customerId: +id,
-      name: body.title || body.name,
-      amount: body.value ?? body.amount,
-      stage: body.stage,
-      probability: body.probability,
-      expectedCloseDate: body.expectedCloseDate,
-      description: body.notes || body.description,
-    });
+    return this.customersService.createOpportunity(
+      {
+        customerId: +id,
+        name: body.title || body.name,
+        amount: body.value ?? body.amount,
+        stage: body.stage,
+        probability: body.probability,
+        ownerId: user.role === 'sales' ? String(user.sub) : body.ownerId,
+        collaboratorIds: user.role === 'sales' ? [] : body.collaboratorIds,
+        productName: body.productName,
+        productSpecification: body.productSpecification,
+        expectedQuantity: body.expectedQuantity,
+        quantityUnit: body.quantityUnit,
+        targetPrice: body.targetPrice,
+        currency: body.currency,
+        budget: body.budget,
+        purchaseTime: body.purchaseTime,
+        decisionProcess: body.decisionProcess,
+        nextStepAction: body.nextStepAction,
+        nextStepDueDate: body.nextStepDueDate,
+        expectedCloseDate: body.expectedCloseDate,
+        forecastCategory: body.forecastCategory,
+        winReason: body.winReason,
+        lossReason: body.lossReason,
+        competitors: body.competitors,
+        description: body.notes || body.description,
+      },
+      opportunityActor(user),
+    );
   }
 
   // ==================== Contacts ====================
@@ -229,19 +298,38 @@ export class CustomersController {
 
   @Post(':id/contacts')
   @Roles('admin', 'sales')
-  createContact(@Param('id') id: string, @Body() createContactDto: CreateContactDto, @CurrentUser() user: RequestUser) {
-    return this.customersService.createContact(+id, createContactDto, this.salesOwnerId(user));
+  createContact(
+    @Param('id') id: string,
+    @Body() createContactDto: CreateContactDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.customersService.createContact(
+      +id,
+      createContactDto,
+      this.salesOwnerId(user),
+    );
   }
 
   @Put('contacts/:contactId')
   @Roles('admin', 'sales')
-  updateContact(@Param('contactId') id: string, @Body() updateContactDto: UpdateContactDto, @CurrentUser() user: RequestUser) {
-    return this.customersService.updateContact(+id, updateContactDto, this.salesOwnerId(user));
+  updateContact(
+    @Param('contactId') id: string,
+    @Body() updateContactDto: UpdateContactDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.customersService.updateContact(
+      +id,
+      updateContactDto,
+      this.salesOwnerId(user),
+    );
   }
 
   @Delete('contacts/:contactId')
   @Roles('admin', 'sales')
-  deleteContact(@Param('contactId') id: string, @CurrentUser() user: RequestUser) {
+  deleteContact(
+    @Param('contactId') id: string,
+    @CurrentUser() user: RequestUser,
+  ) {
     return this.customersService.deleteContact(+id, this.salesOwnerId(user));
   }
 
@@ -254,8 +342,16 @@ export class CustomersController {
 
   @Post(':id/activities')
   @Roles('admin', 'sales')
-  createActivity(@Param('id') id: string, @Body() createActivityDto: CreateActivityDto, @CurrentUser() user: RequestUser) {
-    return this.customersService.createActivity(+id, createActivityDto, this.salesOwnerId(user));
+  createActivity(
+    @Param('id') id: string,
+    @Body() createActivityDto: CreateActivityDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.customersService.createActivity(
+      +id,
+      createActivityDto,
+      this.salesOwnerId(user),
+    );
   }
 }
 
@@ -266,20 +362,36 @@ export class TodosController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Get()
-  findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
-    return this.customersService.findTodos({ ...query, ownerId: requestOwnerId(user) });
+  findAll(
+    @Query() query: Record<string, any>,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.customersService.findTodos({
+      ...query,
+      ownerId: requestOwnerId(user),
+    });
   }
 
   @Post()
   @Roles('admin', 'sales')
-  async create(@Body() createTodoDto: CreateTodoDto, @CurrentUser() user: RequestUser) {
-    await this.customersService.assertCustomerOwner(createTodoDto.customerId, requestOwnerId(user));
+  async create(
+    @Body() createTodoDto: CreateTodoDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.customersService.assertCustomerOwner(
+      createTodoDto.customerId,
+      requestOwnerId(user),
+    );
     return this.customersService.createTodo(createTodoDto);
   }
 
   @Put(':id')
   @Roles('admin', 'sales')
-  async update(@Param('id') id: string, @Body() updateTodoDto: UpdateTodoDto, @CurrentUser() user: RequestUser) {
+  async update(
+    @Param('id') id: string,
+    @Body() updateTodoDto: UpdateTodoDto,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.customersService.assertTodoOwner(+id, requestOwnerId(user));
     return this.customersService.updateTodo(+id, updateTodoDto);
   }
@@ -297,32 +409,85 @@ export class OpportunitiesController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Get()
-  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
-    const opportunities = await this.customersService.findOpportunities({ ...query, ownerId: requestOwnerId(user) });
+  async findAll(
+    @Query() query: Record<string, any>,
+    @CurrentUser() user: RequestUser,
+  ) {
+    const opportunities = await this.customersService.findOpportunities({
+      ...query,
+      ownerId: requestOwnerId(user),
+    });
     return { opportunities };
   }
 
   @Post()
   @Roles('admin', 'sales')
-  async create(@Body() createOpportunityDto: CreateOpportunityDto, @CurrentUser() user: RequestUser) {
-    await this.customersService.assertCustomerOwner(createOpportunityDto.customerId, requestOwnerId(user));
-    return this.customersService.createOpportunity(createOpportunityDto);
+  async create(
+    @Body() createOpportunityDto: CreateOpportunityDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.customersService.assertCustomerOwner(
+      createOpportunityDto.customerId,
+      requestOwnerId(user),
+    );
+    const create = {
+      ...createOpportunityDto,
+      ownerId:
+        user.role === 'sales' ? String(user.sub) : createOpportunityDto.ownerId,
+      collaboratorIds:
+        user.role === 'sales' ? [] : createOpportunityDto.collaboratorIds,
+    };
+    return this.customersService.createOpportunity(
+      create,
+      opportunityActor(user),
+    );
+  }
+
+  @Get(':id/history')
+  async history(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    await this.customersService.assertOpportunityOwner(
+      +id,
+      requestOwnerId(user),
+    );
+    return this.customersService.findOpportunityStageHistory(+id);
   }
 
   @Put(':id')
   @Roles('admin', 'sales')
-  async update(@Param('id') id: string, @Body() updateOpportunityDto: UpdateOpportunityDto, @CurrentUser() user: RequestUser) {
-    await this.customersService.assertOpportunityOwner(+id, requestOwnerId(user));
+  async update(
+    @Param('id') id: string,
+    @Body() updateOpportunityDto: UpdateOpportunityDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.customersService.assertOpportunityOwner(
+      +id,
+      requestOwnerId(user),
+    );
     if (updateOpportunityDto.customerId) {
-      await this.customersService.assertCustomerOwner(updateOpportunityDto.customerId, requestOwnerId(user));
+      await this.customersService.assertCustomerOwner(
+        updateOpportunityDto.customerId,
+        requestOwnerId(user),
+      );
     }
-    return this.customersService.updateOpportunity(+id, updateOpportunityDto);
+    const update = { ...updateOpportunityDto };
+    if (user.role === 'sales') {
+      delete update.ownerId;
+      delete update.collaboratorIds;
+    }
+    return this.customersService.updateOpportunity(
+      +id,
+      update,
+      opportunityActor(user),
+    );
   }
 
   @Delete(':id')
   @Roles('admin', 'sales')
   async remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
-    await this.customersService.assertOpportunityOwner(+id, requestOwnerId(user));
+    await this.customersService.assertOpportunityOwner(
+      +id,
+      requestOwnerId(user),
+    );
     return this.customersService.deleteOpportunity(+id);
   }
 }
@@ -332,8 +497,14 @@ export class QuotesController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Get()
-  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
-    const quotes = await this.customersService.findQuotes({ ...query, ownerId: requestOwnerId(user) });
+  async findAll(
+    @Query() query: Record<string, any>,
+    @CurrentUser() user: RequestUser,
+  ) {
+    const quotes = await this.customersService.findQuotes({
+      ...query,
+      ownerId: requestOwnerId(user),
+    });
     return { quotes };
   }
 
@@ -345,17 +516,30 @@ export class QuotesController {
 
   @Post()
   @Roles('admin', 'sales')
-  async create(@Body() createQuoteDto: CreateQuoteDto, @CurrentUser() user: RequestUser) {
-    await this.customersService.assertCustomerOwner(createQuoteDto.customerId, requestOwnerId(user));
+  async create(
+    @Body() createQuoteDto: CreateQuoteDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.customersService.assertCustomerOwner(
+      createQuoteDto.customerId,
+      requestOwnerId(user),
+    );
     return this.customersService.createQuote(createQuoteDto);
   }
 
   @Put(':id')
   @Roles('admin', 'sales')
-  async update(@Param('id') id: string, @Body() updateQuoteDto: UpdateQuoteDto, @CurrentUser() user: RequestUser) {
+  async update(
+    @Param('id') id: string,
+    @Body() updateQuoteDto: UpdateQuoteDto,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.customersService.assertQuoteOwner(+id, requestOwnerId(user));
     if (updateQuoteDto.customerId) {
-      await this.customersService.assertCustomerOwner(updateQuoteDto.customerId, requestOwnerId(user));
+      await this.customersService.assertCustomerOwner(
+        updateQuoteDto.customerId,
+        requestOwnerId(user),
+      );
     }
     return this.customersService.updateQuote(+id, updateQuoteDto);
   }
@@ -368,7 +552,11 @@ export class QuotesController {
   }
 
   @Get(':id/export')
-  async export(@Param('id') id: string, @Res() res: Response, @CurrentUser() user: RequestUser) {
+  async export(
+    @Param('id') id: string,
+    @Res() res: Response,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.customersService.assertQuoteOwner(+id, requestOwnerId(user));
     const quote = await this.customersService.findQuote(+id);
     const customer = await this.customersService.findOne(quote.customerId);
@@ -387,24 +575,43 @@ export class SamplesController {
   constructor(private readonly customersService: CustomersService) {}
 
   @Get()
-  async findAll(@Query() query: Record<string, any>, @CurrentUser() user: RequestUser) {
-    const samples = await this.customersService.findSamples({ ...query, ownerId: requestOwnerId(user) });
+  async findAll(
+    @Query() query: Record<string, any>,
+    @CurrentUser() user: RequestUser,
+  ) {
+    const samples = await this.customersService.findSamples({
+      ...query,
+      ownerId: requestOwnerId(user),
+    });
     return { samples };
   }
 
   @Post()
   @Roles('admin', 'sales')
-  async create(@Body() createSampleDto: CreateSampleDto, @CurrentUser() user: RequestUser) {
-    await this.customersService.assertCustomerOwner(createSampleDto.customerId, requestOwnerId(user));
+  async create(
+    @Body() createSampleDto: CreateSampleDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    await this.customersService.assertCustomerOwner(
+      createSampleDto.customerId,
+      requestOwnerId(user),
+    );
     return this.customersService.createSample(createSampleDto);
   }
 
   @Put(':id')
   @Roles('admin', 'sales')
-  async update(@Param('id') id: string, @Body() updateSampleDto: UpdateSampleDto, @CurrentUser() user: RequestUser) {
+  async update(
+    @Param('id') id: string,
+    @Body() updateSampleDto: UpdateSampleDto,
+    @CurrentUser() user: RequestUser,
+  ) {
     await this.customersService.assertSampleOwner(+id, requestOwnerId(user));
     if (updateSampleDto.customerId) {
-      await this.customersService.assertCustomerOwner(updateSampleDto.customerId, requestOwnerId(user));
+      await this.customersService.assertCustomerOwner(
+        updateSampleDto.customerId,
+        requestOwnerId(user),
+      );
     }
     return this.customersService.updateSample(+id, updateSampleDto);
   }
@@ -429,14 +636,28 @@ export class CustomerViewsController {
 
   @Post()
   @Roles('admin', 'sales')
-  create(@Body() createDto: CreateCustomerViewDto, @CurrentUser() user: RequestUser) {
-    return this.customersService.createView(createDto, requestOwnerId(user) || '');
+  create(
+    @Body() createDto: CreateCustomerViewDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.customersService.createView(
+      createDto,
+      requestOwnerId(user) || '',
+    );
   }
 
   @Put(':id')
   @Roles('admin', 'sales')
-  update(@Param('id') id: string, @Body() updateDto: UpdateCustomerViewDto, @CurrentUser() user: RequestUser) {
-    return this.customersService.updateView(+id, updateDto, requestOwnerId(user));
+  update(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateCustomerViewDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.customersService.updateView(
+      +id,
+      updateDto,
+      requestOwnerId(user),
+    );
   }
 
   @Delete(':id')
@@ -503,8 +724,16 @@ export class ContactsController {
 
   @Put(':id')
   @Roles('admin', 'sales')
-  update(@Param('id') id: string, @Body() updateContactDto: UpdateContactDto, @CurrentUser() user: RequestUser) {
-    return this.customersService.updateContact(+id, updateContactDto, requestOwnerId(user));
+  update(
+    @Param('id') id: string,
+    @Body() updateContactDto: UpdateContactDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.customersService.updateContact(
+      +id,
+      updateContactDto,
+      requestOwnerId(user),
+    );
   }
 
   @Delete(':id')
@@ -538,8 +767,12 @@ export class CustomerTrashController {
 // ==================== Helpers ====================
 
 function escapeHtml(value: any): string {
-  return String(value ?? '').replace(/[&<>'"]/g, (ch: string) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[ch] || ch,
+  return String(value ?? '').replace(
+    /[&<>'"]/g,
+    (ch: string) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[
+        ch
+      ] || ch,
   );
 }
 
