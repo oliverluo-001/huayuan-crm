@@ -306,11 +306,14 @@ describe('CustomersService opportunity lifecycle sync', () => {
       stageHistory.filter((item) => item.opportunityPk === where.opportunityPk),
     ),
   };
+  const todoRepository = {
+    find: jest.fn(async () => []),
+  };
   const service = new CustomersService(
     customerRepository as any,
     {} as any,
     {} as any,
-    {} as any,
+    todoRepository as any,
     opportunityRepository as any,
     {} as any,
     {} as any,
@@ -330,9 +333,12 @@ describe('CustomersService opportunity lifecycle sync', () => {
       id: 1,
       customerId: 'cus_1',
       company: 'Buyer Co',
+      ownerId: '7',
       journeyStage: 'qualified',
       openOpportunityCount: 0,
       openOpportunityValue: 0,
+      nextTodoTitle: '确认首单产品规格',
+      nextTodoAt: new Date('2026-08-15T00:00:00Z'),
       tags: [],
     };
   });
@@ -342,13 +348,35 @@ describe('CustomersService opportunity lifecycle sync', () => {
       customerId: 1,
       name: 'First order',
       amount: 2500,
+      nextStepAction: '确认首单产品规格',
+      expectedCloseDate: '2026-09-30',
     });
 
     expect(customer).toMatchObject({
       journeyStage: 'opportunity',
+      ownerId: '7',
+      nextTodoTitle: '确认首单产品规格',
       openOpportunityCount: 1,
       openOpportunityValue: 2500,
     });
+  });
+
+  it('rejects an active opportunity without a next action or expected close date', async () => {
+    await expect(
+      service.createOpportunity({
+        customerId: 1,
+        name: 'Missing close date',
+        nextStepAction: '确认采购计划',
+      } as any),
+    ).rejects.toThrow('商机必须填写预计成交日期');
+
+    await expect(
+      service.createOpportunity({
+        customerId: 1,
+        name: 'Missing next action',
+        expectedCloseDate: '2026-09-30',
+      }),
+    ).rejects.toThrow('未关闭商机必须填写下一步行动');
   });
 
   it('updates customer 360 when the current opportunity stage changes', async () => {
@@ -356,6 +384,8 @@ describe('CustomersService opportunity lifecycle sync', () => {
       customerId: 1,
       name: 'First order',
       amount: 2500,
+      nextStepAction: '确认首单产品规格',
+      expectedCloseDate: '2026-09-30',
     });
     await service.updateOpportunity(opportunity.id, { stage: 'negotiation' });
 
@@ -372,7 +402,12 @@ describe('CustomersService opportunity lifecycle sync', () => {
 
   it('requires a result reason before closing and updates the customer after a valid win', async () => {
     const opportunity = await service.createOpportunity(
-      { customerId: 1, name: 'First order' },
+      {
+        customerId: 1,
+        name: 'First order',
+        nextStepAction: '确认首单产品规格',
+        expectedCloseDate: '2026-09-30',
+      },
       { userId: '7', displayName: '销售甲' },
     );
 
@@ -407,6 +442,8 @@ describe('CustomersService opportunity lifecycle sync', () => {
     const opportunity = await service.createOpportunity({
       customerId: 1,
       name: 'First order',
+      nextStepAction: '确认首单产品规格',
+      expectedCloseDate: '2026-09-30',
     });
     await expect(
       service.updateOpportunity(opportunity.id, { stage: 'lost' }),
@@ -420,6 +457,8 @@ describe('CustomersService opportunity lifecycle sync', () => {
     const opportunity = await service.createOpportunity({
       customerId: 1,
       name: 'First order',
+      nextStepAction: '确认首单产品规格',
+      expectedCloseDate: '2026-09-30',
     });
     await service.update(1, { journeyStage: 'proposal' });
 
@@ -442,7 +481,12 @@ describe('CustomersService opportunity lifecycle sync', () => {
   });
 
   it('prevents an early customer stage from silently diverging from an existing opportunity', async () => {
-    await service.createOpportunity({ customerId: 1, name: 'First order' });
+    await service.createOpportunity({
+      customerId: 1,
+      name: 'First order',
+      nextStepAction: '确认首单产品规格',
+      expectedCloseDate: '2026-09-30',
+    });
     await expect(
       service.update(1, { journeyStage: 'contacted' }),
     ).rejects.toThrow('该客户已有商机，请在商机看板调整阶段');
@@ -453,6 +497,8 @@ describe('CustomersService opportunity lifecycle sync', () => {
       customerId: 1,
       name: 'First order',
       amount: 2500,
+      nextStepAction: '确认首单产品规格',
+      expectedCloseDate: '2026-09-30',
     });
     await service.deleteOpportunity(opportunity.id);
 
@@ -508,12 +554,15 @@ describe('CustomersService customer summary refresh', () => {
       return { affected: before - todos.length };
     }),
   };
+  const opportunityRepository = {
+    find: jest.fn(async () => []),
+  };
   const service = new CustomersService(
     customerRepository as any,
     {} as any,
     activityRepository as any,
     todoRepository as any,
-    {} as any,
+    opportunityRepository as any,
     {} as any,
     {} as any,
     {} as any,

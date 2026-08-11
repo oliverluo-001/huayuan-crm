@@ -822,13 +822,39 @@ export class CustomersService {
       );
     const nextTodo = withDueDate[0] || openTodos[0];
 
-    customer.nextTodoAt = (nextTodo?.dueAt || null) as any;
-    customer.nextTodoTitle = nextTodo?.title || "";
-    customer.health = withDueDate.some(
-      (todo) => new Date(todo.dueAt).getTime() < Date.now(),
-    )
+    const openOpportunity = nextTodo
+      ? undefined
+      : (await this.listCustomerOpportunities(customerId))
+          .filter(
+            (opportunity) =>
+              !["won", "lost"].includes(opportunity.stage) &&
+              Boolean(String(opportunity.nextStepAction || "").trim()),
+          )
+          .sort((left, right) => {
+            const leftTime = left.nextStepDueDate
+              ? new Date(left.nextStepDueDate).getTime()
+              : Number.MAX_SAFE_INTEGER;
+            const rightTime = right.nextStepDueDate
+              ? new Date(right.nextStepDueDate).getTime()
+              : Number.MAX_SAFE_INTEGER;
+            return leftTime - rightTime;
+          })[0];
+
+    customer.nextTodoAt = (nextTodo?.dueAt ||
+      openOpportunity?.nextStepDueDate ||
+      null) as any;
+    customer.nextTodoTitle =
+      nextTodo?.title || openOpportunity?.nextStepAction || "";
+    const nextActionOverdue = Boolean(
+      openOpportunity?.nextStepDueDate &&
+        new Date(openOpportunity.nextStepDueDate).getTime() < Date.now(),
+    );
+    customer.health =
+      withDueDate.some(
+        (todo) => new Date(todo.dueAt).getTime() < Date.now(),
+      ) || nextActionOverdue
       ? "critical"
-      : openTodos.length > 0
+      : openTodos.length > 0 || openOpportunity
         ? "warning"
         : "good";
     await this.customerRepository.save(customer);
@@ -870,7 +896,15 @@ export class CustomersService {
       createOpportunityDto.lossReason,
     );
     const ownerId = String(
-      createOpportunityDto.ownerId || customer.ownerId || "",
+      createOpportunityDto.ownerId || customer.ownerId || actor.userId || "",
+    );
+    this.assertOpportunityRequiredFields(
+      stage,
+      ownerId,
+      createOpportunityDto.nextStepAction,
+      createOpportunityDto.expectedCloseDate,
+      createOpportunityDto.winReason,
+      createOpportunityDto.lossReason,
     );
     const now = new Date();
     const opportunity = this.opportunityRepository.create({
@@ -910,6 +944,9 @@ export class CustomersService {
       where: { id },
     });
     if (!opportunity) throw new NotFoundException("商机不存在");
+    const targetCustomer = await this.findOne(
+      updateOpportunityDto.customerId || opportunity.customerId,
+    );
     const previousCustomerId = opportunity.customerId;
     const previousStage = opportunity.stage;
     const previousStageEnteredAt =
@@ -925,7 +962,19 @@ export class CustomersService {
     );
 
     const nextOwnerId = String(
-      updateOpportunityDto.ownerId ?? opportunity.ownerId ?? "",
+      updateOpportunityDto.ownerId ||
+        opportunity.ownerId ||
+        targetCustomer.ownerId ||
+        actor.userId ||
+        "",
+    );
+    this.assertOpportunityRequiredFields(
+      nextStage,
+      nextOwnerId,
+      updateOpportunityDto.nextStepAction ?? opportunity.nextStepAction,
+      updateOpportunityDto.expectedCloseDate ?? opportunity.expectedCloseDate,
+      updateOpportunityDto.winReason ?? opportunity.winReason,
+      updateOpportunityDto.lossReason ?? opportunity.lossReason,
     );
     if (
       updateOpportunityDto.collaboratorIds !== undefined ||
@@ -943,6 +992,7 @@ export class CustomersService {
     }
 
     Object.assign(opportunity, updateOpportunityDto);
+    opportunity.ownerId = nextOwnerId;
     if (
       updateOpportunityDto.stage &&
       updateOpportunityDto.probability === undefined
@@ -1049,6 +1099,14 @@ export class CustomersService {
         customer.openOpportunityValue = 0;
         return;
       }
+      const ownerId = String(customer.ownerId || "").trim();
+      const expectedCloseDate = this.defaultExpectedCloseDate();
+      this.assertOpportunityRequiredFields(
+        targetStage,
+        ownerId,
+        customer.nextTodoTitle,
+        expectedCloseDate,
+      );
       const opportunity = this.opportunityRepository.create({
         customerId: customer.id,
         opportunityId: this.generateId("opp"),
@@ -1056,12 +1114,15 @@ export class CustomersService {
         stage: targetStage,
         probability: this.defaultProbability(targetStage),
         forecastCategory: this.forecastCategoryForStage(targetStage),
-        ownerId: customer.ownerId || "",
+        ownerId,
         collaboratorIds: this.normalizeCollaboratorIds(
           customer.collaboratorIds,
           customer.ownerId,
         ),
         currency: customer.preferredCurrency || "USD",
+        nextStepAction: customer.nextTodoTitle,
+        nextStepDueDate: customer.nextTodoAt,
+        expectedCloseDate,
         stageEnteredAt: new Date(),
       });
       const saved = await this.opportunityRepository.save(opportunity);
@@ -1085,6 +1146,21 @@ export class CustomersService {
         targetStage,
         current.forecastCategory,
       );
+      current.ownerId = current.ownerId || customer.ownerId;
+      current.nextStepAction =
+        current.nextStepAction || customer.nextTodoTitle;
+      current.nextStepDueDate =
+        current.nextStepDueDate || customer.nextTodoAt;
+      current.expectedCloseDate =
+        current.expectedCloseDate || this.defaultExpectedCloseDate();
+      this.assertOpportunityRequiredFields(
+        targetStage,
+        current.ownerId,
+        current.nextStepAction,
+        current.expectedCloseDate,
+        current.winReason,
+        current.lossReason,
+      );
       if (previousStage !== targetStage) current.stageEnteredAt = new Date();
       const saved = await this.opportunityRepository.save(current);
       if (previousStage !== targetStage) {
@@ -1105,6 +1181,12 @@ export class CustomersService {
     }
 
     this.assignOpportunityMetrics(customer, opportunities);
+    const activeOpportunity = opportunities.find(
+      (item) => !["won", "lost"].includes(item.stage),
+    );
+    if (activeOpportunity && !customer.ownerId) {
+      customer.ownerId = activeOpportunity.ownerId;
+    }
   }
 
   private async refreshCustomerOpportunityState(
@@ -1120,12 +1202,19 @@ export class CustomersService {
       ? opportunities.find((item) => item.id === preferred.id) || preferred
       : opportunities[0];
     this.assignOpportunityMetrics(customer, opportunities);
+    const activeOpportunity = opportunities.find(
+      (item) => !["won", "lost"].includes(item.stage),
+    );
+    if (activeOpportunity && !customer.ownerId) {
+      customer.ownerId = activeOpportunity.ownerId;
+    }
     if (current) {
       customer.journeyStage = this.journeyStageFromOpportunity(current.stage);
     } else if (this.opportunityStageFromJourney(customer.journeyStage)) {
       customer.journeyStage = "qualified";
     }
     await this.customerRepository.save(customer);
+    await this.refreshCustomerTodoSummary(customerId);
   }
 
   private listCustomerOpportunities(customerId: number) {
@@ -1210,6 +1299,35 @@ export class CustomersService {
     if (stage === "lost" && !String(lossReason || "").trim()) {
       throw new BadRequestException("商机关闭为输单前必须填写输单原因");
     }
+  }
+
+  private assertOpportunityRequiredFields(
+    stage: Opportunity["stage"],
+    ownerId?: string | null,
+    nextStepAction?: string | null,
+    expectedCloseDate?: string | Date | null,
+    winReason?: string | null,
+    lossReason?: string | null,
+  ) {
+    if (!String(ownerId || "").trim()) {
+      throw new BadRequestException("商机必须指定负责人");
+    }
+    if (!expectedCloseDate) {
+      throw new BadRequestException("商机必须填写预计成交日期");
+    }
+    if (
+      !["won", "lost"].includes(stage) &&
+      !String(nextStepAction || "").trim()
+    ) {
+      throw new BadRequestException("未关闭商机必须填写下一步行动");
+    }
+    this.assertOpportunityCanClose(stage, winReason, lossReason);
+  }
+
+  private defaultExpectedCloseDate() {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() + 90);
+    return date;
   }
 
   private async recordOpportunityStage(

@@ -87,6 +87,9 @@ async function seedLegacyFixture(connection: Connection) {
       DROP COLUMN closed_at
   `);
   await connection.query(
+    "ALTER TABLE opportunities MODIFY COLUMN expected_close_date DATE NULL",
+  );
+  await connection.query(
     "ALTER TABLE products ADD COLUMN base_price VARCHAR(64) NULL",
   );
   await connection.query(
@@ -270,7 +273,7 @@ async function verifyMigratedData(connection: Connection) {
     "P1.4 商机字段迁移不完整",
   );
   const [opportunityRows] = await connection.query<CheckRow[]>(
-    "SELECT owner_id, forecast_category, stage_entered_at FROM opportunities WHERE opportunity_id = 'OPP-CI-1'",
+    "SELECT owner_id, forecast_category, stage_entered_at, next_step_action, next_step_due_date, expected_close_date FROM opportunities WHERE opportunity_id = 'OPP-CI-1'",
   );
   assert.equal(opportunityRows[0].owner_id, "7", "历史商机负责人未从客户补齐");
   assert.equal(
@@ -279,6 +282,24 @@ async function verifyMigratedData(connection: Connection) {
     "历史商机预测分类不正确",
   );
   assert.ok(opportunityRows[0].stage_entered_at, "历史商机缺少阶段进入时间");
+  assert.equal(
+    opportunityRows[0].next_step_action,
+    "联系客户并确认下一步安排",
+    "历史活跃商机缺少下一步行动",
+  );
+  assert.ok(opportunityRows[0].next_step_due_date, "历史活跃商机缺少行动日期");
+  assert.ok(opportunityRows[0].expected_close_date, "历史商机缺少预计成交日期");
+  const [expectedCloseColumn] = await connection.query<CheckRow[]>(
+    `SELECT IS_NULLABLE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'opportunities'
+       AND COLUMN_NAME = 'expected_close_date'`,
+    [database],
+  );
+  assert.equal(
+    expectedCloseColumn[0].IS_NULLABLE,
+    "NO",
+    "预计成交日期仍允许为空",
+  );
   const [opportunityHistory] = await connection.query<CheckRow[]>(
     "SELECT COUNT(*) AS count FROM opportunity_stage_history WHERE opportunity_key = 'OPP-CI-1'",
   );

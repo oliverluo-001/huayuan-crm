@@ -122,6 +122,16 @@ describe('CRM API contracts', () => {
     ).resolves.toHaveLength(0);
   });
 
+  it('requires an expected close date for every new opportunity', async () => {
+    await expect(
+      contractErrors(CreateOpportunityDto, {
+        customerId: 1,
+        name: 'Annual flange order',
+        nextStepAction: 'Confirm drawing',
+      }),
+    ).resolves.not.toHaveLength(0);
+  });
+
   it('rejects invalid purchasing influence and negative annual purchase values', async () => {
     await expect(
       contractErrors(CreateContactDto, {

@@ -301,7 +301,7 @@ export interface Opportunity {
   decisionProcess?: string;
   nextStepAction?: string;
   nextStepDueDate?: string;
-  expectedCloseDate?: string;
+  expectedCloseDate: string;
   forecastCategory?: "pipeline" | "best_case" | "commit" | "closed" | "omitted";
   winReason?: string;
   lossReason?: string;
@@ -420,7 +420,7 @@ export interface CreateOpportunityInput {
   decisionProcess?: string;
   nextStepAction?: string;
   nextStepDueDate?: string;
-  expectedCloseDate?: string;
+  expectedCloseDate: string;
   forecastCategory?: Opportunity["forecastCategory"];
   winReason?: string;
   lossReason?: string;

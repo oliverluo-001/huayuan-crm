@@ -114,7 +114,7 @@ export class Opportunity {
   @Column({ name: 'next_step_due_date', type: 'date', nullable: true })
   nextStepDueDate: Date;
 
-  @Column({ name: 'expected_close_date', type: 'date', nullable: true })
+  @Column({ name: 'expected_close_date', type: 'date' })
   expectedCloseDate: Date;
 
   @Column({

@@ -587,8 +587,7 @@ export class CreateOpportunityDto {
   nextStepDueDate?: string;
 
   @IsDateString()
-  @IsOptional()
-  expectedCloseDate?: string;
+  expectedCloseDate: string;
 
   @IsEnum(["pipeline", "best_case", "commit", "closed", "omitted"])
   @IsOptional()

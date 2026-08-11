@@ -19,6 +19,7 @@ import {
   createCustomerContact,
   createCustomerOpportunity,
   createCustomerTodo,
+  createEmailTask,
   createQuote,
   createSample,
   deleteContact,
@@ -28,7 +29,9 @@ import {
   getCustomer360,
   getCustomerAttachments,
   getProducts,
+  getTemplates,
   getUserDirectory,
+  runEmailTask,
   updateContact,
   updateOpportunity,
   updateTodo,
@@ -37,6 +40,7 @@ import {
   type Contact,
   type Customer360,
   type CustomerAttachment,
+  type EmailTemplate,
   type Opportunity,
   type Product,
   type Sample,
@@ -131,6 +135,33 @@ const createQuoteLine = (): QuoteLineForm => ({
   unitPrice: "",
   discount: "0",
 });
+const dateInputValue = (value?: string | Date) =>
+  value ? String(value).split("T")[0] : "";
+
+const createOpportunityForm = () => ({
+  name: "",
+  amount: "",
+  stage: "prospecting" as Opportunity["stage"],
+  productName: "",
+  productSpecification: "",
+  expectedQuantity: "",
+  quantityUnit: "件",
+  targetPrice: "",
+  currency: "USD",
+  budget: "",
+  purchaseTime: "",
+  decisionProcess: "",
+  nextStepAction: "",
+  nextStepDueDate: "",
+  expectedCloseDate: "",
+  forecastCategory: "pipeline" as NonNullable<
+    Opportunity["forecastCategory"]
+  >,
+  winReason: "",
+  lossReason: "",
+  competitors: "",
+  description: "",
+});
 
 export function Customer360Dialog({
   customerId,
@@ -152,6 +183,9 @@ export function Customer360Dialog({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const [editingOpportunityId, setEditingOpportunityId] = useState<
+    string | null
+  >(null);
   const [contactForm, setContactForm] = useState({
     name: "",
     title: "",
@@ -177,29 +211,13 @@ export function Customer360Dialog({
     dueAt: "",
     description: "",
   });
-  const [opportunityForm, setOpportunityForm] = useState({
-    name: "",
-    amount: "",
-    stage: "prospecting" as Opportunity["stage"],
-    productName: "",
-    productSpecification: "",
-    expectedQuantity: "",
-    quantityUnit: "件",
-    targetPrice: "",
-    currency: "USD",
-    budget: "",
-    purchaseTime: "",
-    decisionProcess: "",
-    nextStepAction: "",
-    nextStepDueDate: "",
-    expectedCloseDate: "",
-    forecastCategory: "pipeline" as NonNullable<
-      Opportunity["forecastCategory"]
-    >,
-    winReason: "",
-    lossReason: "",
-    competitors: "",
-    description: "",
+  const [opportunityForm, setOpportunityForm] = useState(
+    createOpportunityForm,
+  );
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
+  const [emailForm, setEmailForm] = useState({
+    templateId: "",
+    taskName: "",
   });
   const [quoteForm, setQuoteForm] = useState({
     opportunityId: "",
@@ -237,11 +255,13 @@ export function Customer360Dialog({
           attachmentResult,
           productResult,
           directoryResult,
+          templateResult,
         ] = await Promise.allSettled([
           getCustomer360(customerId),
           getCustomerAttachments(customerId),
           getProducts(),
           getUserDirectory(),
+          getTemplates(),
         ]);
         if (customerResult.status === "rejected") throw customerResult.reason;
         setData(customerResult.value);
@@ -262,6 +282,14 @@ export function Customer360Dialog({
         setUserDirectory(
           directoryResult.status === "fulfilled" ? directoryResult.value : [],
         );
+        const templates =
+          templateResult.status === "fulfilled" ? templateResult.value : [];
+        setEmailTemplates(templates);
+        setEmailForm((current) => ({
+          ...current,
+          templateId:
+            current.templateId || templates[0]?.templateId || templates[0]?.id || "",
+        }));
         setError("");
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "客户详情加载失败");
@@ -400,6 +428,17 @@ export function Customer360Dialog({
   const submitOpportunity = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!opportunityForm.name.trim()) return;
+    if (!opportunityForm.expectedCloseDate) {
+      toast.error("请填写预计成交日期");
+      return;
+    }
+    if (
+      !["won", "lost"].includes(opportunityForm.stage) &&
+      !opportunityForm.nextStepAction.trim()
+    ) {
+      toast.error("未关闭商机必须填写下一步行动");
+      return;
+    }
     if (opportunityForm.stage === "won" && !opportunityForm.winReason.trim()) {
       toast.error("商机关闭为赢单前必须填写赢单原因");
       return;
@@ -411,9 +450,7 @@ export function Customer360Dialog({
       toast.error("商机关闭为输单前必须填写输单原因");
       return;
     }
-    const succeeded = await mutate(
-      () =>
-        createCustomerOpportunity(customerId, {
+    const payload = {
           name: opportunityForm.name.trim(),
           amount: Number(opportunityForm.amount || 0),
           stage: opportunityForm.stage,
@@ -428,38 +465,90 @@ export function Customer360Dialog({
           decisionProcess: opportunityForm.decisionProcess.trim(),
           nextStepAction: opportunityForm.nextStepAction.trim(),
           nextStepDueDate: opportunityForm.nextStepDueDate || undefined,
-          expectedCloseDate: opportunityForm.expectedCloseDate || undefined,
+          expectedCloseDate: opportunityForm.expectedCloseDate,
           forecastCategory: opportunityForm.forecastCategory,
           winReason: opportunityForm.winReason.trim(),
           lossReason: opportunityForm.lossReason.trim(),
           competitors: opportunityForm.competitors.trim(),
           description: opportunityForm.description.trim() || undefined,
-        }),
-      "商机已创建，客户跟进阶段已同步",
+        };
+    const succeeded = await mutate(
+      () =>
+        editingOpportunityId
+          ? updateOpportunity(editingOpportunityId, payload)
+          : createCustomerOpportunity(customerId, payload),
+      editingOpportunityId
+        ? "商机已更新，阶段和客户摘要已同步"
+        : "商机已创建，客户跟进阶段已同步",
     );
-    if (succeeded)
-      setOpportunityForm({
-        name: "",
-        amount: "",
-        stage: "prospecting",
-        productName: "",
-        productSpecification: "",
-        expectedQuantity: "",
-        quantityUnit: "件",
-        targetPrice: "",
-        currency: "USD",
-        budget: "",
-        purchaseTime: "",
-        decisionProcess: "",
-        nextStepAction: "",
-        nextStepDueDate: "",
-        expectedCloseDate: "",
-        forecastCategory: "pipeline",
-        winReason: "",
-        lossReason: "",
-        competitors: "",
-        description: "",
-      });
+    if (succeeded) {
+      setEditingOpportunityId(null);
+      setOpportunityForm(createOpportunityForm());
+    }
+  };
+
+  const editOpportunity = (
+    opportunity: Opportunity,
+    nextStage: Opportunity["stage"] = opportunity.stage,
+  ) => {
+    setEditingOpportunityId(opportunity.id);
+    setOpportunityForm({
+      name: opportunity.name,
+      amount: String(opportunity.amount || ""),
+      stage: nextStage,
+      productName: opportunity.productName || "",
+      productSpecification: opportunity.productSpecification || "",
+      expectedQuantity: String(opportunity.expectedQuantity || ""),
+      quantityUnit: opportunity.quantityUnit || "件",
+      targetPrice: String(opportunity.targetPrice || ""),
+      currency: opportunity.currency || "USD",
+      budget: String(opportunity.budget || ""),
+      purchaseTime: opportunity.purchaseTime || "",
+      decisionProcess: opportunity.decisionProcess || "",
+      nextStepAction: opportunity.nextStepAction || "",
+      nextStepDueDate: dateInputValue(opportunity.nextStepDueDate),
+      expectedCloseDate: dateInputValue(opportunity.expectedCloseDate),
+      forecastCategory: opportunity.forecastCategory || "pipeline",
+      winReason: opportunity.winReason || "",
+      lossReason: opportunity.lossReason || "",
+      competitors: opportunity.competitors || "",
+      description: opportunity.description || "",
+    });
+    toast.info(
+      ["won", "lost"].includes(nextStage)
+        ? "请填写关闭原因后保存商机"
+        : "商机已载入编辑区，请确认后保存",
+    );
+  };
+
+  const submitEmail = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!emailForm.templateId) {
+      toast.error("请选择邮件模板");
+      return;
+    }
+    const template = emailTemplates.find(
+      (item) => (item.templateId || item.id) === emailForm.templateId,
+    );
+    const taskName =
+      emailForm.taskName.trim() ||
+      `${data?.customer.company || "客户"} - ${template?.name || "跟进邮件"}`;
+    const succeeded = await mutate(
+      async () => {
+        const task = await createEmailTask({
+          name: taskName,
+          taskMode: "once",
+          templateId: emailForm.templateId,
+          customerIds: [customerId],
+          batchSize: 1,
+        });
+        await runEmailTask(String(task.id));
+      },
+      "邮件任务已创建并开始发送",
+    );
+    if (succeeded) {
+      setEmailForm((current) => ({ ...current, taskName: "" }));
+    }
   };
 
   const updateQuoteLine = (key: string, update: Partial<QuoteLineForm>) => {
@@ -1494,9 +1583,10 @@ export function Customer360Dialog({
                           </SelectContent>
                         </Select>
                         <div className="space-y-1">
-                          <Label className="text-xs">预计成交日期</Label>
+                          <Label className="text-xs">预计成交日期 *</Label>
                           <Input
                             type="date"
+                            required
                             value={opportunityForm.expectedCloseDate}
                             onChange={(event) =>
                               setOpportunityForm((current) => ({
@@ -1531,7 +1621,10 @@ export function Customer360Dialog({
                         />
                         <Textarea
                           className="md:col-span-2"
-                          placeholder="下一步行动（建议包含责任人和预期结果）"
+                          placeholder="下一步行动（未关闭商机必填，建议包含责任人和预期结果）"
+                          required={!["won", "lost"].includes(
+                            opportunityForm.stage,
+                          )}
                           value={opportunityForm.nextStepAction}
                           onChange={(event) =>
                             setOpportunityForm((current) => ({
@@ -1587,9 +1680,21 @@ export function Customer360Dialog({
                             }
                           />
                         )}
-                        <div className="flex justify-end md:col-span-3">
+                        <div className="flex justify-end gap-2 md:col-span-3">
+                          {editingOpportunityId && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setEditingOpportunityId(null);
+                                setOpportunityForm(createOpportunityForm());
+                              }}
+                            >
+                              取消编辑
+                            </Button>
+                          )}
                           <Button type="submit" disabled={isSaving}>
-                            创建商机
+                            {editingOpportunityId ? "保存商机" : "创建商机"}
                           </Button>
                         </div>
                       </form>
@@ -1600,43 +1705,43 @@ export function Customer360Dialog({
                           key={opportunity.id}
                           actions={
                             canManage && (
-                              <Select
-                                value={opportunity.stage}
-                                onValueChange={(value) => {
-                                  if (!value) return;
-                                  if (value === "won" || value === "lost") {
-                                    toast.info(
-                                      "关闭商机前必须填写赢单或输单原因，请在完整商机管理中操作",
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  title="编辑商机"
+                                  onClick={() => editOpportunity(opportunity)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Select
+                                  value={opportunity.stage}
+                                  onValueChange={(value) => {
+                                    if (!value) return;
+                                    editOpportunity(
+                                      opportunity,
+                                      value as Opportunity["stage"],
                                     );
-                                    goTo("/opportunities");
-                                    return;
-                                  }
-                                  void mutate(
-                                    () =>
-                                      updateOpportunity(opportunity.id, {
-                                        stage: value as Opportunity["stage"],
-                                      }),
-                                    "商机阶段与客户跟进阶段已同步",
-                                  );
-                                }}
-                              >
-                                <SelectTrigger className="w-32">
-                                  {optionLabel(
-                                    OPPORTUNITY_STAGES,
-                                    opportunity.stage,
-                                  )}
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {OPPORTUNITY_STAGES.map((stage) => (
-                                    <SelectItem
-                                      key={stage.value}
-                                      value={stage.value}
-                                    >
-                                      {stage.label}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                  }}
+                                >
+                                  <SelectTrigger className="w-32">
+                                    {optionLabel(
+                                      OPPORTUNITY_STAGES,
+                                      opportunity.stage,
+                                    )}
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {OPPORTUNITY_STAGES.map((stage) => (
+                                      <SelectItem
+                                        key={stage.value}
+                                        value={stage.value}
+                                      >
+                                        {stage.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
                             )
                           }
                         >
@@ -2124,14 +2229,65 @@ export function Customer360Dialog({
                 <TabsContent value="emails">
                   <Workspace
                     title="邮件"
-                    description="集中查看该客户的发送记录和投递结果。"
-                    action={
-                      <Button onClick={() => goTo("/marketing")}>
-                        发送邮件
-                        <Mail className="ml-1 h-4 w-4" />
-                      </Button>
-                    }
+                    description="在当前客户下直接创建并启动单次跟进邮件，同时查看投递结果。"
                   >
+                    {canManage && (
+                      <form
+                        className="mb-4 grid gap-3 rounded-xl border bg-muted/20 p-4 md:grid-cols-[1fr_1fr_auto]"
+                        onSubmit={submitEmail}
+                      >
+                        <Select
+                          value={emailForm.templateId || undefined}
+                          onValueChange={(value) =>
+                            value &&
+                            setEmailForm((current) => ({
+                              ...current,
+                              templateId: value,
+                            }))
+                          }
+                        >
+                          <SelectTrigger>
+                            {emailTemplates.find(
+                              (item) =>
+                                (item.templateId || item.id) ===
+                                emailForm.templateId,
+                            )?.name || "选择邮件模板 *"}
+                          </SelectTrigger>
+                          <SelectContent>
+                            {emailTemplates.map((template) => (
+                              <SelectItem
+                                key={template.id}
+                                value={template.templateId || template.id}
+                              >
+                                {template.name} · {template.subject}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          placeholder="任务名称（可选）"
+                          value={emailForm.taskName}
+                          onChange={(event) =>
+                            setEmailForm((current) => ({
+                              ...current,
+                              taskName: event.target.value,
+                            }))
+                          }
+                        />
+                        <Button
+                          type="submit"
+                          disabled={isSaving || emailTemplates.length === 0}
+                        >
+                          <Mail className="mr-1 h-4 w-4" />
+                          创建并发送
+                        </Button>
+                        {emailTemplates.length === 0 && (
+                          <p className="text-sm text-muted-foreground md:col-span-3">
+                            当前账号没有可用邮件模板，请先在邮件发送页面创建模板。
+                          </p>
+                        )}
+                      </form>
+                    )}
                     <RecordList empty="暂无邮件记录">
                       {(data.sendLogs || []).map((log) => (
                         <RecordRow key={log.id}>

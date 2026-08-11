@@ -231,6 +231,17 @@ export function OpportunitiesPage() {
       toast.error("请选择客户并填写商机名称");
       return;
     }
+    if (!form.expectedCloseDate) {
+      toast.error("请填写预计成交日期");
+      return;
+    }
+    if (
+      !["won", "lost"].includes(form.stage) &&
+      !form.nextStepAction.trim()
+    ) {
+      toast.error("未关闭商机必须填写下一步行动");
+      return;
+    }
     if (form.stage === "won" && !form.winReason.trim()) {
       toast.error("商机关闭为赢单前必须填写赢单原因");
       return;
@@ -258,7 +269,7 @@ export function OpportunitiesPage() {
         decisionProcess: form.decisionProcess.trim(),
         nextStepAction: form.nextStepAction.trim(),
         nextStepDueDate: form.nextStepDueDate || undefined,
-        expectedCloseDate: form.expectedCloseDate || undefined,
+        expectedCloseDate: form.expectedCloseDate,
         forecastCategory: form.forecastCategory,
         winReason: form.winReason.trim(),
         lossReason: form.lossReason.trim(),
@@ -611,9 +622,10 @@ export function OpportunitiesPage() {
                     placeholder="例如：2026 年第四季度"
                   />
                 </Field>
-                <Field label="预计成交日期">
+                <Field label="预计成交日期 *">
                   <Input
                     type="date"
+                    required
                     value={form.expectedCloseDate}
                     onChange={(event) =>
                       setForm((current) => ({
@@ -647,7 +659,8 @@ export function OpportunitiesPage() {
                         nextStepAction: event.target.value,
                       }))
                     }
-                    placeholder="明确行动、责任人和预期结果"
+                    placeholder="未关闭商机必填：明确行动、责任人和预期结果"
+                    required={!["won", "lost"].includes(form.stage)}
                   />
                 </Field>
                 <Field label="决策流程" wide>

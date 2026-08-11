@@ -2,6 +2,7 @@ import {
   ensureInitialAdmin,
   migrateCustomerDuplicateManagement,
   migrateOpportunityManagement,
+  migrateP1AcceptanceHardening,
   normalizeLegacyUserEmails,
 } from './migrate';
 
@@ -159,5 +160,56 @@ describe('database migration', () => {
     expect(
       query.mock.calls.filter(([sql]) => String(sql).includes('ADD INDEX')),
     ).toHaveLength(3);
+  });
+
+  it('can repeat the P1 acceptance hardening and keeps required opportunity fields populated', async () => {
+    const columns = new Set<string>();
+    const indexes = new Set<string>();
+    const statements: string[] = [];
+    const query = jest.fn(async (rawSql: string, params: any[] = []) => {
+      const sql = String(rawSql);
+      statements.push(sql);
+      if (sql.includes('information_schema.TABLES')) {
+        return [[{ TABLE_NAME: params[1] }], []];
+      }
+      if (sql.includes('information_schema.COLUMNS')) {
+        return [
+          columns.has(String(params[2])) ? [{ COLUMN_NAME: params[2] }] : [],
+          [],
+        ];
+      }
+      if (sql.includes('information_schema.STATISTICS')) {
+        return [
+          indexes.has(String(params[2])) ? [{ INDEX_NAME: params[2] }] : [],
+          [],
+        ];
+      }
+      const columnMatch = sql.match(/ADD COLUMN `([^`]+)`/);
+      if (columnMatch) columns.add(columnMatch[1]);
+      const indexMatch = sql.match(/ADD INDEX `([^`]+)`/);
+      if (indexMatch) indexes.add(indexMatch[1]);
+      return [{ affectedRows: 1 }, []];
+    });
+
+    await migrateP1AcceptanceHardening({ query } as any);
+    await migrateP1AcceptanceHardening({ query } as any);
+
+    expect(columns).toEqual(new Set(['expected_close_date']));
+    expect(indexes).toEqual(
+      new Set([
+        'idx_opportunities_expected_close',
+        'idx_opportunities_next_step_due',
+      ]),
+    );
+    expect(
+      statements.some(
+        (sql) =>
+          sql.includes('联系客户并确认下一步安排') &&
+          sql.includes('expected_close_date'),
+      ),
+    ).toBe(true);
+    expect(
+      statements.filter((sql) => sql.includes('ADD COLUMN')),
+    ).toHaveLength(1);
   });
 });

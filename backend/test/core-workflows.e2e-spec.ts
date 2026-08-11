@@ -581,6 +581,7 @@ describe("core CRM workflows (HTTP e2e)", () => {
         decisionProcess: "Engineering approval, then purchasing director",
         nextStepAction: "Confirm drawing and material certificate",
         nextStepDueDate: "2026-08-20",
+        expectedCloseDate: "2026-09-30",
         forecastCategory: "best_case",
         competitors: "Competitor A",
       }),
@@ -975,6 +976,9 @@ describe("core CRM workflows (HTTP e2e)", () => {
           title: "Northwind 2026 flange order",
           value: 12800,
           stage: "prospecting",
+          nextStepAction: "确认正式报价并约定下一次沟通",
+          nextStepDueDate: "2026-08-19",
+          expectedCloseDate: "2026-09-30",
         }),
       },
     );
@@ -984,6 +988,8 @@ describe("core CRM workflows (HTTP e2e)", () => {
       customerId: customer.id,
       amount: 12800,
       stage: "prospecting",
+      nextStepAction: "确认正式报价并约定下一次沟通",
+      expectedCloseDate: "2026-09-30",
     });
 
     const stageResponse = await fetch(

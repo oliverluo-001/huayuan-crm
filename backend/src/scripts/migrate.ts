@@ -110,6 +110,7 @@ export async function runDatabaseMigrations() {
       await connection.rollback();
       throw error;
     }
+    await migrateP1AcceptanceHardening(connection);
     return { p03Report };
   } finally {
     await connection.end();
@@ -637,6 +638,88 @@ export async function migrateOpportunityManagement(connection: Connection) {
     )
   `);
 
+  await connection.query(
+    "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
+    [id],
+  );
+}
+
+export async function migrateP1AcceptanceHardening(connection: Connection) {
+  const id = "20260811_p1_acceptance_hardening";
+  if (
+    !(await tableExists(connection, "opportunities")) ||
+    !(await tableExists(connection, "customers"))
+  ) {
+    return;
+  }
+
+  await addColumnToTable(
+    connection,
+    "opportunities",
+    "expected_close_date",
+    "DATE NULL",
+  );
+
+  const adminOwner = (await tableExists(connection, "users"))
+    ? `(SELECT CAST(u.id AS CHAR) FROM users u
+        WHERE u.role = 'admin' AND u.status = 'active' AND u.active = 1
+        ORDER BY u.id LIMIT 1)`
+    : "NULL";
+
+  await connection.query(`
+    UPDATE opportunities o
+    JOIN customers c ON c.id = o.customer_id
+    SET o.owner_id = COALESCE(NULLIF(o.owner_id, ''), NULLIF(c.owner_id, ''), ${adminOwner}, ''),
+        o.next_step_action = CASE
+          WHEN o.stage NOT IN ('won', 'lost') AND TRIM(COALESCE(o.next_step_action, '')) = ''
+            THEN '联系客户并确认下一步安排'
+          ELSE o.next_step_action
+        END,
+        o.next_step_due_date = CASE
+          WHEN o.stage NOT IN ('won', 'lost') AND o.next_step_due_date IS NULL
+            THEN DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+          ELSE o.next_step_due_date
+        END,
+        o.expected_close_date = CASE
+          WHEN o.expected_close_date IS NOT NULL THEN o.expected_close_date
+          WHEN o.stage IN ('won', 'lost')
+            THEN DATE(COALESCE(o.closed_at, o.updated_at, o.created_at, NOW()))
+          ELSE DATE_ADD(CURDATE(), INTERVAL 90 DAY)
+        END
+  `);
+
+  await connection.query(`
+    UPDATE customers c
+    JOIN opportunities o ON o.id = (
+      SELECT o2.id
+      FROM opportunities o2
+      WHERE o2.customer_id = c.id AND o2.stage NOT IN ('won', 'lost')
+      ORDER BY o2.updated_at DESC, o2.id DESC
+      LIMIT 1
+    )
+    SET c.owner_id = COALESCE(NULLIF(c.owner_id, ''), NULLIF(o.owner_id, ''), ${adminOwner}, ''),
+        c.next_todo_title = CASE
+          WHEN TRIM(COALESCE(c.next_todo_title, '')) = '' THEN o.next_step_action
+          ELSE c.next_todo_title
+        END,
+        c.next_todo_at = COALESCE(c.next_todo_at, o.next_step_due_date)
+  `);
+
+  await connection.query(
+    "ALTER TABLE opportunities MODIFY COLUMN expected_close_date DATE NOT NULL",
+  );
+  await addIndexIfMissing(
+    connection,
+    "opportunities",
+    "idx_opportunities_expected_close",
+    "expected_close_date",
+  );
+  await addIndexIfMissing(
+    connection,
+    "opportunities",
+    "idx_opportunities_next_step_due",
+    "next_step_due_date",
+  );
   await connection.query(
     "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
     [id],
