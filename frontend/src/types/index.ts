@@ -335,15 +335,86 @@ export interface OpportunityStageHistory {
 export interface Product {
   id: string;
   productId?: string;
+  sku: string;
   code?: string;
   name: string;
   category?: string;
+  productType?: "general" | "flange";
   unit?: string;
+  weight?: number;
+  weightUnit?: string;
+  packaging?: string;
+  packageQuantity?: number;
+  baseCost?: number;
+  costCurrency?: string;
   price?: number;
   currency?: string;
+  prices?: ProductCurrencyPrice[];
+  standards?: string[];
+  materials?: string[];
+  specifications?: ProductSpecification[];
+  descriptionTemplates?: ProductDescriptionTemplate[];
+  variants?: ProductVariant[];
+  assets?: ProductAsset[];
   description?: string;
+  active?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProductCurrencyPrice {
+  currency: string;
+  referencePrice: number;
+}
+
+export interface ProductSpecification {
+  name: string;
+  value: string;
+  unit?: string;
+}
+
+export interface ProductDescriptionTemplate {
+  id?: string;
+  name: string;
+  content: string;
+}
+
+export interface ProductVariant {
+  id?: string;
+  variantId?: string;
+  sku: string;
+  name?: string;
+  standard?: string;
+  material?: string;
+  pressureRating?: string;
+  nominalSize?: string;
+  facing?: string;
+  surfaceTreatment?: string;
+  unit?: string;
+  weight?: number;
+  weightUnit?: string;
+  packaging?: string;
+  packageQuantity?: number;
+  baseCost?: number;
+  costCurrency?: string;
+  prices?: ProductCurrencyPrice[];
+  specifications?: ProductSpecification[];
+  inspectionRequirements?: string;
+  certificateRequirements?: string;
+  quoteDescription?: string;
+  active?: boolean;
+}
+
+export interface ProductAsset {
+  id: string;
+  assetId?: string;
+  productPk: number;
+  assetType: "image" | "technical";
+  originalName: string;
+  mimeType?: string;
+  size: number;
+  note?: string;
+  createdAt: string;
 }
 
 // Quote types (mirrors the backend Quote + QuoteItem entities)
@@ -352,6 +423,19 @@ export interface QuoteItem {
   productId?: string;
   productName: string;
   productCode?: string;
+  variantId?: string;
+  sku?: string;
+  standard?: string;
+  material?: string;
+  pressureRating?: string;
+  nominalSize?: string;
+  facing?: string;
+  surfaceTreatment?: string;
+  weight?: number;
+  weightUnit?: string;
+  packaging?: string;
+  inspectionRequirements?: string;
+  certificateRequirements?: string;
   description?: string;
   quantity: number;
   unit?: string;
@@ -437,6 +521,19 @@ export interface QuoteItemInput {
   productId?: string;
   productName: string;
   productCode?: string;
+  variantId?: string;
+  sku?: string;
+  standard?: string;
+  material?: string;
+  pressureRating?: string;
+  nominalSize?: string;
+  facing?: string;
+  surfaceTreatment?: string;
+  weight?: number;
+  weightUnit?: string;
+  packaging?: string;
+  inspectionRequirements?: string;
+  certificateRequirements?: string;
   description?: string;
   quantity?: number;
   unit?: string;

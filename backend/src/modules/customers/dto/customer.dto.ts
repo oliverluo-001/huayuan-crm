@@ -742,6 +742,59 @@ export class QuoteItemDto {
 
   @IsString()
   @IsOptional()
+  variantId?: string;
+
+  @IsString()
+  @IsOptional()
+  sku?: string;
+
+  @IsString()
+  @IsOptional()
+  standard?: string;
+
+  @IsString()
+  @IsOptional()
+  material?: string;
+
+  @IsString()
+  @IsOptional()
+  pressureRating?: string;
+
+  @IsString()
+  @IsOptional()
+  nominalSize?: string;
+
+  @IsString()
+  @IsOptional()
+  facing?: string;
+
+  @IsString()
+  @IsOptional()
+  surfaceTreatment?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  weight?: number;
+
+  @IsString()
+  @IsOptional()
+  weightUnit?: string;
+
+  @IsString()
+  @IsOptional()
+  packaging?: string;
+
+  @IsString()
+  @IsOptional()
+  inspectionRequirements?: string;
+
+  @IsString()
+  @IsOptional()
+  certificateRequirements?: string;
+
+  @IsString()
+  @IsOptional()
   description?: string;
 
   @IsNumber()

@@ -1441,7 +1441,7 @@ export class CustomersService {
       ? items.map((item, index) => ({ ...quote.items[index], ...item }))
       : quote.items;
     const calculated = this.calculateQuote(
-      sourceItems,
+      sourceItems as any,
       quote.freight,
       quote.taxRate,
     );

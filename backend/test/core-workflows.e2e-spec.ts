@@ -192,6 +192,8 @@ describe("core CRM workflows (HTTP e2e)", () => {
   });
   const sampleRepository = new MemoryRepository<any>();
   const productRepository = new MemoryRepository<any>();
+  const productVariantRepository = new MemoryRepository<any>();
+  const productAssetRepository = new MemoryRepository<any>();
   const tagRepository = new MemoryRepository<any>();
   const customerViewRepository = new MemoryRepository<any>();
   const leadRepository = new MemoryRepository<any>();
@@ -215,7 +217,12 @@ describe("core CRM workflows (HTTP e2e)", () => {
       customerViewRepository as any,
       emailLogRepository as any,
     );
-    productsService = new ProductsService(productRepository as any);
+    productsService = new ProductsService(
+      productRepository as any,
+      productVariantRepository as any,
+      productAssetRepository as any,
+      { get: jest.fn() } as any,
+    );
     leadsService = new LeadsService(
       leadRepository as any,
       leadTaskRepository as any,
@@ -527,16 +534,35 @@ describe("core CRM workflows (HTTP e2e)", () => {
       method: "POST",
       headers,
       body: JSON.stringify({
+        sku: "WN-DN50",
         code: "WN-DN50",
         name: "Weld neck flange DN50",
         category: "Flange",
+        productType: "flange",
         unit: "pcs",
-        price: 25,
-        currency: "USD",
+        baseCost: 18,
+        costCurrency: "USD",
+        prices: [{ currency: "USD", referencePrice: 25 }, { currency: "EUR", referencePrice: 23 }],
+        standards: ["EN 1092-1"],
+        materials: ["ASTM A105"],
+        descriptionTemplates: [{ name: "Standard export", content: "EN 1092-1, ASTM A105, EN 10204 3.1" }],
+        variants: [{
+          sku: "WN-DN50-PN16",
+          standard: "EN 1092-1",
+          material: "ASTM A105",
+          pressureRating: "PN16",
+          nominalSize: "DN50",
+          facing: "RF",
+          prices: [{ currency: "USD", referencePrice: 25 }],
+          certificateRequirements: "EN 10204 3.1",
+        }],
       }),
     });
     expect(productResponse.status).toBe(201);
     const product = await productResponse.json();
+    expect(product.variants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sku: "WN-DN50-PN16", quoteDescription: expect.stringContaining("EN 1092-1") }),
+    ]));
     const productUpdateResponse = await fetch(
       `${baseUrl}/api/products/${product.id}`,
       {
@@ -680,6 +706,15 @@ describe("core CRM workflows (HTTP e2e)", () => {
           {
             productId: product.productId,
             productName: "Weld neck flange DN50",
+            variantId: product.variants[0].variantId,
+            sku: "WN-DN50-PN16",
+            standard: "EN 1092-1",
+            material: "ASTM A105",
+            pressureRating: "PN16",
+            nominalSize: "DN50",
+            facing: "RF",
+            certificateRequirements: "EN 10204 3.1",
+            description: product.variants[0].quoteDescription,
             quantity: 10,
             unit: "pcs",
             unitPrice: 25,
@@ -736,6 +771,9 @@ describe("core CRM workflows (HTTP e2e)", () => {
       expect.arrayContaining([
         expect.objectContaining({
           productName: "Weld neck flange DN50 PN16",
+          sku: "WN-DN50-PN16",
+          standard: "EN 1092-1",
+          certificateRequirements: "EN 10204 3.1",
           quantity: 12,
           unitPrice: 27.5,
         }),

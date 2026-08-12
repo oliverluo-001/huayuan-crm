@@ -33,6 +33,19 @@ interface QuoteLineForm {
   productId: string;
   productName: string;
   productCode: string;
+  variantId: string;
+  sku: string;
+  standard: string;
+  material: string;
+  pressureRating: string;
+  nominalSize: string;
+  facing: string;
+  surfaceTreatment: string;
+  weight: string;
+  weightUnit: string;
+  packaging: string;
+  inspectionRequirements: string;
+  certificateRequirements: string;
   description: string;
   quantity: string;
   unit: string;
@@ -46,6 +59,19 @@ const createLine = (): QuoteLineForm => ({
   productId: "",
   productName: "",
   productCode: "",
+  variantId: "",
+  sku: "",
+  standard: "",
+  material: "",
+  pressureRating: "",
+  nominalSize: "",
+  facing: "",
+  surfaceTreatment: "",
+  weight: "",
+  weightUnit: "kg",
+  packaging: "",
+  inspectionRequirements: "",
+  certificateRequirements: "",
   description: "",
   quantity: "1",
   unit: "pcs",
@@ -110,19 +136,39 @@ export function QuotesPage() {
   };
 
   const selectProduct = (key: string, selectionId: string) => {
-    const product = products.find((item) => String(item.id) === selectionId);
+    const [kind, productKey, variantKey] = selectionId.split(":");
+    const product = products.find((item) => String(item.id) === productKey);
     if (!product) return;
+    const variant = kind === "variant"
+      ? product.variants?.find((item) => String(item.variantId || item.id) === variantKey)
+      : undefined;
+    const availablePrices = variant?.prices?.length ? variant.prices : product.prices || [];
+    const selectedPrice = availablePrices.find((item) => item.currency === form.currency) || availablePrices[0];
+    const description = variant?.quoteDescription || product.description || "";
     setLines((current) => current.map((line) => line.key === key ? {
       ...line,
       selectionId,
       productId: product.productId || String(product.id),
       productName: product.name,
       productCode: product.code || "",
-      description: product.description || "",
-      unit: product.unit || line.unit || "pcs",
-      unitPrice: product.price === undefined || product.price === null ? line.unitPrice : String(product.price),
+      variantId: variant?.variantId || "",
+      sku: variant?.sku || product.sku || product.code || "",
+      standard: variant?.standard || "",
+      material: variant?.material || "",
+      pressureRating: variant?.pressureRating || "",
+      nominalSize: variant?.nominalSize || "",
+      facing: variant?.facing || "",
+      surfaceTreatment: variant?.surfaceTreatment || "",
+      weight: String(variant?.weight || product.weight || ""),
+      weightUnit: variant?.weightUnit || product.weightUnit || "kg",
+      packaging: variant?.packaging || product.packaging || "",
+      inspectionRequirements: variant?.inspectionRequirements || "",
+      certificateRequirements: variant?.certificateRequirements || "",
+      description,
+      unit: variant?.unit || product.unit || line.unit || "pcs",
+      unitPrice: String(selectedPrice?.referencePrice ?? product.price ?? line.unitPrice),
     } : line));
-    if (product.currency) setForm((current) => ({ ...current, currency: product.currency || current.currency }));
+    if (selectedPrice?.currency || product.currency) setForm((current) => ({ ...current, currency: selectedPrice?.currency || product.currency || current.currency }));
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -150,6 +196,19 @@ export function QuotesPage() {
         productId: line.productId || undefined,
         productName: line.productName.trim(),
         productCode: line.productCode.trim() || undefined,
+        variantId: line.variantId || undefined,
+        sku: line.sku || undefined,
+        standard: line.standard || undefined,
+        material: line.material || undefined,
+        pressureRating: line.pressureRating || undefined,
+        nominalSize: line.nominalSize || undefined,
+        facing: line.facing || undefined,
+        surfaceTreatment: line.surfaceTreatment || undefined,
+        weight: Number(line.weight || 0),
+        weightUnit: line.weightUnit || undefined,
+        packaging: line.packaging || undefined,
+        inspectionRequirements: line.inspectionRequirements || undefined,
+        certificateRequirements: line.certificateRequirements || undefined,
         description: line.description.trim() || undefined,
         quantity: Number(line.quantity),
         unit: line.unit.trim() || "pcs",
@@ -194,10 +253,23 @@ export function QuotesPage() {
       );
       return {
         key: `${item.id || Date.now()}-${Math.random()}`,
-        selectionId: product ? String(product.id) : "snapshot",
+        selectionId: item.variantId && product ? `variant:${product.id}:${item.variantId}` : product ? `product:${product.id}` : "snapshot",
         productId: item.productId || "",
         productName: item.productName || "",
         productCode: item.productCode || "",
+        variantId: item.variantId || "",
+        sku: item.sku || "",
+        standard: item.standard || "",
+        material: item.material || "",
+        pressureRating: item.pressureRating || "",
+        nominalSize: item.nominalSize || "",
+        facing: item.facing || "",
+        surfaceTreatment: item.surfaceTreatment || "",
+        weight: String(item.weight || ""),
+        weightUnit: item.weightUnit || "kg",
+        packaging: item.packaging || "",
+        inspectionRequirements: item.inspectionRequirements || "",
+        certificateRequirements: item.certificateRequirements || "",
         description: item.description || "",
         quantity: String(item.quantity ?? 1),
         unit: item.unit || product?.unit || "pcs",
@@ -280,9 +352,26 @@ export function QuotesPage() {
                       <SelectTrigger>{line.productName || <SelectValue placeholder="选择产品" />}</SelectTrigger>
                       <SelectContent>
                         {line.selectionId === "snapshot" && <SelectItem value="snapshot">{line.productName || "历史产品"}</SelectItem>}
-                        {products.map((product) => <SelectItem key={product.id} value={String(product.id)}>{product.name}{product.code ? ` (${product.code})` : ""}</SelectItem>)}
+                        {products.map((product) => [
+                          <SelectItem key={`product-${product.id}`} value={`product:${product.id}`}>{product.name} · {product.sku || product.code || "主产品"}</SelectItem>,
+                          ...(product.variants || []).filter((variant) => variant.active !== false).map((variant) => <SelectItem key={`variant-${product.id}-${variant.variantId || variant.id}`} value={`variant:${product.id}:${variant.variantId || variant.id}`}>↳ {variant.sku} · {[variant.standard, variant.material, variant.pressureRating, variant.nominalSize].filter(Boolean).join(" / ")}</SelectItem>)
+                        ])}
                       </SelectContent>
                     </Select>
+                    {line.sku && <p className="text-xs text-muted-foreground">{[line.sku, line.standard, line.material, line.pressureRating, line.nominalSize, line.facing].filter(Boolean).join(" · ")}</p>}
+                    {products.some((product) => product.descriptionTemplates?.length) && <select
+                      className="h-9 w-full rounded-md border bg-background px-2 text-xs"
+                      defaultValue=""
+                      onChange={(event) => {
+                        const [productId, templateId] = event.target.value.split(":");
+                        const template = products.find((product) => String(product.id) === productId)?.descriptionTemplates?.find((item) => String(item.id) === templateId);
+                        if (template) updateLine(line.key, { description: template.content });
+                        event.currentTarget.value = "";
+                      }}
+                    >
+                      <option value="">选用报价描述模板</option>
+                      {products.flatMap((product) => (product.descriptionTemplates || []).map((template) => <option key={`${product.id}-${template.id || template.name}`} value={`${product.id}:${template.id}`}>{product.name} · {template.name}</option>))}
+                    </select>}
                   </div>
                   <div className="space-y-2 md:col-span-2"><Label>数量</Label><Input type="number" min="0.01" step="0.01" value={line.quantity} onChange={(event) => updateLine(line.key, { quantity: event.target.value })} required /></div>
                   <div className="space-y-2 md:col-span-2"><Label>单位</Label><Input value={line.unit} onChange={(event) => updateLine(line.key, { unit: event.target.value })} /></div>
@@ -291,6 +380,7 @@ export function QuotesPage() {
                   <div className="flex items-end md:col-span-1">
                     <Button type="button" variant="ghost" size="icon" className="text-destructive" title="删除产品行" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((item) => item.key !== line.key))}><Trash2 className="h-4 w-4" /></Button>
                   </div>
+                  <div className="space-y-2 md:col-span-12"><Label>报价描述</Label><Textarea rows={2} value={line.description} onChange={(event) => updateLine(line.key, { description: event.target.value })} placeholder="产品标准、材质、规格、检验及证书要求" /></div>
                 </div>
               ))}
             </div>

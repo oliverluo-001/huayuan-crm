@@ -117,6 +117,21 @@ interface QuoteLineForm {
   key: string;
   productId: string;
   productName: string;
+  productCode: string;
+  variantId: string;
+  sku: string;
+  standard: string;
+  material: string;
+  pressureRating: string;
+  nominalSize: string;
+  facing: string;
+  surfaceTreatment: string;
+  weight: string;
+  weightUnit: string;
+  packaging: string;
+  inspectionRequirements: string;
+  certificateRequirements: string;
+  description: string;
   quantity: string;
   unit: string;
   unitPrice: string;
@@ -130,6 +145,21 @@ const createQuoteLine = (): QuoteLineForm => ({
   key: `${Date.now()}-${Math.random()}`,
   productId: "",
   productName: "",
+  productCode: "",
+  variantId: "",
+  sku: "",
+  standard: "",
+  material: "",
+  pressureRating: "",
+  nominalSize: "",
+  facing: "",
+  surfaceTreatment: "",
+  weight: "",
+  weightUnit: "kg",
+  packaging: "",
+  inspectionRequirements: "",
+  certificateRequirements: "",
+  description: "",
   quantity: "1",
   unit: "pcs",
   unitPrice: "",
@@ -558,18 +588,37 @@ export function Customer360Dialog({
   };
 
   const chooseQuoteProduct = (key: string, value: string) => {
-    const product = products.find((item) => String(item.id) === value);
+    const [kind, productKey, variantKey] = value.split(":");
+    const product = products.find((item) => String(item.id) === productKey);
     if (!product) return;
+    const variant = kind === "variant" ? product.variants?.find((item) => String(item.variantId || item.id) === variantKey) : undefined;
+    const availablePrices = variant?.prices?.length ? variant.prices : product.prices || [];
+    const selectedPrice = availablePrices.find((item) => item.currency === quoteForm.currency) || availablePrices[0];
     updateQuoteLine(key, {
       productId: product.productId || String(product.id),
       productName: product.name,
-      unit: product.unit || "pcs",
-      unitPrice: product.price === undefined ? "" : String(product.price),
+      productCode: product.code || "",
+      variantId: variant?.variantId || "",
+      sku: variant?.sku || product.sku || product.code || "",
+      standard: variant?.standard || "",
+      material: variant?.material || "",
+      pressureRating: variant?.pressureRating || "",
+      nominalSize: variant?.nominalSize || "",
+      facing: variant?.facing || "",
+      surfaceTreatment: variant?.surfaceTreatment || "",
+      weight: String(variant?.weight || product.weight || ""),
+      weightUnit: variant?.weightUnit || product.weightUnit || "kg",
+      packaging: variant?.packaging || product.packaging || "",
+      inspectionRequirements: variant?.inspectionRequirements || "",
+      certificateRequirements: variant?.certificateRequirements || "",
+      description: variant?.quoteDescription || product.description || "",
+      unit: variant?.unit || product.unit || "pcs",
+      unitPrice: String(selectedPrice?.referencePrice ?? product.price ?? ""),
     });
-    if (product.currency)
+    if (selectedPrice?.currency || product.currency)
       setQuoteForm((current) => ({
         ...current,
-        currency: product.currency || current.currency,
+        currency: selectedPrice?.currency || product.currency || current.currency,
       }));
   };
 
@@ -611,6 +660,21 @@ export function Customer360Dialog({
           items: quoteLines.map((line) => ({
             productId: line.productId || undefined,
             productName: line.productName.trim(),
+            productCode: line.productCode || undefined,
+            variantId: line.variantId || undefined,
+            sku: line.sku || undefined,
+            standard: line.standard || undefined,
+            material: line.material || undefined,
+            pressureRating: line.pressureRating || undefined,
+            nominalSize: line.nominalSize || undefined,
+            facing: line.facing || undefined,
+            surfaceTreatment: line.surfaceTreatment || undefined,
+            weight: Number(line.weight || 0),
+            weightUnit: line.weightUnit || undefined,
+            packaging: line.packaging || undefined,
+            inspectionRequirements: line.inspectionRequirements || undefined,
+            certificateRequirements: line.certificateRequirements || undefined,
+            description: line.description || undefined,
             quantity: Number(line.quantity),
             unit: line.unit.trim() || "pcs",
             unitPrice: Number(line.unitPrice),
@@ -1888,16 +1952,31 @@ export function Customer360Dialog({
                                   {line.productName || "从产品库选择"}
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {products.map((product) => (
-                                    <SelectItem
-                                      key={product.id}
-                                      value={String(product.id)}
-                                    >
-                                      {product.name}
-                                    </SelectItem>
-                                  ))}
+                                  {products.map((product) => [
+                                    <SelectItem key={`product-${product.id}`} value={`product:${product.id}`}>
+                                      {product.name} · {product.sku || product.code || "主产品"}
+                                    </SelectItem>,
+                                    ...(product.variants || []).filter((variant) => variant.active !== false).map((variant) => (
+                                      <SelectItem key={`variant-${product.id}-${variant.variantId || variant.id}`} value={`variant:${product.id}:${variant.variantId || variant.id}`}>
+                                        ↳ {variant.sku} · {[variant.standard, variant.material, variant.pressureRating, variant.nominalSize].filter(Boolean).join(" / ")}
+                                      </SelectItem>
+                                    )),
+                                  ])}
                                 </SelectContent>
                               </Select>
+                              {products.some((product) => product.descriptionTemplates?.length) && <select
+                                className="h-10 rounded-md border bg-background px-2 text-sm md:col-span-2"
+                                defaultValue=""
+                                onChange={(event) => {
+                                  const [productId, templateId] = event.target.value.split(":");
+                                  const template = products.find((product) => String(product.id) === productId)?.descriptionTemplates?.find((item) => String(item.id) === templateId);
+                                  if (template) updateQuoteLine(line.key, { description: template.content });
+                                  event.currentTarget.value = "";
+                                }}
+                              >
+                                <option value="">选用报价描述模板</option>
+                                {products.flatMap((product) => (product.descriptionTemplates || []).map((template) => <option key={`${product.id}-${template.id || template.name}`} value={`${product.id}:${template.id}`}>{product.name} · {template.name}</option>))}
+                              </select>}
                               <Input
                                 type="number"
                                 min="0.01"
@@ -1963,6 +2042,8 @@ export function Customer360Dialog({
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
+                              {line.sku && <p className="text-xs text-muted-foreground md:col-span-6">{[line.sku, line.standard, line.material, line.pressureRating, line.nominalSize, line.facing].filter(Boolean).join(" · ")}</p>}
+                              <Textarea className="md:col-span-6" rows={2} placeholder="报价描述、检验与证书要求" value={line.description} onChange={(event) => updateQuoteLine(line.key, { description: event.target.value })} />
                             </div>
                           ))}
                         </div>

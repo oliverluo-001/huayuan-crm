@@ -789,13 +789,28 @@ function renderQuoteExport(quote: any, customer: any): string {
   const currency = escapeHtml(quote.currency || 'USD');
   const amt = (v: any) => amount(v, currency);
   const date = fmtDate;
+  const itemDescription = (item: any) => {
+    if (item.description) return item.description;
+    const specification = [
+      item.sku,
+      item.standard,
+      item.material,
+      item.pressureRating,
+      item.nominalSize,
+      item.facing,
+      item.surfaceTreatment,
+    ].filter(Boolean);
+    if (item.inspectionRequirements) specification.push(`Inspection: ${item.inspectionRequirements}`);
+    if (item.certificateRequirements) specification.push(`Certificates: ${item.certificateRequirements}`);
+    return specification.join(', ');
+  };
 
   const rows = (quote.items || [])
     .map(
       (item: any, index: number) => `
     <tr>
       <td>${index + 1}</td>
-      <td><strong>${escapeHtml(item.productName)}</strong>${item.description ? `<br><span class="muted">${escapeHtml(item.description)}</span>` : ''}</td>
+      <td><strong>${escapeHtml(item.productName)}</strong>${itemDescription(item) ? `<br><span class="muted">${escapeHtml(itemDescription(item))}</span>` : ''}</td>
       <td>${escapeHtml(item.unit || 'pcs')}</td>
       <td class="number">${Number(item.quantity || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
       <td class="number">${amt(item.unitPrice)}</td>

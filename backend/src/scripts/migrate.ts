@@ -111,6 +111,7 @@ export async function runDatabaseMigrations() {
       throw error;
     }
     await migrateP1AcceptanceHardening(connection);
+    await migrateP21ProductCatalog(connection);
     return { p03Report };
   } finally {
     await connection.end();
@@ -726,6 +727,128 @@ export async function migrateP1AcceptanceHardening(connection: Connection) {
   );
 }
 
+export async function migrateP21ProductCatalog(connection: Connection) {
+  const id = "20260812_p21_product_catalog";
+  if (!(await tableExists(connection, "products"))) return;
+
+  await addColumnToTable(connection, "products", "sku", "VARCHAR(100) NULL");
+  await addColumnToTable(connection, "products", "product_type", "VARCHAR(32) NOT NULL DEFAULT 'general'");
+  await addColumnToTable(connection, "products", "weight", "DECIMAL(12,3) NOT NULL DEFAULT 0");
+  await addColumnToTable(connection, "products", "weight_unit", "VARCHAR(20) NOT NULL DEFAULT 'kg'");
+  await addColumnToTable(connection, "products", "packaging", "VARCHAR(255) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, "products", "package_quantity", "DECIMAL(12,2) NOT NULL DEFAULT 0");
+  await addColumnToTable(connection, "products", "base_cost", "DECIMAL(15,2) NOT NULL DEFAULT 0");
+  await addColumnToTable(connection, "products", "cost_currency", "VARCHAR(10) NOT NULL DEFAULT 'USD'");
+  await addColumnToTable(connection, "products", "prices", "JSON NULL");
+  await addColumnToTable(connection, "products", "standards", "JSON NULL");
+  await addColumnToTable(connection, "products", "materials", "JSON NULL");
+  await addColumnToTable(connection, "products", "specifications", "JSON NULL");
+  await addColumnToTable(connection, "products", "description_templates", "JSON NULL");
+  await addColumnToTable(connection, "products", "active", "TINYINT(1) NOT NULL DEFAULT 1");
+
+  await connection.query(`
+    UPDATE products
+    SET sku = CASE
+          WHEN TRIM(COALESCE(sku, '')) <> '' THEN UPPER(TRIM(sku))
+          WHEN TRIM(COALESCE(code, '')) <> '' THEN UPPER(TRIM(code))
+          ELSE UPPER(product_id)
+        END,
+        currency = UPPER(COALESCE(NULLIF(TRIM(currency), ''), 'USD')),
+        cost_currency = UPPER(COALESCE(NULLIF(TRIM(cost_currency), ''), NULLIF(TRIM(currency), ''), 'USD')),
+        prices = COALESCE(prices, JSON_ARRAY(JSON_OBJECT(
+          'currency', UPPER(COALESCE(NULLIF(TRIM(currency), ''), 'USD')),
+          'referencePrice', CAST(COALESCE(price, 0) AS DECIMAL(15,2))
+        ))),
+        standards = COALESCE(standards, JSON_ARRAY()),
+        materials = COALESCE(materials, JSON_ARRAY()),
+        specifications = COALESCE(specifications, JSON_ARRAY()),
+        description_templates = COALESCE(description_templates, JSON_ARRAY())
+  `);
+  await connection.query(`
+    UPDATE products p
+    JOIN (
+      SELECT sku FROM products GROUP BY sku HAVING COUNT(*) > 1
+    ) duplicate_sku ON duplicate_sku.sku = p.sku
+    SET p.sku = CONCAT(LEFT(p.sku, 80), '-', p.id)
+  `);
+  await connection.query("ALTER TABLE products MODIFY COLUMN sku VARCHAR(100) NOT NULL");
+  await addIndexIfMissing(connection, "products", "uq_products_sku", "sku", true);
+  await addIndexIfMissing(connection, "products", "idx_products_category_active", "category, active");
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS product_variants (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      variant_id VARCHAR(32) NOT NULL,
+      product_pk INT NOT NULL,
+      sku VARCHAR(100) NOT NULL,
+      name VARCHAR(255) NOT NULL DEFAULT '',
+      standard VARCHAR(80) NOT NULL DEFAULT '',
+      material VARCHAR(120) NOT NULL DEFAULT '',
+      pressure_rating VARCHAR(80) NOT NULL DEFAULT '',
+      nominal_size VARCHAR(80) NOT NULL DEFAULT '',
+      facing VARCHAR(80) NOT NULL DEFAULT '',
+      surface_treatment VARCHAR(160) NOT NULL DEFAULT '',
+      unit VARCHAR(20) NOT NULL DEFAULT 'pcs',
+      weight DECIMAL(12,3) NOT NULL DEFAULT 0,
+      weight_unit VARCHAR(20) NOT NULL DEFAULT 'kg',
+      packaging VARCHAR(255) NOT NULL DEFAULT '',
+      package_quantity DECIMAL(12,2) NOT NULL DEFAULT 0,
+      base_cost DECIMAL(15,2) NOT NULL DEFAULT 0,
+      cost_currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+      prices JSON NULL,
+      specifications JSON NULL,
+      inspection_requirements TEXT NULL,
+      certificate_requirements TEXT NULL,
+      quote_description TEXT NULL,
+      active TINYINT(1) NOT NULL DEFAULT 1,
+      created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uq_product_variants_variant_id (variant_id),
+      UNIQUE KEY uq_product_variants_sku (sku),
+      KEY idx_product_variants_product_active (product_pk, active),
+      CONSTRAINT fk_product_variants_product FOREIGN KEY (product_pk) REFERENCES products(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS product_assets (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      asset_id VARCHAR(32) NOT NULL,
+      product_pk INT NOT NULL,
+      asset_type ENUM('image','technical') NOT NULL,
+      original_name VARCHAR(255) NOT NULL,
+      stored_name VARCHAR(255) NOT NULL,
+      mime_type VARCHAR(160) NOT NULL DEFAULT 'application/octet-stream',
+      size INT UNSIGNED NOT NULL,
+      note VARCHAR(1000) NULL,
+      created_by VARCHAR(32) NOT NULL DEFAULT '',
+      created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uq_product_assets_asset_id (asset_id),
+      UNIQUE KEY uq_product_assets_stored_name (stored_name),
+      KEY idx_product_assets_product (product_pk, created_at),
+      CONSTRAINT fk_product_assets_product FOREIGN KEY (product_pk) REFERENCES products(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  if (await tableExists(connection, "quote_items")) {
+    await addColumnToTable(connection, "quote_items", "variant_id", "VARCHAR(32) NULL");
+    await addColumnToTable(connection, "quote_items", "sku", "VARCHAR(100) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "quote_items", "standard", "VARCHAR(80) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "quote_items", "material", "VARCHAR(120) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "quote_items", "pressure_rating", "VARCHAR(80) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "quote_items", "nominal_size", "VARCHAR(80) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "quote_items", "facing", "VARCHAR(80) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "quote_items", "surface_treatment", "VARCHAR(160) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "quote_items", "weight", "DECIMAL(12,3) NOT NULL DEFAULT 0");
+    await addColumnToTable(connection, "quote_items", "weight_unit", "VARCHAR(20) NOT NULL DEFAULT 'kg'");
+    await addColumnToTable(connection, "quote_items", "packaging", "VARCHAR(255) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "quote_items", "inspection_requirements", "TEXT NULL");
+    await addColumnToTable(connection, "quote_items", "certificate_requirements", "TEXT NULL");
+  }
+
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+  console.log(`Applied migration: ${id}`);
+}
+
 export async function ensureInitialAdmin(
   connection: Pick<Connection, "query">,
   credentials: {
@@ -1045,6 +1168,7 @@ async function addIndexIfMissing(
   table: string,
   indexName: string,
   column: string,
+  unique = false,
 ) {
   const [rows] = await connection.query<RowDataPacket[]>(
     `SELECT INDEX_NAME FROM information_schema.STATISTICS
@@ -1053,7 +1177,10 @@ async function addIndexIfMissing(
   );
   if (!rows.length)
     await connection.query(
-      `ALTER TABLE \`${table}\` ADD INDEX \`${indexName}\` (\`${column}\`)`,
+      `ALTER TABLE \`${table}\` ADD ${unique ? "UNIQUE " : ""}INDEX \`${indexName}\` (${column
+        .split(",")
+        .map((name) => `\`${name.trim()}\``)
+        .join(", ")})`,
     );
 }
 

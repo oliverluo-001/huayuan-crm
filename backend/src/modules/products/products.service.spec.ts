@@ -1,49 +1,104 @@
 import { ProductsService } from './products.service';
 
 describe('ProductsService', () => {
-  const product = {
-    id: 1,
-    productId: 'prod_1',
-    code: 'WN-FLG-DN300',
-    name: 'Weld Neck Flange',
-    price: 0,
-    currency: 'USD',
-  };
   const productRepository = {
     findOne: jest.fn(),
     create: jest.fn((value) => value),
     save: jest.fn(async (value) => value),
-    delete: jest.fn(),
+    remove: jest.fn(async () => undefined),
   };
-  const service = new ProductsService(productRepository as any);
+  const variantRepository = {
+    findOne: jest.fn(),
+    create: jest.fn((value) => value),
+    save: jest.fn(async (value) => value),
+    delete: jest.fn(async () => ({ affected: 0 })),
+  };
+  const assetRepository = {
+    findOne: jest.fn(),
+    find: jest.fn(),
+    create: jest.fn((value) => value),
+    save: jest.fn(async (value) => value),
+    remove: jest.fn(),
+  };
+  const service = new ProductsService(
+    productRepository as any,
+    variantRepository as any,
+    assetRepository as any,
+    { get: jest.fn() } as any,
+  );
 
-  beforeEach(() => {
-    jest.clearAllMocks();
-    productRepository.findOne.mockResolvedValue({ ...product });
-    productRepository.delete.mockResolvedValue({ affected: 1 });
-  });
+  beforeEach(() => jest.clearAllMocks());
 
-  it('creates a product while preserving a zero reference price', async () => {
+  it('creates a flange family with a normalized SKU and quote-ready variant', async () => {
+    productRepository.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 1,
+        productId: 'prod_1',
+        sku: 'WN-FLG',
+        name: 'Weld Neck Flange',
+        prices: [{ currency: 'USD', referencePrice: 25 }],
+        variants: [],
+        assets: [],
+      });
+    variantRepository.findOne.mockResolvedValue(null);
+    productRepository.save.mockImplementation(async (value) => ({ ...value, id: 1 }));
+
     const result = await service.create({
-      code: product.code,
-      name: product.name,
-      price: 0,
-      currency: 'USD',
+      sku: 'wn-flg',
+      name: 'Weld Neck Flange',
+      productType: 'flange',
+      prices: [{ currency: 'usd', referencePrice: 25 }],
+      variants: [{
+        sku: 'wn-dn50-cl150',
+        standard: 'ASME B16.5',
+        material: 'ASTM A105',
+        pressureRating: 'Class 150',
+        nominalSize: 'DN50',
+      }],
     });
 
-    expect(result).toMatchObject({ name: product.name, price: 0, currency: 'USD' });
-    expect(result.productId).toMatch(/^prod_/);
+    expect(result.sku).toBe('WN-FLG');
+    expect(variantRepository.save).toHaveBeenCalledWith([
+      expect.objectContaining({
+        sku: 'WN-DN50-CL150',
+        quoteDescription: expect.stringContaining('ASME B16.5'),
+      }),
+    ]);
   });
 
-  it('edits an existing product price', async () => {
-    const result = await service.update(1, { price: 125.5 });
-
-    expect(result.price).toBe(125.5);
-    expect(productRepository.save).toHaveBeenCalledWith(expect.objectContaining({ id: 1, price: 125.5 }));
+  it('hides internal cost fields from viewer product responses', async () => {
+    productRepository.findOne.mockResolvedValue({
+      id: 1,
+      baseCost: 10,
+      costCurrency: 'USD',
+      variants: [{ sku: 'A', baseCost: 8, costCurrency: 'USD' }],
+      assets: [],
+    });
+    const result: any = await service.findOne(1, false);
+    expect(result.baseCost).toBeUndefined();
+    expect(result.variants[0].baseCost).toBeUndefined();
   });
 
-  it('deletes an existing product', async () => {
-    await expect(service.remove(1)).resolves.toEqual({ deleted: true });
-    expect(productRepository.delete).toHaveBeenCalledWith(1);
+  it('keeps legacy single-price updates compatible with the multi-currency catalog', async () => {
+    productRepository.findOne
+      .mockResolvedValueOnce({
+        id: 1, productId: 'prod_1', sku: 'WN-FLG', name: 'Weld Neck Flange',
+        currency: 'USD', price: 25, prices: [{ currency: 'USD', referencePrice: 25 }],
+        variants: [], assets: [],
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 1, productId: 'prod_1', sku: 'WN-FLG', name: 'Weld Neck Flange',
+        currency: 'USD', price: 30, prices: [{ currency: 'USD', referencePrice: 30 }],
+        variants: [], assets: [],
+      });
+
+    const result: any = await service.update(1, { price: 30 });
+    expect(productRepository.save).toHaveBeenCalledWith(expect.objectContaining({
+      price: 30,
+      prices: [{ currency: 'USD', referencePrice: 30 }],
+    }));
+    expect(result.price).toBe(30);
   });
 });

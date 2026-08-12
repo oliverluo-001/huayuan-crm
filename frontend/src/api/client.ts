@@ -14,6 +14,11 @@ import type {
   CreateOpportunityInput,
   UpdateOpportunityInput,
   Product,
+  ProductAsset,
+  ProductCurrencyPrice,
+  ProductDescriptionTemplate,
+  ProductSpecification,
+  ProductVariant,
   Quote,
   CreateQuoteInput,
   UpdateQuoteInput,
@@ -65,6 +70,11 @@ export type {
   CreateOpportunityInput,
   UpdateOpportunityInput,
   Product,
+  ProductAsset,
+  ProductCurrencyPrice,
+  ProductDescriptionTemplate,
+  ProductSpecification,
+  ProductVariant,
   Quote,
   CreateQuoteInput,
   UpdateQuoteInput,
@@ -617,6 +627,45 @@ export async function updateProduct(
 
 export async function deleteProduct(id: string): Promise<void> {
   await api(`/api/products/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function getProductAssets(id: string): Promise<ProductAsset[]> {
+  return api<ProductAsset[]>(`/api/products/${encodeURIComponent(id)}/assets`);
+}
+
+export async function uploadProductAsset(
+  id: string,
+  file: File,
+  data: { assetType: ProductAsset["assetType"]; note?: string },
+): Promise<ProductAsset> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("assetType", data.assetType);
+  if (data.note) formData.append("note", data.note);
+  return api<ProductAsset>(`/api/products/${encodeURIComponent(id)}/assets`, {
+    method: "POST",
+    rawBody: formData,
+  });
+}
+
+export async function deleteProductAsset(id: string): Promise<void> {
+  await api(`/api/products/assets/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function downloadProductAsset(asset: ProductAsset): Promise<void> {
+  const response = await fetch(
+    `/api/products/assets/${encodeURIComponent(asset.id)}/download`,
+    { credentials: "include" },
+  );
+  if (!response.ok) throw new Error("产品资料下载失败");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = asset.originalName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 // Quotes API

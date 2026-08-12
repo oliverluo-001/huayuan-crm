@@ -73,6 +73,10 @@ test('keeps customer attachments outside replaceable release directories', () =>
   position('write_env_value CUSTOMER_ATTACHMENT_DIR "$CUSTOMER_ATTACHMENT_DIR"');
   position('mkdir -p "$CUSTOMER_ATTACHMENT_DIR"');
   assert.equal(script.includes('CUSTOMER_ATTACHMENT_DIR="$RELEASE_DIR'), false);
+  position('PRODUCT_ASSET_DIR="${PRODUCT_ASSET_DIR:-$APP_ROOT/data/product-assets}"');
+  position('write_env_value PRODUCT_ASSET_DIR "$PRODUCT_ASSET_DIR"');
+  position('mkdir -p "$PRODUCT_ASSET_DIR"');
+  assert.equal(script.includes('PRODUCT_ASSET_DIR="$RELEASE_DIR'), false);
 });
 
 test('recreates PM2 from an absolute release path and verifies the exact backend release', () => {

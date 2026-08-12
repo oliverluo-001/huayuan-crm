@@ -35,6 +35,42 @@ async function createCurrentSchema() {
 }
 
 async function seedLegacyFixture(connection: Connection) {
+  await connection.query("DROP TABLE IF EXISTS product_assets");
+  await connection.query("DROP TABLE IF EXISTS product_variants");
+  await connection.query("ALTER TABLE products DROP INDEX idx_products_category_active");
+  await connection.query(`
+    ALTER TABLE products
+      DROP COLUMN sku,
+      DROP COLUMN product_type,
+      DROP COLUMN weight,
+      DROP COLUMN weight_unit,
+      DROP COLUMN packaging,
+      DROP COLUMN package_quantity,
+      DROP COLUMN base_cost,
+      DROP COLUMN cost_currency,
+      DROP COLUMN prices,
+      DROP COLUMN standards,
+      DROP COLUMN materials,
+      DROP COLUMN specifications,
+      DROP COLUMN description_templates,
+      DROP COLUMN active
+  `);
+  await connection.query(`
+    ALTER TABLE quote_items
+      DROP COLUMN variant_id,
+      DROP COLUMN sku,
+      DROP COLUMN standard,
+      DROP COLUMN material,
+      DROP COLUMN pressure_rating,
+      DROP COLUMN nominal_size,
+      DROP COLUMN facing,
+      DROP COLUMN surface_treatment,
+      DROP COLUMN weight,
+      DROP COLUMN weight_unit,
+      DROP COLUMN packaging,
+      DROP COLUMN inspection_requirements,
+      DROP COLUMN certificate_requirements
+  `);
   await connection.query(`
     ALTER TABLE customers
       DROP COLUMN address,
@@ -138,10 +174,29 @@ async function seedLegacyFixture(connection: Connection) {
 
 async function verifyMigratedData(connection: Connection) {
   const [products] = await connection.query<CheckRow[]>(
-    "SELECT price, currency FROM products WHERE product_id = 'PROD-CI-1'",
+    "SELECT price, currency, sku, prices FROM products WHERE product_id = 'PROD-CI-1'",
   );
   assert.equal(Number(products[0].price), 1250.5, "历史产品价格未正确转换");
   assert.equal(products[0].currency, "USD", "历史产品币种未正确识别");
+
+  assert.equal(products[0].sku, "WN-DN50", "历史产品未生成 SKU");
+  const migratedPrices = typeof products[0].prices === "string"
+    ? JSON.parse(products[0].prices)
+    : products[0].prices;
+  assert.deepEqual(migratedPrices, [{ currency: "USD", referencePrice: 1250.5 }], "历史价格未转换为多币种价格");
+  const [catalogTables] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('product_variants', 'product_assets')`,
+    [database],
+  );
+  assert.equal(Number(catalogTables[0].count), 2, "P2.1 产品规格或资料表未创建");
+  const [quoteSnapshotColumns] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'quote_items'
+       AND COLUMN_NAME IN ('variant_id','sku','standard','material','pressure_rating','nominal_size','facing','surface_treatment','weight','weight_unit','packaging','inspection_requirements','certificate_requirements')`,
+    [database],
+  );
+  assert.equal(Number(quoteSnapshotColumns[0].count), 13, "P2.1 报价规格快照字段不完整");
 
   const [samples] = await connection.query<CheckRow[]>(
     "SELECT status, sent_at FROM samples WHERE sample_id = 'SAMPLE-CI-1'",

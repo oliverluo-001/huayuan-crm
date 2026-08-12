@@ -91,6 +91,45 @@ export class QuoteItem {
   @Column({ name: 'product_code', type: 'varchar', length: 100, default: '' })
   productCode: string;
 
+  @Column({ name: 'variant_id', type: 'varchar', length: 32, nullable: true })
+  variantId: string | null;
+
+  @Column({ type: 'varchar', length: 100, default: '' })
+  sku: string;
+
+  @Column({ type: 'varchar', length: 80, default: '' })
+  standard: string;
+
+  @Column({ type: 'varchar', length: 120, default: '' })
+  material: string;
+
+  @Column({ name: 'pressure_rating', type: 'varchar', length: 80, default: '' })
+  pressureRating: string;
+
+  @Column({ name: 'nominal_size', type: 'varchar', length: 80, default: '' })
+  nominalSize: string;
+
+  @Column({ type: 'varchar', length: 80, default: '' })
+  facing: string;
+
+  @Column({ name: 'surface_treatment', type: 'varchar', length: 160, default: '' })
+  surfaceTreatment: string;
+
+  @Column({ type: 'decimal', precision: 12, scale: 3, default: 0, transformer: decimalNumberTransformer })
+  weight: number;
+
+  @Column({ name: 'weight_unit', type: 'varchar', length: 20, default: 'kg' })
+  weightUnit: string;
+
+  @Column({ type: 'varchar', length: 255, default: '' })
+  packaging: string;
+
+  @Column({ name: 'inspection_requirements', type: 'text', nullable: true })
+  inspectionRequirements: string | null;
+
+  @Column({ name: 'certificate_requirements', type: 'text', nullable: true })
+  certificateRequirements: string | null;
+
   @Column({ type: 'text', nullable: true })
   description: string;
 
