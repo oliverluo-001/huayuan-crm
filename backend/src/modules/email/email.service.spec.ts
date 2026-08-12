@@ -11,12 +11,16 @@ describe('EmailService ownership', () => {
   const taskRepository = {
     find: jest.fn(),
     findOne: jest.fn(),
+    create: jest.fn((value) => ({ id: 5, ...value })),
     save: jest.fn(async (value) => value),
+    delete: jest.fn(),
   };
   const recipientRepository = {
     find: jest.fn(),
     count: jest.fn(),
+    create: jest.fn((value) => value),
     save: jest.fn(async (value) => value),
+    delete: jest.fn(),
   };
   const customersService = {
     findOne: jest.fn(),
@@ -159,6 +163,55 @@ describe('EmailService ownership', () => {
     expect(templateRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({ ownerId: '7' }),
     );
+  });
+
+  it('creates and automatically activates a complete scheduled batch plan', async () => {
+    templateRepository.findOne.mockResolvedValue({
+      id: 1,
+      templateId: 'tmpl_1',
+      ownerId: '7',
+      subject: 'Hello',
+      body: 'Body',
+    });
+    recipientRepository.count.mockResolvedValue(2);
+    const startAt = new Date(Date.now() + 60_000).toISOString();
+
+    await expect(service.createTask({
+      name: 'Scheduled outreach',
+      taskMode: 'scheduled',
+      templateId: 'tmpl_1',
+      customerIds: ['contact:11', 'contact:12'],
+      startAt,
+      intervalMinutes: 60,
+      batchSize: 1,
+      totalRuns: 2,
+      autoStart: true,
+    }, '7')).resolves.toEqual(expect.objectContaining({
+      status: 'active',
+      taskMode: 'scheduled',
+      intervalMinutes: 60,
+      batchSize: 1,
+      totalRuns: 2,
+      customerIds: ['contact:11', 'contact:12'],
+    }));
+    expect(taskRepository.save).toHaveBeenCalledWith(expect.objectContaining({
+      nextRunAt: new Date(startAt),
+      status: 'active',
+    }));
+  });
+
+  it('rejects a scheduled plan whose rounds cannot cover all selected recipients', async () => {
+    await expect(service.createTask({
+      name: 'Undersized plan',
+      taskMode: 'scheduled',
+      templateId: 'tmpl_1',
+      customerIds: ['contact:11', 'contact:12', 'contact:13'],
+      startAt: new Date(Date.now() + 60_000).toISOString(),
+      intervalMinutes: 60,
+      batchSize: 1,
+      totalRuns: 2,
+    }, '7')).rejects.toThrow('当前计划最多可发送 2 封');
+    expect(taskRepository.save).not.toHaveBeenCalled();
   });
 
   it('rejects manually submitted recipients outside the sales authorization scope', async () => {

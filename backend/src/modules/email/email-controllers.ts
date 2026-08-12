@@ -16,6 +16,7 @@ import { SettingsService } from '../settings/settings.service';
 import { verifyUnsubscribeToken } from '../../common/utils/unsubscribe';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
+import { isValidEmail } from './email-utils';
 
 @Controller()
 export class EmailRecipientsController {
@@ -37,7 +38,10 @@ export class EmailRecipientsController {
     if (query.tag) filters.tag = query.tag;
     if (query.tier) filters.tier = query.tier;
     if (query.region) filters.region = query.region;
-    if (query.emailStatus) filters.emailStatus = query.emailStatus;
+    if (query.journeyStage) filters.journeyStage = query.journeyStage;
+    if (query.emailStatus && !['sendable', 'all', 'invalid', 'missing'].includes(query.emailStatus)) {
+      filters.emailStatus = query.emailStatus;
+    }
     if (query.ownerId) filters.ownerId = query.ownerId;
     if (user.role === 'sales') filters.ownerId = String(user.sub);
 
@@ -81,9 +85,14 @@ export class EmailRecipientsController {
             customerId,
             customerName: (customer as any).company || '',
             region: (customer as any).region || '',
-            emailStatus: (customer as any).emailStatus || 'unknown',
+            tier: (customer as any).tier || '',
+            journeyStage: (customer as any).journeyStage || '',
+            emailStatus: isValidEmail(customerEmail) ? ((customer as any).emailStatus || 'valid') : 'invalid',
             suppressed: customerSuppressed,
-            suppressionReason: marketingBlocked ? '该联系人未允许营销邮件' : '',
+            suppressionReason: marketingBlocked
+              ? '该联系人未允许营销邮件'
+              : suppressedEmails.has(customerEmail) ? '邮箱位于退订或抑制名单' : '',
+            business: (customer as any).business || (customer as any).product || '',
           });
         }
       }
@@ -109,23 +118,40 @@ export class EmailRecipientsController {
             customerId,
             customerName: (customer as any).company || '',
             region: (customer as any).region || '',
-            emailStatus: (customer as any).emailStatus || 'unknown',
+            tier: (customer as any).tier || '',
+            journeyStage: (customer as any).journeyStage || '',
+            emailStatus: isValidEmail(contactEmail) ? 'valid' : 'invalid',
             suppressed: contactSuppressed,
-            suppressionReason: marketingBlocked ? '该联系人未允许营销邮件' : '',
+            suppressionReason: marketingBlocked
+              ? '该联系人未允许营销邮件'
+              : suppressedEmails.has(contactEmail) ? '邮箱位于退订或抑制名单' : '',
+            business: (customer as any).business || (customer as any).product || '',
           });
         }
       }
     }
 
+    const business = String(query.business || '').trim().toLowerCase();
+    const emailState = String(query.emailState || query.emailStatus || 'all');
+    const filteredRows = rows.filter((row) => {
+      if (business && !String(row.business || '').toLowerCase().includes(business)) return false;
+      if (emailState === 'sendable') return isValidEmail(row.email) && !row.suppressed;
+      if (emailState === 'invalid') return !isValidEmail(row.email);
+      if (emailState === 'missing') return !row.email;
+      return true;
+    });
+
     if (needIds) {
       return {
-        ids: rows.filter((r) => !r.suppressed).map((r) => r.recipientKey),
+        ids: filteredRows
+          .filter((row) => isValidEmail(row.email) && !row.suppressed)
+          .map((row) => row.recipientKey),
       };
     }
 
     return {
-      recipients: rows.slice(offset, offset + limit),
-      total: rows.length,
+      recipients: filteredRows.slice(offset, offset + limit),
+      total: filteredRows.length,
       offset,
       limit,
     };

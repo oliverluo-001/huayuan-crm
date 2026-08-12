@@ -160,35 +160,76 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
   }
 
   async createTask(createDto: CreateEmailTaskDto, ownerId = '') {
-    const customerIds = (createDto.customerIds || []).map((id) => String(id));
-    if (customerIds.length === 0) throw new BadRequestException('请至少选择一个收件客户');
+    const customerIds = [...new Set((createDto.customerIds || []).map((id) => String(id)))];
+    if (customerIds.length === 0) throw new BadRequestException('请至少选择一个收件人');
     if (!createDto.templateId) throw new BadRequestException('请选择邮件模板');
 
-    const template = await this.findTemplateByIdentifier(createDto.templateId, ownerId || undefined);
+    const taskMode = createDto.taskMode === 'scheduled' ? 'scheduled' : 'once';
     const startAt = createDto.startAt ? new Date(createDto.startAt) : null;
     if (startAt && Number.isNaN(startAt.getTime())) throw new BadRequestException('指定开始时间无效');
+    const batchSize = taskMode === 'scheduled' ? Number(createDto.batchSize || 0) : 0;
+    const totalRuns = taskMode === 'scheduled' ? Number(createDto.totalRuns || 0) : 1;
+    const intervalMinutes = taskMode === 'scheduled' ? Number(createDto.intervalMinutes || 0) : 1;
+    if (taskMode === 'scheduled') {
+      if (!startAt) throw new BadRequestException('定时任务必须指定开始时间');
+      if (!Number.isInteger(batchSize) || batchSize < 1) {
+        throw new BadRequestException('每轮邮件数量必须大于 0');
+      }
+      if (!Number.isInteger(totalRuns) || totalRuns < 1) {
+        throw new BadRequestException('总轮数必须大于 0');
+      }
+      if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1) {
+        throw new BadRequestException('轮次间隔必须大于 0 分钟');
+      }
+      if (customerIds.length > batchSize * totalRuns) {
+        throw new BadRequestException(
+          `已选 ${customerIds.length} 个收件人，但当前计划最多可发送 ${batchSize * totalRuns} 封，请增加每轮数量或总轮数`,
+        );
+      }
+    }
 
+    const template = await this.findTemplateByIdentifier(createDto.templateId, ownerId || undefined);
+    const autoStart = taskMode === 'scheduled' && createDto.autoStart !== false;
     const task = this.taskRepository.create({
-      ...createDto,
+      name: createDto.name || '',
+      customerId: createDto.customerId || '',
+      templateId: createDto.templateId,
+      region: createDto.region || null,
+      business: createDto.business || null,
       ownerId,
       emailTaskId: this.generateId('etask'),
       customerIds: JSON.stringify(customerIds),
       subject: createDto.subject || template.subject,
       body: createDto.body || template.body,
-      taskMode: createDto.taskMode === 'scheduled' ? 'scheduled' : 'once',
-      totalRuns: Math.max(1, Number(createDto.totalRuns || 1)),
-      batchSize: Math.max(0, Number(createDto.batchSize || 0)),
-      intervalMinutes: Math.max(1, Number(createDto.intervalMinutes || 1440)),
-      scheduledAt: createDto.scheduledAt ? new Date(createDto.scheduledAt) : null,
+      taskMode,
+      totalRuns,
+      batchSize,
+      intervalMinutes,
+      scheduledAt: taskMode === 'scheduled' ? startAt : null,
       startAt,
-      status: 'pending',
+      status: autoStart ? 'active' : 'pending',
+      nextRunAt: autoStart ? startAt : null,
       runsCompleted: 0,
       successfulSendCount: 0,
       failedSendCount: 0,
       skippedSendCount: 0,
-      lastMessage: '等待开始任务',
+      lastMessage: autoStart
+        ? `定时任务已启用，将于 ${startAt!.toLocaleString()} 开始第 1 轮`
+        : '任务已创建，等待手动启动',
     } as EmailTask);
-    return this.formatTask(await this.taskRepository.save(task));
+    await this.taskRepository.save(task);
+
+    if (autoStart) {
+      const recipientCount = await this.ensureTaskRecipients(task);
+      if (recipientCount === 0) {
+        await this.recipientRepository.delete({ taskId: task.id });
+        await this.taskRepository.delete(task.id);
+        throw new BadRequestException('所选联系人没有可用且允许营销邮件的邮箱');
+      }
+      if (startAt!.getTime() <= Date.now()) void this.processTask(task.id);
+    }
+
+    return this.formatTask(task);
   }
 
   async updateTask(idOrEmailTaskId: string, updateDto: UpdateEmailTaskDto, ownerId?: string) {
@@ -219,6 +260,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     if (['completed', 'failed'].includes(task.status)) {
       await this.requeueRetryableRecipients(task);
       await this.refreshTaskCounts(task);
+      if (task.taskMode === 'scheduled') task.runsCompleted = 0;
     }
 
     const recipientCount = await this.ensureTaskRecipients(task);
@@ -357,39 +399,44 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       }
 
       const batchSize = Number(task.batchSize || 0);
-      const targetSuccess = task.taskMode === 'once'
+      const batchLimit = task.taskMode === 'once'
         ? queued.length
         : batchSize > 0
           ? batchSize
           : queued.length;
       let successfulThisRun = 0;
+      let processedThisRun = 0;
       let deferred = 0;
       let rateLimitedUntil: Date | null = null;
 
       for (const recipient of queued) {
-        if (successfulThisRun >= targetSuccess) break;
+        if (processedThisRun >= batchLimit) break;
         const latest = await this.taskRepository.findOne({ where: { id: taskId } });
         if (!latest || latest.status === 'cancelled') return;
 
         if (task.ownerId) {
           if (!recipient.customerId) {
             await this.skipRecipient(recipient, '收件人未关联授权客户');
+            processedThisRun++;
             continue;
           }
           try {
             await this.customersService.assertCustomerOwner(recipient.customerId, task.ownerId);
           } catch {
             await this.skipRecipient(recipient, '当前账号已无权访问该客户');
+            processedThisRun++;
             continue;
           }
         }
 
         if (!isValidEmail(recipient.email)) {
           await this.skipRecipient(recipient, '邮箱格式无效');
+          processedThisRun++;
           continue;
         }
         if (await this.suppressionService.isSuppressed(recipient.email)) {
           await this.skipRecipient(recipient, '邮箱在退订或抑制名单中');
+          processedThisRun++;
           continue;
         }
 
@@ -397,6 +444,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         if (!window.allowed) {
           if (window.reason?.includes('缺失') || window.reason?.includes('无效')) {
             await this.skipRecipient(recipient, window.reason);
+            processedThisRun++;
           } else {
             recipient.lastError = window.reason || '客户当地时间不允许发送';
             await this.recipientRepository.save(recipient);
@@ -412,30 +460,38 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         }
 
         const sent = await this.sendRecipient(task, template, recipient, transporter, smtp, policy);
+        processedThisRun++;
         if (sent) successfulThisRun++;
       }
 
-      if (task.taskMode === 'scheduled' && successfulThisRun > 0) task.runsCompleted += 1;
+      if (task.taskMode === 'scheduled' && processedThisRun > 0) task.runsCompleted += 1;
+      if (processedThisRun > 0) task.lastRunAt = new Date();
       await this.refreshTaskCounts(task);
 
       const remaining = await this.recipientRepository.count({ where: { taskId, status: 'queued' } });
       const totalRuns = Math.max(1, Number(task.totalRuns || 1));
       const reachedRunLimit = task.taskMode === 'scheduled' && task.runsCompleted >= totalRuns;
 
+      if (reachedRunLimit && remaining > 0) {
+        await this.skipQueuedRecipients(task.id, '已达到计划总轮数，未进入发送批次');
+      }
+
       if (remaining === 0 || reachedRunLimit) {
         await this.finishTask(task);
       } else {
+        const retryDelayMinutes = processedThisRun > 0
+          ? Math.max(1, Number(task.intervalMinutes || 1))
+          : 30;
+        const plannedNextRunAt = new Date(Date.now() + retryDelayMinutes * 60_000);
         task.status = 'active';
-        task.nextRunAt = rateLimitedUntil || new Date(
-          Date.now() + (successfulThisRun > 0
-            ? Math.max(1, Number(task.intervalMinutes || 1)) * 60_000
-            : 30 * 60_000),
-        );
+        task.nextRunAt = rateLimitedUntil
+          ? new Date(Math.max(rateLimitedUntil.getTime(), plannedNextRunAt.getTime()))
+          : plannedNextRunAt;
         task.lastMessage = rateLimitedUntil
           ? '达到发送限额，任务已自动延后'
-          : deferred > 0 && successfulThisRun === 0
+          : deferred > 0 && processedThisRun === 0
             ? '客户当地时间不适合发送，任务已自动延后'
-            : `本轮成功 ${successfulThisRun} 封，等待下一轮`;
+            : `第 ${task.runsCompleted} 轮已处理 ${processedThisRun} 封，成功 ${successfulThisRun} 封，等待下一轮`;
         await this.taskRepository.save(task);
       }
     } catch (error: any) {
@@ -664,6 +720,13 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     const skipReasons = await this.getSkipReasonSummary(task.id);
     task.lastMessage = `任务结束：成功 ${task.successfulSendCount} 封，失败 ${task.failedSendCount} 封，跳过 ${task.skippedSendCount} 封${skipReasons ? `；跳过原因：${skipReasons}` : ''}`;
     await this.taskRepository.save(task);
+  }
+
+  private async skipQueuedRecipients(taskId: number, reason: string) {
+    const queued = await this.recipientRepository.find({
+      where: { taskId, status: 'queued' },
+    });
+    for (const recipient of queued) await this.skipRecipient(recipient, reason);
   }
 
   private async formatTaskWithSkipReasons(task: EmailTask) {

@@ -609,7 +609,7 @@ export interface EmailTask {
   smtpUser?: string;
   smtpFrom?: string;
   smtpSecure?: boolean;
-  status: "pending" | "active" | "completed" | "cancelled" | "failed";
+  status: "pending" | "active" | "sending" | "sent" | "completed" | "cancelled" | "failed";
   runsCompleted?: number;
   lastRunAt?: string;
   nextRunAt?: string;
@@ -630,6 +630,7 @@ export interface CreateEmailTaskInput {
   intervalMinutes?: number;
   totalRuns?: number;
   startAt?: string;
+  autoStart?: boolean;
 }
 
 export interface SendLog {
@@ -867,8 +868,12 @@ export interface EmailRecipient {
   customerId: string;
   customerName: string;
   region: string;
+  tier?: string;
+  journeyStage?: string;
+  business?: string;
   emailStatus: string;
   suppressed: boolean;
+  suppressionReason?: string;
 }
 
 export interface SuppressionEntry {

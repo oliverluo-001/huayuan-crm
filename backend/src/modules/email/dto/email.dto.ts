@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsEmail, IsArray, IsNumber, IsBoolean, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsEmail, IsArray, IsInt, IsNumber, IsBoolean, IsDateString, Max, Min } from 'class-validator';
 
 export class CreateTemplateDto {
   @IsString()
@@ -48,8 +48,8 @@ export class CreateEmailTaskDto {
   name?: string;
 
   @IsOptional()
-  @IsString()
-  taskMode?: string;
+  @IsIn(['once', 'scheduled'])
+  taskMode?: 'once' | 'scheduled';
 
   @IsOptional()
   @IsString()
@@ -72,15 +72,21 @@ export class CreateEmailTaskDto {
   business?: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(1)
+  @Max(43200)
   intervalMinutes?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
   totalRuns?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(0)
+  @Max(200)
   batchSize?: number;
 
   @IsOptional()
@@ -138,6 +144,10 @@ export class CreateEmailTaskDto {
   @IsOptional()
   @IsBoolean()
   smtpSecure?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  autoStart?: boolean;
 }
 
 export class UpdateEmailTaskDto {

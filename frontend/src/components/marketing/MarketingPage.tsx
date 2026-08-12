@@ -23,10 +23,11 @@ import {
   deleteEmailTask,
   deleteSendLog,
   getSendLogs,
-  getCustomers,
+  getEmailRecipients,
+  getEmailRecipientIds,
   type EmailTemplate,
   type EmailTask,
-  type Customer,
+  type EmailRecipient,
   type SendLog,
 } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -366,9 +367,11 @@ function TemplatesTab({ canManage, role, userId }: { canManage: boolean; role: s
 function EmailTasksTab({ canManage }: { canManage: boolean }) {
   const [tasks, setTasks] = useState<EmailTask[]>([]);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [recipients, setRecipients] = useState<EmailRecipient[]>([]);
+  const [recipientTotal, setRecipientTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -379,7 +382,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
     totalRuns: "1",
     startAt: "",
   });
-  const [selectedCustomerIds, setSelectedCustomerIds] = useState<Set<string>>(new Set());
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<Set<string>>(new Set());
   const [recipientFilters, setRecipientFilters] = useState({
     q: "",
     region: "",
@@ -392,14 +395,15 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [tasksData, templatesData, customersData] = await Promise.all([
+      const [tasksData, templatesData, recipientsData] = await Promise.all([
         getEmailTasks(),
         getTemplates(),
-        getCustomers(0, 1000, {}),
+        getEmailRecipients({ limit: "500", emailState: "all" }),
       ]);
       setTasks(tasksData);
       setTemplates(templatesData);
-      setCustomers(customersData.customers);
+      setRecipients(recipientsData.recipients);
+      setRecipientTotal(recipientsData.total);
     } finally {
       setIsLoading(false);
     }
@@ -419,15 +423,27 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
       toast.error("请选择一个邮件模板");
       return;
     }
-    if (selectedCustomerIds.size === 0) {
-      toast.error("请先选择收件客户");
+    if (selectedRecipientIds.size === 0) {
+      toast.error("请先选择收件联系人");
       return;
+    }
+    if (form.taskMode === "scheduled") {
+      const batchSize = Number.parseInt(form.batchSize, 10);
+      const intervalMinutes = Number.parseInt(form.intervalMinutes, 10);
+      const totalRuns = Number.parseInt(form.totalRuns, 10);
+      if (!form.startAt) return void toast.error("请指定定时任务的开始时间");
+      if (!Number.isInteger(batchSize) || batchSize < 1) return void toast.error("每轮邮件数量必须大于 0");
+      if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1) return void toast.error("轮次间隔必须大于 0 分钟");
+      if (!Number.isInteger(totalRuns) || totalRuns < 1) return void toast.error("总轮数必须大于 0");
+      if (selectedRecipientIds.size > batchSize * totalRuns) {
+        return void toast.error(`当前计划最多发送 ${batchSize * totalRuns} 封，少于已选的 ${selectedRecipientIds.size} 个收件人`);
+      }
     }
 
     setIsCreating(true);
     try {
-      await createEmailTask(buildCreateEmailTaskInput(form, [...selectedCustomerIds]));
-      toast.success("发信任务已创建");
+      await createEmailTask(buildCreateEmailTaskInput(form, [...selectedRecipientIds]));
+      toast.success(form.taskMode === "scheduled" ? "定时分批任务已创建并启用" : "发信任务已创建");
       setForm({
         name: "",
         taskMode: "once",
@@ -437,7 +453,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
         totalRuns: "1",
         startAt: "",
       });
-      setSelectedCustomerIds(new Set());
+      setSelectedRecipientIds(new Set());
       await fetchData();
     } catch {
       // API 客户端已经展示具体错误，保留表单和已选客户以便重试。
@@ -462,55 +478,61 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
     fetchData();
   };
 
-  const toggleCustomer = (id: string, checked: boolean) => {
-    const newSet = new Set(selectedCustomerIds);
+  const toggleRecipient = (id: string, checked: boolean) => {
+    const newSet = new Set(selectedRecipientIds);
     if (checked) newSet.add(id);
     else newSet.delete(id);
-    setSelectedCustomerIds(newSet);
+    setSelectedRecipientIds(newSet);
   };
 
   const recipientRegions = useMemo(() => (
-    [...new Set(customers
-      .map((customer) => customer.region || customer.country)
+    [...new Set(recipients
+      .map((recipient) => recipient.region)
       .filter((region): region is string => Boolean(region)))]
       .sort((a, b) => a.localeCompare(b))
-  ), [customers]);
+  ), [recipients]);
 
-  const filteredCustomers = useMemo(() => {
+  const filteredRecipients = useMemo(() => {
     const q = recipientFilters.q.trim().toLowerCase();
     const business = recipientFilters.business.trim().toLowerCase();
-    return customers.filter((customer) => {
+    return recipients.filter((recipient) => {
       const searchText = [
-        customer.company,
-        customer.contact,
-        customer.email,
-        customer.business,
-        customer.product,
-        customer.region,
-        customer.country,
-        ...(customer.tags || []),
+        recipient.customerName,
+        recipient.name,
+        recipient.email,
+        recipient.business,
+        recipient.region,
       ].join(" ").toLowerCase();
       if (q && !searchText.includes(q)) return false;
-      if (recipientFilters.region && (customer.region || customer.country) !== recipientFilters.region) return false;
-      if (recipientFilters.tier && customer.tier !== recipientFilters.tier) return false;
-      if (recipientFilters.journeyStage && customer.journeyStage !== recipientFilters.journeyStage) return false;
-      if (business && !`${customer.business || ""} ${customer.product || ""}`.toLowerCase().includes(business)) return false;
-      if (recipientFilters.emailState === "sendable" && (!customer.email || customer.emailStatus === "invalid")) return false;
-      if (recipientFilters.emailState === "invalid" && customer.emailStatus !== "invalid") return false;
-      if (recipientFilters.emailState === "missing" && customer.email) return false;
+      if (recipientFilters.region && recipient.region !== recipientFilters.region) return false;
+      if (recipientFilters.tier && recipient.tier !== recipientFilters.tier) return false;
+      if (recipientFilters.journeyStage && recipient.journeyStage !== recipientFilters.journeyStage) return false;
+      if (business && !String(recipient.business || "").toLowerCase().includes(business)) return false;
+      const sendable = Boolean(recipient.email) && recipient.emailStatus !== "invalid" && !recipient.suppressed;
+      if (recipientFilters.emailState === "sendable" && !sendable) return false;
+      if (recipientFilters.emailState === "invalid" && recipient.emailStatus !== "invalid") return false;
+      if (recipientFilters.emailState === "missing" && recipient.email) return false;
       return true;
     });
-  }, [customers, recipientFilters]);
+  }, [recipients, recipientFilters]);
 
-  const selectFilteredCustomers = () => {
-    setSelectedCustomerIds((current) => {
-      const next = new Set(current);
-      for (const customer of filteredCustomers) {
-        if (customer.email && customer.emailStatus !== "invalid") next.add(customer.id);
-      }
-      return next;
-    });
+  const recipientQuery = () => Object.fromEntries(
+    Object.entries(recipientFilters).filter(([, value]) => Boolean(value)),
+  );
+
+  const selectAllFilteredRecipients = async () => {
+    setIsSelectingAll(true);
+    try {
+      const { ids } = await getEmailRecipientIds(recipientQuery());
+      setSelectedRecipientIds(new Set(ids));
+      toast.success(`已一键选择 ${ids.length} 个可发送联系人`);
+    } finally {
+      setIsSelectingAll(false);
+    }
   };
+
+  const scheduledCapacity = Math.max(0, Number.parseInt(form.batchSize, 10) || 0)
+    * Math.max(0, Number.parseInt(form.totalRuns, 10) || 0);
 
   return (
     <div className="space-y-6">
@@ -534,7 +556,11 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                 <Label>执行方式 *</Label>
                 <Select
                   value={form.taskMode}
-                  onValueChange={(v) => setForm({ ...form, taskMode: v as "once" | "scheduled" })}
+                  onValueChange={(v) => setForm({
+                    ...form,
+                    taskMode: v as "once" | "scheduled",
+                    batchSize: v === "scheduled" && form.batchSize === "0" ? "20" : form.batchSize,
+                  })}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -544,16 +570,6 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                     <SelectItem value="scheduled">定时任务</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>每批封数</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  max="200"
-                  value={form.batchSize}
-                  onChange={(e) => setForm({ ...form, batchSize: e.target.value })}
-                />
               </div>
               <div className="space-y-2">
                 <Label>选择模板 *</Label>
@@ -578,15 +594,72 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
               </div>
             </div>
 
+            {form.taskMode === "scheduled" && (
+              <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+                <div>
+                  <div className="font-medium">定时分批计划</div>
+                  <p className="text-sm text-muted-foreground">创建后自动启用，系统会按指定时间和轮次逐批发送。</p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div className="space-y-2">
+                    <Label>开始时间 *</Label>
+                    <Input
+                      type="datetime-local"
+                      value={form.startAt}
+                      onChange={(e) => setForm({ ...form, startAt: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>每轮邮件数量 *</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      max="200"
+                      value={form.batchSize}
+                      onChange={(e) => setForm({ ...form, batchSize: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>轮次间隔（分钟）*</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      max="43200"
+                      value={form.intervalMinutes}
+                      onChange={(e) => setForm({ ...form, intervalMinutes: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>总轮数 *</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      max="1000"
+                      value={form.totalRuns}
+                      onChange={(e) => setForm({ ...form, totalRuns: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  计划最多处理 <span className="font-medium text-foreground">{scheduledCapacity}</span> 封；
+                  已选 <span className="font-medium text-foreground">{selectedRecipientIds.size}</span> 个收件人。
+                </p>
+              </div>
+            )}
+
             {/* Recipient selection */}
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <Label>收件客户（符合条件 {filteredCustomers.length} / 共 {customers.length}，已选 {selectedCustomerIds.size} 个）</Label>
+                <Label>收件联系人（当前显示 {filteredRecipients.length} / 共 {recipientTotal}，已选 {selectedRecipientIds.size} 个）</Label>
                 <div className="flex gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={selectFilteredCustomers} disabled={filteredCustomers.length === 0}>
-                    选择筛选结果
+                  <Button type="button" variant="outline" size="sm" onClick={selectAllFilteredRecipients} disabled={isSelectingAll || recipientTotal === 0}>
+                    {isSelectingAll ? "正在选择..." : "一键选择全部可用联系人"}
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedCustomerIds(new Set())} disabled={selectedCustomerIds.size === 0}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedRecipientIds(new Set())} disabled={selectedRecipientIds.size === 0}>
                     清空已选
                   </Button>
                 </div>
@@ -652,29 +725,30 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                 </Button>
               </div>
               <div className="border rounded-lg max-h-60 overflow-y-auto">
-                {filteredCustomers.length === 0 ? (
-                  <p className="text-center py-4 text-muted-foreground text-sm">没有符合筛选条件的客户</p>
+                {filteredRecipients.length === 0 ? (
+                  <p className="text-center py-4 text-muted-foreground text-sm">没有符合筛选条件的联系人</p>
                 ) : (
-                  filteredCustomers.map((customer) => {
-                    const sendable = Boolean(customer.email) && customer.emailStatus !== "invalid";
+                  filteredRecipients.map((recipient) => {
+                    const sendable = Boolean(recipient.email) && recipient.emailStatus !== "invalid" && !recipient.suppressed;
                     return (
                     <div
-                      key={customer.id}
+                      key={recipient.recipientKey}
                       className="flex items-center gap-3 p-2 hover:bg-muted/50"
                     >
                       <input
                         type="checkbox"
-                        checked={selectedCustomerIds.has(customer.id)}
-                        onChange={(e) => toggleCustomer(customer.id, e.target.checked)}
+                        checked={selectedRecipientIds.has(recipient.recipientKey)}
+                        onChange={(e) => toggleRecipient(recipient.recipientKey, e.target.checked)}
                         disabled={!sendable}
                         className="h-4 w-4"
                       />
                       <div className="flex-1 text-sm">
-                        <span className="font-medium">{customer.company}</span>
-                        <span className="text-muted-foreground ml-2">{customer.email}</span>
-                        {(customer.region || customer.country) && <Badge variant="outline" className="ml-2">{customer.region || customer.country}</Badge>}
-                        {customer.tier && <Badge variant="secondary" className="ml-1">{customer.tier}</Badge>}
-                        {!sendable && <Badge variant="destructive" className="ml-1">{customer.email ? "邮箱异常" : "缺少邮箱"}</Badge>}
+                        <span className="font-medium">{recipient.name || recipient.customerName}</span>
+                        <span className="text-muted-foreground ml-2">{recipient.email}</span>
+                        <span className="text-muted-foreground ml-2">{recipient.customerName}</span>
+                        <Badge variant="outline" className="ml-2">{recipient.type === "contact" ? "联系人" : "客户主邮箱"}</Badge>
+                        {recipient.region && <Badge variant="outline" className="ml-1">{recipient.region}</Badge>}
+                        {!sendable && <Badge variant="destructive" className="ml-1">{recipient.suppressionReason || (recipient.email ? "邮箱异常" : "缺少邮箱")}</Badge>}
                       </div>
                     </div>
                     );
@@ -685,7 +759,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
 
             <Button type="submit" disabled={isCreating}>
               <Plus className="mr-2 h-4 w-4" />
-              {isCreating ? "正在创建..." : "创建发信任务"}
+              {isCreating ? "正在创建..." : form.taskMode === "scheduled" ? "创建并启用定时任务" : "创建发信任务"}
             </Button>
           </form>
         </CardContent>
@@ -734,8 +808,8 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                 );
                 const modeText = task.taskMode === "scheduled" ? "定时" : "单批";
                 const scheduledInfo = task.taskMode === "once"
-                  ? `指定客户 ${task.customerIds?.length || 0} 人`
-                  : `成功发送 ${Number((task as any).successfulSendCount || (task as any).maxSuccessfulSends || 0)} 次 / ${(task as any).region || "全部区域"} | 轮次 ${Number((task as any).completedRuns || 0)}/${Number((task as any).totalRuns || 1)}`;
+                  ? `指定收件人 ${task.customerIds?.length || 0} 人`
+                  : `成功 ${Number(task.successfulSendCount || 0)} 封 | 轮次 ${Number(task.runsCompleted || 0)}/${Number(task.totalRuns || 1)} | 间隔 ${Number(task.intervalMinutes || 0)} 分钟`;
                 return (
                   <TableRow key={task.id}>
                     <TableCell>
@@ -761,12 +835,13 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                     </TableCell>
                     <TableCell className="text-sm">
                       {task.customerIds?.length || 0}
-                      {(task as any).batchSize ? ` / 每批 ${(task as any).batchSize} 封` : ""}
+                      {task.batchSize ? ` / 每轮 ${task.batchSize} 封` : ""}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">
                       {scheduledInfo}
-                      {(task as any).startAt ? ` | 开始 ${new Date((task as any).startAt).toLocaleDateString()}` : ""}
-                      {task.lastRunAt ? ` | 上次 ${new Date(task.lastRunAt).toLocaleDateString()}` : ""}
+                      {task.startAt ? ` | 开始 ${new Date(task.startAt).toLocaleString()}` : ""}
+                      {task.nextRunAt ? ` | 下次 ${new Date(task.nextRunAt).toLocaleString()}` : ""}
+                      {task.lastRunAt ? ` | 上次 ${new Date(task.lastRunAt).toLocaleString()}` : ""}
                     </TableCell>
                     {canManage && <TableCell>
                       <div className="flex gap-1">

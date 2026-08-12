@@ -28,6 +28,44 @@ describe('EmailRecipientsController', () => {
     await expect(controller.findAll({ ids: 'true' }, { sub: 1, role: 'admin' }))
       .resolves.toEqual({ ids: [] });
   });
+
+  it('returns every sendable contact id for one-click filtered selection', async () => {
+    const customersService = {
+      findAll: jest.fn().mockResolvedValue({
+        customers: [{
+          id: 1,
+          customerId: 'CUS-1',
+          company: 'Acme Flange',
+          contact: 'Anna',
+          email: 'anna@acme.test',
+          business: 'flange',
+          journeyStage: 'qualified',
+        }],
+      }),
+      findContactsForCustomers: jest.fn().mockResolvedValue([
+        { id: 11, contactId: 'CON-11', customerId: 1, name: 'Ben', email: 'ben@acme.test', marketingAllowed: true },
+        { id: 12, contactId: 'CON-12', customerId: 1, name: 'Blocked', email: 'blocked@acme.test', marketingAllowed: false },
+      ]),
+    };
+    const controller = new EmailRecipientsController(
+      {} as any,
+      customersService as any,
+      { findAll: jest.fn().mockResolvedValue([]) } as any,
+    );
+
+    await expect(controller.findAll({
+      ids: 'true',
+      business: 'flange',
+      emailState: 'sendable',
+      journeyStage: 'qualified',
+    }, { sub: 7, role: 'sales' })).resolves.toEqual({
+      ids: ['customer:CUS-1', 'contact:CON-11'],
+    });
+    expect(customersService.findAll).toHaveBeenCalledWith(expect.objectContaining({
+      ownerId: '7',
+      journeyStage: 'qualified',
+    }));
+  });
 });
 
 describe('UnsubscribeController', () => {

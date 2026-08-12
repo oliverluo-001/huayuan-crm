@@ -32,7 +32,8 @@ export function buildCreateEmailTaskInput(
     input.intervalMinutes = positiveInteger(form.intervalMinutes, 1440);
     input.totalRuns = positiveInteger(form.totalRuns, 1);
     const startAt = form.startAt.trim();
-    if (startAt) input.startAt = startAt;
+    if (startAt) input.startAt = new Date(startAt).toISOString();
+    input.autoStart = true;
   }
 
   return input;

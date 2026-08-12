@@ -27,23 +27,24 @@ describe("email task creation contract", () => {
     expect(input).not.toHaveProperty("successfulSendCount");
   });
 
-  it("omits a blank scheduled date so backend date validation succeeds", () => {
+  it("includes the complete auto-start schedule plan", () => {
     const input = buildCreateEmailTaskInput({
       name: "定时开发信",
       taskMode: "scheduled",
       templateId: "template-2",
-      batchSize: "",
-      intervalMinutes: "",
-      totalRuns: "0",
-      startAt: "  ",
+      batchSize: "20",
+      intervalMinutes: "60",
+      totalRuns: "3",
+      startAt: "2026-08-12T09:30",
     }, ["21"]);
 
     expect(input).toMatchObject({
-      batchSize: 0,
-      intervalMinutes: 1440,
-      totalRuns: 1,
+      batchSize: 20,
+      intervalMinutes: 60,
+      totalRuns: 3,
+      startAt: new Date("2026-08-12T09:30").toISOString(),
+      autoStart: true,
     });
-    expect(input).not.toHaveProperty("startAt");
   });
 
   it("resolves both historical numeric and stable template identifiers", () => {
