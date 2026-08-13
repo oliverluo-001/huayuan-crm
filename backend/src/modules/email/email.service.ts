@@ -7,6 +7,8 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ImapFlow } from 'imapflow';
+import { simpleParser, ParsedMail } from 'mailparser';
 import { createTransport, Transporter } from 'nodemailer';
 import { In, IsNull, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import {
@@ -38,6 +40,8 @@ import { resolveCustomerTimezone } from './customer-timezone';
 
 const MAX_SEND_ATTEMPTS = 3;
 const SCHEDULER_INTERVAL_MS = 15_000;
+const BOUNCE_MONITOR_INTERVAL_MS = 5 * 60_000;
+const MAX_BOUNCE_SCAN_LIMIT = 500;
 
 @Injectable()
 export class EmailService implements OnModuleInit, OnModuleDestroy {
@@ -45,6 +49,8 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
   private readonly processingTasks = new Set<number>();
   private scheduler?: NodeJS.Timeout;
   private schedulerRun?: Promise<void>;
+  private bounceScheduler?: NodeJS.Timeout;
+  private bounceSchedulerRun?: Promise<void>;
   private lastSendAt = 0;
   private sendLock: Promise<void> = Promise.resolve();
 
@@ -68,11 +74,17 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     }, SCHEDULER_INTERVAL_MS);
     this.scheduler.unref?.();
     this.runScheduler();
+    this.bounceScheduler = setInterval(() => {
+      this.runBounceMonitor();
+    }, BOUNCE_MONITOR_INTERVAL_MS);
+    this.bounceScheduler.unref?.();
   }
 
   async onModuleDestroy() {
     if (this.scheduler) clearInterval(this.scheduler);
+    if (this.bounceScheduler) clearInterval(this.bounceScheduler);
     await this.schedulerRun;
+    await this.bounceSchedulerRun;
   }
 
   private runScheduler() {
@@ -85,6 +97,19 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         if (this.schedulerRun === execution) this.schedulerRun = undefined;
       });
     this.schedulerRun = execution;
+  }
+
+  private runBounceMonitor() {
+    if (this.bounceSchedulerRun) return;
+    const execution = this.checkAllEnabledMailboxBounces()
+      .then(() => undefined)
+      .catch((error: any) => {
+        this.logger.error('邮件退信监控失败', error?.stack || error);
+      })
+      .finally(() => {
+        if (this.bounceSchedulerRun === execution) this.bounceSchedulerRun = undefined;
+      });
+    this.bounceSchedulerRun = execution;
   }
 
   // ==================== Templates ====================
@@ -338,13 +363,98 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   // ==================== Bounce Check ====================
 
-  async checkBounces() {
-    return {
-      ok: true,
-      checked: 0,
-      bounced: 0,
-      message: 'SMTP 发送已恢复；IMAP 退信与回复同步将在下一阶段启用',
-    };
+  async checkBounces(ownerId?: string) {
+    return this.scanMailboxForBounces(ownerId);
+  }
+
+  private async checkAllEnabledMailboxBounces() {
+    const profiles = await this.settingsService.listEnabledImapCredentials();
+    const results = [];
+    for (const { userId } of profiles) {
+      try {
+        results.push(await this.scanMailboxForBounces(userId));
+      } catch (error: any) {
+        this.logger.warn(`账号 ${userId || 'admin'} 邮箱退信监控失败：${this.errorMessage(error)}`);
+      }
+    }
+    return results;
+  }
+
+  private async scanMailboxForBounces(ownerId?: string) {
+    const profile: Record<string, any> | null = await this.settingsService.getImapCredentials(ownerId);
+    if (!profile?.imapEnabled) {
+      throw new BadRequestException('请先在设置中启用 IMAP 收信配置');
+    }
+    this.assertImapProfile(profile);
+
+    const client = this.createImapClient(profile);
+    let checked = 0;
+    let bounced = 0;
+    let latestUid = Number(profile.imapLastSeenUid || 0);
+    try {
+      await client.connect();
+      const mailbox = await client.mailboxOpen(profile.imapMailbox || 'INBOX');
+      const uidValidity = String(mailbox.uidValidity || '');
+      const previousUidValidity = String(profile.imapUidValidity || '');
+      const lastSeenUid = previousUidValidity && previousUidValidity === uidValidity
+        ? Number(profile.imapLastSeenUid || 0)
+        : 0;
+      const range = this.mailboxScanRange(
+        mailbox.exists || 0,
+        mailbox.uidNext || 0,
+        lastSeenUid,
+        profile.imapScanLimit,
+      );
+      if (!range) {
+        await this.settingsService.updateImapMonitorState(ownerId, {
+          imapUidValidity: uidValidity,
+          imapLastCheckedAt: new Date().toISOString(),
+          imapLastCheckStatus: 'ok',
+          imapLastCheckMessage: '没有需要检查的新邮件',
+        });
+        return { ok: true, checked: 0, bounced: 0, message: '没有需要检查的新邮件' };
+      }
+
+      const messages = await client.fetchAll(range, {
+        uid: true,
+        envelope: true,
+        source: { maxLength: 1024 * 1024 },
+      }, { uid: true });
+      checked = messages.length;
+      for (const message of messages) {
+        latestUid = Math.max(latestUid, Number(message.uid || 0));
+        if (!message.source) continue;
+        const parsed = await simpleParser(message.source as Buffer);
+        const bounce = this.extractBounceInfo(parsed, message.envelope);
+        if (!bounce.isBounce) continue;
+        const updated = await this.applyBounceInfo(bounce, ownerId);
+        if (updated) bounced++;
+      }
+
+      const message = `已检查 ${checked} 封邮件，识别退信 ${bounced} 封`;
+      await this.settingsService.updateImapMonitorState(ownerId, {
+        imapUidValidity: uidValidity,
+        imapLastSeenUid: latestUid,
+        imapLastCheckedAt: new Date().toISOString(),
+        imapLastCheckStatus: 'ok',
+        imapLastCheckMessage: message,
+      });
+      return { ok: true, checked, bounced, message };
+    } catch (error: any) {
+      const message = this.formatImapError(error);
+      await this.settingsService.updateImapMonitorState(ownerId, {
+        imapLastCheckedAt: new Date().toISOString(),
+        imapLastCheckStatus: 'error',
+        imapLastCheckMessage: message,
+      });
+      throw new BadRequestException(message);
+    } finally {
+      try {
+        await client.logout();
+      } catch {
+        client.close();
+      }
+    }
   }
 
   // ==================== Execution ====================
@@ -573,7 +683,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
           recipientEmail: recipient.email,
           subject,
           status: 'sent',
-          messageId: info.messageId || '',
+          messageId: this.normalizeMessageId(info.messageId || ''),
           attempt,
         });
         if (recipient.customerId) {
@@ -590,6 +700,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         }
         recipient.status = 'failed';
         await this.recipientRepository.save(recipient);
+        const hardFailure = this.isHardDeliveryFailure(recipient.lastError || '');
         await this.createLog({
           ownerId: task.ownerId,
           customerId: customer?.customerId || '',
@@ -605,9 +716,253 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
           errorMessage: recipient.lastError,
           attempt,
         });
+        if (recipient.customerId && hardFailure) {
+          await this.customersService.markEmailDeliveryFailed(
+            recipient.customerId,
+            subject,
+            recipient.email,
+            recipient.lastError || 'SMTP 发送失败',
+            true,
+          );
+        }
       }
     }
     return false;
+  }
+
+  private mailboxScanRange(
+    exists: number,
+    uidNext: number,
+    lastSeenUid: number,
+    rawLimit: unknown,
+  ) {
+    if (exists <= 0) return '';
+    const limit = Math.min(
+      MAX_BOUNCE_SCAN_LIMIT,
+      Math.max(1, Number(rawLimit || 50) || 50),
+    );
+    const maxUid = Math.max(0, Number(uidNext || 0) - 1);
+    if (maxUid <= 0) return '';
+    const startFromLastSeen = Number(lastSeenUid || 0) > 0
+      ? Number(lastSeenUid) + 1
+      : Math.max(1, maxUid - limit + 1);
+    const startUid = Math.max(1, Math.min(startFromLastSeen, maxUid));
+    if (startUid > maxUid) return '';
+    return `${startUid}:*`;
+  }
+
+  private extractBounceInfo(parsed: ParsedMail, envelope?: any) {
+    const subject = String(parsed.subject || envelope?.subject || '');
+    const text = [parsed.text, typeof parsed.html === 'string' ? parsed.html : '']
+      .filter(Boolean)
+      .join('\n');
+    const haystack = `${subject}\n${text}`.toLowerCase();
+    const fromEmails = this.addressesFrom(parsed.from).concat(
+      (envelope?.from || []).map((item: any) => item.address).filter(Boolean),
+    );
+    const failedRecipient = this.firstValueFromHeaders(parsed, [
+      'x-failed-recipients',
+      'final-recipient',
+      'original-recipient',
+    ]);
+    const code = this.firstValueFromHeaders(parsed, ['status', 'diagnostic-code']);
+    const originalMessageId =
+      this.normalizeMessageId(this.firstValueFromHeaders(parsed, ['x-original-message-id', 'original-message-id'])) ||
+      this.normalizeMessageId(String(envelope?.inReplyTo || '')) ||
+      this.extractFirstMessageId(parsed.references) ||
+      this.extractFirstMessageId(text);
+    const recipientEmail =
+      this.extractFirstEmail(failedRecipient) ||
+      this.extractFirstEmail(text);
+    const diagnostic = this.shortMessage(
+      this.firstValueFromHeaders(parsed, ['diagnostic-code']) ||
+      this.extractDiagnosticLine(text) ||
+      subject,
+    );
+    const isBounce =
+      fromEmails.some((email) => /mailer-daemon|postmaster|mail delivery|bounce/i.test(email)) ||
+      /delivery status notification|undeliver|delivery failure|mail delivery failed|returned mail|failure notice|退信|未送达/i.test(subject) ||
+      /final-recipient|diagnostic-code|status:\s*[245]\.\d+\.\d+/i.test(text);
+
+    return {
+      isBounce,
+      originalMessageId,
+      recipientEmail: normalizeEmail(recipientEmail || ''),
+      code: this.extractBounceCode(`${code}\n${text}`),
+      diagnostic,
+      hardFailure: this.isHardDeliveryFailure(`${code}\n${diagnostic}\n${haystack}`),
+      bounceMessageId: this.normalizeMessageId(String(envelope?.messageId || '')),
+    };
+  }
+
+  private async applyBounceInfo(
+    bounce: ReturnType<EmailService['extractBounceInfo']>,
+    ownerId?: string,
+  ) {
+    const log = await this.findBounceTargetLog(bounce, ownerId);
+    if (!log) return false;
+    if (log.status === 'bounced' && log.bounceMessageId === bounce.bounceMessageId) return false;
+
+    log.status = 'bounced';
+    log.errorMessage = bounce.diagnostic || '收到退信通知';
+    log.bounceCode = bounce.code || '';
+    log.bounceMessageId = bounce.bounceMessageId || '';
+    log.monitoredAt = new Date();
+    await this.logRepository.save(log);
+
+    const task = await this.updateTaskRecipientForBounce(log, bounce);
+    if (log.customerId) {
+      try {
+        const customer = await this.customersService.findByIdentifier(log.customerId);
+        await this.customersService.markEmailDeliveryFailed(
+          customer.id,
+          log.subject || '邮件退信',
+          log.recipientEmail,
+          log.errorMessage || '收到退信通知',
+          bounce.hardFailure,
+        );
+        await this.customersService.refreshEmailSentSummary(customer.id);
+      } catch (error: any) {
+        this.logger.warn(`退信已记录，但客户状态同步失败：${this.errorMessage(error)}`);
+      }
+    }
+    if (task) {
+      await this.refreshTaskCounts(task);
+      task.lastMessage = `收到退信：${log.recipientEmail}${log.errorMessage ? `；${log.errorMessage}` : ''}`;
+      if (task.successfulSendCount === 0 && task.failedSendCount > 0) task.status = 'failed';
+      await this.taskRepository.save(task);
+    }
+    if (bounce.hardFailure && log.recipientEmail) {
+      await this.suppressionService.add({
+        email: normalizeEmail(log.recipientEmail),
+        reason: `退信自动抑制：${log.errorMessage || '硬退信'}`,
+      });
+    }
+    return true;
+  }
+
+  private async findBounceTargetLog(
+    bounce: ReturnType<EmailService['extractBounceInfo']>,
+    ownerId?: string,
+  ) {
+    const scopedOwnerId = ownerId || '';
+    const baseWhere = { ownerId: scopedOwnerId };
+    if (bounce.originalMessageId) {
+      const messageIds = [
+        bounce.originalMessageId,
+        `<${bounce.originalMessageId}>`,
+      ];
+      const exact = await this.logRepository.findOne({
+        where: {
+          ...baseWhere,
+          messageId: In(messageIds),
+        },
+        order: { sentAt: 'DESC' },
+      } as any);
+      if (exact) return exact;
+    }
+    if (bounce.recipientEmail) {
+      return this.logRepository.findOne({
+        where: {
+          ...baseWhere,
+          recipientEmail: bounce.recipientEmail,
+          status: 'sent',
+        } as any,
+        order: { sentAt: 'DESC' },
+      });
+    }
+    return null;
+  }
+
+  private async updateTaskRecipientForBounce(
+    log: EmailLog,
+    bounce: ReturnType<EmailService['extractBounceInfo']>,
+  ) {
+    if (!log.emailTaskId) return null;
+    const task = await this.taskRepository.findOne({
+      where: { emailTaskId: log.emailTaskId, ownerId: log.ownerId || '' },
+    });
+    if (!task) return null;
+    const recipient = await this.recipientRepository.findOne({
+      where: {
+        taskId: task.id,
+        email: normalizeEmail(log.recipientEmail),
+      } as any,
+    });
+    if (!recipient) return task;
+    recipient.status = 'failed';
+    recipient.lastError = bounce.diagnostic || '收到退信通知';
+    await this.recipientRepository.save(recipient);
+    return task;
+  }
+
+  private firstValueFromHeaders(parsed: ParsedMail, keys: string[]) {
+    for (const key of keys) {
+      const raw = parsed.headers.get(key);
+      const value = this.headerValueToText(raw);
+      if (value) return value;
+    }
+    return '';
+  }
+
+  private headerValueToText(value: unknown): string {
+    if (!value) return '';
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map((item) => this.headerValueToText(item)).filter(Boolean).join(' ');
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value === 'object') {
+      if ('text' in value && typeof (value as any).text === 'string') return (value as any).text;
+      if ('value' in value && typeof (value as any).value === 'string') return (value as any).value;
+      if ('address' in value && typeof (value as any).address === 'string') return (value as any).address;
+    }
+    return String(value || '');
+  }
+
+  private addressesFrom(addressObject: unknown) {
+    const values = Array.isArray(addressObject)
+      ? addressObject
+      : addressObject
+        ? [addressObject]
+        : [];
+    return values
+      .flatMap((item: any) => item?.value || item?.address || [])
+      .map((item: any) => normalizeEmail(item?.address || item))
+      .filter(Boolean);
+  }
+
+  private normalizeMessageId(value: string) {
+    return String(value || '').trim().replace(/^<|>$/g, '');
+  }
+
+  private extractFirstMessageId(value: unknown) {
+    const text = Array.isArray(value) ? value.join(' ') : String(value || '');
+    const match = text.match(/<([^<>@\s]+@[^<>\s]+)>/);
+    return this.normalizeMessageId(match ? match[1] : '');
+  }
+
+  private extractFirstEmail(value: string) {
+    const match = String(value || '').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return match ? match[0] : '';
+  }
+
+  private extractBounceCode(value: string) {
+    const match = String(value || '').match(/\b[245]\.\d{1,3}\.\d{1,3}\b|\b[45]\d{2}\b/);
+    return match ? match[0] : '';
+  }
+
+  private extractDiagnosticLine(value: string) {
+    const match = String(value || '').match(/(?:Diagnostic-Code|Reason|Error|Status):\s*([^\r\n]+)/i);
+    return match ? match[1] : '';
+  }
+
+  private isHardDeliveryFailure(value: string) {
+    return /\b5\.\d+\.\d+\b|\b5\d{2}\b|user unknown|mailbox unavailable|no such user|does not exist|recipient address rejected|permanent/i.test(
+      String(value || ''),
+    );
+  }
+
+  private shortMessage(value: string) {
+    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 1000);
   }
 
   private async ensureTaskRecipients(task: EmailTask) {
@@ -851,6 +1206,28 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  private createImapClient(profile: Record<string, any>) {
+    return new ImapFlow({
+      host: profile.imapHost,
+      port: Number(profile.imapPort || 993),
+      secure: profile.imapSecure !== false,
+      auth: {
+        user: profile.imapUser,
+        pass: profile.pass,
+      },
+      logger: false,
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
+    } as any);
+  }
+
+  private assertImapProfile(profile: Record<string, any>) {
+    if (!profile.imapHost || !profile.imapUser || !profile.pass) {
+      throw new BadRequestException('IMAP 配置不完整，请前往设置补充');
+    }
+  }
+
   private async findTaskEntity(idOrEmailTaskId: string, ownerId?: string) {
     const numericId = Number(idOrEmailTaskId);
     const task = await this.taskRepository.findOne({
@@ -893,6 +1270,20 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   private errorMessage(error: any) {
     return formatSmtpError(error);
+  }
+
+  private formatImapError(error: any) {
+    const message = String(error?.response || error?.message || error || '').trim();
+    if (/auth|login|password|credential|535|534|invalid/i.test(message)) {
+      return 'IMAP 认证失败，请核对用户名和邮箱授权码';
+    }
+    if (/timeout|timed out|ETIMEDOUT/i.test(message)) {
+      return 'IMAP 连接超时，请核对服务器、端口和安全连接方式';
+    }
+    if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|network/i.test(message)) {
+      return 'IMAP 服务器无法连接，请核对服务器地址和网络';
+    }
+    return message || 'IMAP 检查失败';
   }
 
   private generateId(prefix: string) {

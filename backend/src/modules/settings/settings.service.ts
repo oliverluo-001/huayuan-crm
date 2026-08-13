@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ImapFlow } from 'imapflow';
 import { createTransport } from 'nodemailer';
-import { Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { Setting } from './entities';
 import {
   AiProfileDto,
@@ -37,7 +38,8 @@ export class SettingsService {
     for (const setting of settings) {
       if (
         !['search_profiles', 'ai_profile', 'smtp_profile', 'imap_profile', 'unsubscribe_secret'].includes(setting.keyName) &&
-        !setting.keyName.startsWith('smtp_profile_user_')
+        !setting.keyName.startsWith('smtp_profile_user_') &&
+        !setting.keyName.startsWith('imap_profile_user_')
       ) {
         result[setting.keyName] = setting.keyValue;
       }
@@ -281,10 +283,36 @@ export class SettingsService {
 
   // ==================== IMAP Profile ====================
 
-  async getImapProfile() {
-    const profile = await this.findRaw('imap_profile');
+  async testImapProfile(userId?: string) {
+    const profile = await this.getImapCredentials(userId);
+    if (!profile?.imapEnabled) {
+      throw new BadRequestException('请先启用 IMAP 收信配置');
+    }
+    this.assertImapProfile(profile);
+    const client = this.createImapClient(profile);
+    try {
+      await client.connect();
+      const mailbox = await client.mailboxOpen(profile.imapMailbox || 'INBOX');
+      return {
+        ok: true,
+        message: `IMAP 连接成功，${profile.imapMailbox || 'INBOX'} 当前 ${mailbox.exists || 0} 封邮件`,
+      };
+    } catch (error) {
+      throw new BadRequestException(this.formatImapError(error));
+    } finally {
+      try {
+        await client.logout();
+      } catch {
+        client.close();
+      }
+    }
+  }
+
+  async getImapProfile(userId?: string) {
+    const keyName = this.imapProfileKey(userId);
+    const profile = await this.findRaw(keyName);
     if (!profile) return null;
-    const migrated = await this.migrateLegacySecret('imap_profile', profile, 'pass');
+    const migrated = await this.migrateLegacySecret(keyName, profile, 'pass');
     const { pass, passEncrypted, ...safe } = migrated;
     return {
       ...safe,
@@ -293,27 +321,87 @@ export class SettingsService {
     };
   }
 
-  async getImapCredentials() {
-    const profile = await this.findRaw('imap_profile');
+  async getImapCredentials(userId?: string) {
+    const keyName = this.imapProfileKey(userId);
+    const profile = await this.findRaw(keyName);
     if (!profile) return null;
-    const migrated = await this.migrateLegacySecret('imap_profile', profile, 'pass');
-    return {
+    const migrated = await this.migrateLegacySecret(keyName, profile, 'pass');
+    const withPass: StoredProfile = {
       ...migrated,
       pass: this.decryptStoredSecret(migrated.passEncrypted, migrated.pass),
       passEncrypted: undefined,
     };
+    if (withPass.imapUseSmtpCredentials) {
+      const smtp = await this.getSmtpCredentials(userId);
+      withPass.imapUser = withPass.imapUser || smtp.smtpUser;
+      withPass.pass = smtp.pass;
+    }
+    return withPass;
   }
 
-  async saveImapProfile(profile: ImapProfileDto) {
-    const existing = (await this.findRaw('imap_profile')) || {};
+  async saveImapProfile(profile: ImapProfileDto, userId?: string) {
+    const keyName = this.imapProfileKey(userId);
+    const existing = (await this.findRaw(keyName)) || {};
     const incomingSecret = this.usableSecret(profile.pass);
-    const stored: StoredProfile = { ...existing, ...profile };
+    const stored: StoredProfile = {
+      ...existing,
+      ...profile,
+      imapHost: profile.imapHost || profile.host || existing.imapHost || '',
+      imapPort: profile.imapPort || profile.port || existing.imapPort || 993,
+      imapUser: profile.imapUser || profile.user || existing.imapUser || '',
+      imapMailbox: profile.imapMailbox || existing.imapMailbox || 'INBOX',
+      imapScanLimit: profile.imapScanLimit || existing.imapScanLimit || 50,
+    };
     delete stored.pass;
     stored.passEncrypted = incomingSecret
       ? this.crypto.encrypt(incomingSecret)
       : existing.passEncrypted || (existing.pass ? this.crypto.encrypt(existing.pass) : undefined);
-    await this.upsert('imap_profile', stored);
-    return this.getImapProfile();
+    await this.upsert(keyName, stored);
+    return this.getImapProfile(userId);
+  }
+
+  async updateImapMonitorState(userId: string | undefined, patch: Record<string, any>) {
+    const keyName = this.imapProfileKey(userId);
+    const existing = (await this.findRaw(keyName)) || {};
+    await this.upsert(keyName, { ...existing, ...patch });
+  }
+
+  async listEnabledImapCredentials() {
+    const rows = await this.settingRepository.find({
+      where: [
+        { keyName: 'imap_profile' },
+        { keyName: Like('imap_profile_user_%') },
+      ],
+    } as any);
+    const profiles: Array<{ userId?: string; profile: StoredProfile }> = [];
+    for (const row of rows) {
+      const userId = row.keyName.startsWith('imap_profile_user_')
+        ? row.keyName.slice('imap_profile_user_'.length)
+        : undefined;
+      const profile = await this.getImapCredentials(userId);
+      if (profile?.imapEnabled) profiles.push({ userId, profile });
+    }
+    return profiles;
+  }
+
+  private imapProfileKey(userId?: string) {
+    return userId ? `imap_profile_user_${userId}` : 'imap_profile';
+  }
+
+  private createImapClient(profile: StoredProfile) {
+    return new ImapFlow({
+      host: profile.imapHost,
+      port: Number(profile.imapPort || 993),
+      secure: profile.imapSecure !== false,
+      auth: {
+        user: profile.imapUser,
+        pass: profile.pass,
+      },
+      logger: false,
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
+    } as any);
   }
 
   // ==================== Email Policy ====================
@@ -374,5 +462,25 @@ export class SettingsService {
     if (!profile.smtpHost || !profile.smtpUser || !profile.pass) {
       throw new BadRequestException('SMTP 主机、用户名或密码未配置完整');
     }
+  }
+
+  private assertImapProfile(profile: StoredProfile) {
+    if (!profile.imapHost || !profile.imapUser || !profile.pass) {
+      throw new BadRequestException('IMAP 主机、用户名或密码未配置完整');
+    }
+  }
+
+  private formatImapError(error: any) {
+    const message = String(error?.response || error?.message || error || '').trim();
+    if (/auth|login|password|credential|535|534|invalid/i.test(message)) {
+      return 'IMAP 认证失败，请核对用户名和邮箱授权码';
+    }
+    if (/timeout|timed out|ETIMEDOUT/i.test(message)) {
+      return 'IMAP 连接超时，请核对服务器、端口和安全连接方式';
+    }
+    if (/ECONNREFUSED|ENOTFOUND|ECONNRESET|network/i.test(message)) {
+      return 'IMAP 服务器无法连接，请核对服务器地址和网络';
+    }
+    return message || 'IMAP 连接测试失败';
   }
 }

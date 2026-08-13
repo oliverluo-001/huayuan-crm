@@ -1,6 +1,7 @@
 import {
   ensureInitialAdmin,
   migrateCustomerDuplicateManagement,
+  migrateEmailDeliveryMonitoring,
   migrateOpportunityManagement,
   migrateP1AcceptanceHardening,
   migrateP21ProductCatalog,
@@ -246,5 +247,45 @@ describe('database migration', () => {
     expect(columns.get('products')?.size).toBe(14);
     expect(columns.get('quote_items')?.size).toBe(13);
     expect(indexes.get('products')).toEqual(new Set(['uq_products_sku', 'idx_products_category_active']));
+  });
+
+  it('can repeat the email delivery monitoring migration and backfills send counts', async () => {
+    const columns = new Map<string, Set<string>>();
+    const indexes = new Map<string, Set<string>>();
+    const statements: string[] = [];
+    const query = jest.fn(async (rawSql: string, params: any[] = []) => {
+      const sql = String(rawSql);
+      statements.push(sql);
+      if (sql.includes('information_schema.TABLES')) return [[{ TABLE_NAME: params[1] }], []];
+      if (sql.includes('information_schema.COLUMNS')) {
+        return [[...(columns.get(String(params[1]))?.has(String(params[2])) ? [{ COLUMN_NAME: params[2] }] : [])], []];
+      }
+      if (sql.includes('information_schema.STATISTICS')) {
+        return [[...(indexes.get(String(params[1]))?.has(String(params[2])) ? [{ INDEX_NAME: params[2] }] : [])], []];
+      }
+      const table = sql.match(/ALTER TABLE `([^`]+)`/)?.[1];
+      const column = sql.match(/ADD COLUMN `([^`]+)`/)?.[1];
+      if (table && column) {
+        if (!columns.has(table)) columns.set(table, new Set());
+        columns.get(table)!.add(column);
+      }
+      const index = sql.match(/ADD (?:UNIQUE )?INDEX `([^`]+)`/)?.[1];
+      if (table && index) {
+        if (!indexes.has(table)) indexes.set(table, new Set());
+        indexes.get(table)!.add(index);
+      }
+      return [{ affectedRows: 1 }, []];
+    });
+
+    await migrateEmailDeliveryMonitoring({ query } as any);
+    await migrateEmailDeliveryMonitoring({ query } as any);
+
+    expect(columns.get('customers')).toEqual(new Set(['email_sent_count', 'first_email_sent_at', 'last_email_sent_at']));
+    expect(columns.get('email_logs')).toEqual(new Set(['bounce_message_id', 'bounce_code', 'monitored_at']));
+    expect(indexes.get('customers')).toEqual(new Set(['idx_customers_email_sent']));
+    expect(indexes.get('email_logs')).toEqual(new Set(['idx_email_logs_message_owner', 'idx_email_logs_recipient_status']));
+    expect(statements.some((sql) => sql.includes('COUNT(*) AS sent_count'))).toBe(true);
+    expect(statements.some((sql) => sql.includes("journey_stage = 'new'"))).toBe(true);
+    expect(statements.filter((sql) => sql.includes('ADD COLUMN'))).toHaveLength(6);
   });
 });

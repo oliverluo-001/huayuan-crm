@@ -125,10 +125,10 @@ export class EmailBouncesController {
   constructor(private readonly emailService: EmailService) {}
 
   @Post('check')
-  @Roles('admin')
+  @Roles('admin', 'sales')
   @HttpCode(200)
-  async check() {
-    return this.emailService.checkBounces();
+  async check(@CurrentUser() user: RequestUser) {
+    return this.emailService.checkBounces(ownerScope(user));
   }
 }
 

@@ -97,6 +97,9 @@ export interface Customer {
   emailStatus?: "valid" | "invalid" | "unknown";
   emailFailureReason?: string;
   emailFailedAt?: string;
+  emailSentCount?: number;
+  firstEmailSentAt?: string;
+  lastEmailSentAt?: string;
   createdAt: string;
   updatedAt: string;
   // Extended fields from backend
@@ -783,10 +786,16 @@ export interface ImapProfile {
   imapHost?: string;
   imapPort?: number;
   imapUser?: string;
+  pass?: string;
   imapMailbox?: string;
   imapScanLimit?: number;
   imapUseSmtpCredentials?: boolean;
   imapSecure?: boolean;
+  credentialStatus?: "saved" | "reentry_required" | "not_set";
+  imapLastCheckedAt?: string;
+  imapLastCheckStatus?: "ok" | "error";
+  imapLastCheckMessage?: string;
+  imapLastSeenUid?: number;
 }
 
 // Dashboard types

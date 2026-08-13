@@ -110,6 +110,15 @@ export class Customer {
   @Column({ name: 'email_failed_at', type: 'timestamp', nullable: true })
   emailFailedAt: Date;
 
+  @Column({ name: 'email_sent_count', type: 'int', default: 0 })
+  emailSentCount: number;
+
+  @Column({ name: 'first_email_sent_at', type: 'timestamp', nullable: true })
+  firstEmailSentAt: Date | null;
+
+  @Column({ name: 'last_email_sent_at', type: 'timestamp', nullable: true })
+  lastEmailSentAt: Date | null;
+
   @Column({ type: 'varchar', length: 100, default: '' })
   source: string;
 

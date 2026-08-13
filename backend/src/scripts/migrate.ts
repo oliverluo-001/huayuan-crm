@@ -112,6 +112,7 @@ export async function runDatabaseMigrations() {
     }
     await migrateP1AcceptanceHardening(connection);
     await migrateP21ProductCatalog(connection);
+    await migrateEmailDeliveryMonitoring(connection);
     return { p03Report };
   } finally {
     await connection.end();
@@ -845,6 +846,47 @@ export async function migrateP21ProductCatalog(connection: Connection) {
     await addColumnToTable(connection, "quote_items", "certificate_requirements", "TEXT NULL");
   }
 
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+  console.log(`Applied migration: ${id}`);
+}
+
+export async function migrateEmailDeliveryMonitoring(connection: Connection) {
+  const id = "20260813_email_delivery_monitoring";
+  if (!(await tableExists(connection, "customers"))) return;
+
+  await addColumnToTable(connection, "customers", "email_sent_count", "INT NOT NULL DEFAULT 0");
+  await addColumnToTable(connection, "customers", "first_email_sent_at", "TIMESTAMP NULL");
+  await addColumnToTable(connection, "customers", "last_email_sent_at", "TIMESTAMP NULL");
+
+  if (await tableExists(connection, "email_logs")) {
+    await addColumnToTable(connection, "email_logs", "bounce_message_id", "VARCHAR(255) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "email_logs", "bounce_code", "VARCHAR(50) NOT NULL DEFAULT ''");
+    await addColumnToTable(connection, "email_logs", "monitored_at", "TIMESTAMP NULL");
+    await addIndexIfMissing(connection, "email_logs", "idx_email_logs_message_owner", "owner_id, message_id");
+    await addIndexIfMissing(connection, "email_logs", "idx_email_logs_recipient_status", "owner_id, recipient_email, status");
+
+    await connection.query(`
+      UPDATE customers c
+      LEFT JOIN (
+        SELECT customer_id, COUNT(*) AS sent_count, MIN(sent_at) AS first_sent_at, MAX(sent_at) AS last_sent_at
+        FROM email_logs
+        WHERE status = 'sent' AND TRIM(COALESCE(customer_id, '')) <> ''
+        GROUP BY customer_id
+      ) s ON s.customer_id = c.customerId
+      SET c.email_sent_count = COALESCE(s.sent_count, 0),
+          c.first_email_sent_at = s.first_sent_at,
+          c.last_email_sent_at = s.last_sent_at
+    `);
+  }
+
+  await connection.query(`
+    UPDATE customers
+    SET journey_stage = 'new'
+    WHERE COALESCE(email_sent_count, 0) = 0
+      AND journey_stage IN ('', 'lead', 'prospect', 'contacted')
+  `);
+
+  await addIndexIfMissing(connection, "customers", "idx_customers_email_sent", "email_sent_count, journey_stage");
   await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
   console.log(`Applied migration: ${id}`);
 }

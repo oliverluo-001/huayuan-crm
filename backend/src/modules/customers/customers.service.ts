@@ -241,6 +241,11 @@ export class CustomersService {
     ) {
       customer.journeyStage = "contacted";
     }
+    const now = new Date();
+    customer.emailSentCount = Number(customer.emailSentCount || 0) + 1;
+    if (!customer.firstEmailSentAt) customer.firstEmailSentAt = now;
+    customer.lastEmailSentAt = now;
+    if (customer.emailStatus !== "invalid") customer.emailStatus = "valid";
     customer.lastActivityAt = new Date();
     customer.lastActivityType = "email";
     if (!customer.health) customer.health = "good";
@@ -254,6 +259,53 @@ export class CustomersService {
     });
     await this.activityRepository.save(activity);
     return customer;
+  }
+
+  async markEmailDeliveryFailed(
+    customerId: number,
+    subject: string,
+    recipientEmail: string,
+    reason: string,
+    hardFailure = true,
+  ) {
+    const customer = await this.findOne(customerId);
+    const normalizedRecipient = this.normalizeEmail(recipientEmail || "");
+    const normalizedCustomer = this.normalizeEmail(customer.email || "");
+    if (hardFailure && normalizedRecipient && normalizedRecipient === normalizedCustomer) {
+      customer.emailStatus = "invalid";
+      customer.emailFailureReason = reason;
+      customer.emailFailedAt = new Date();
+    }
+    customer.lastActivityAt = new Date();
+    customer.lastActivityType = "email";
+    await this.customerRepository.save(customer);
+    const activity = this.activityRepository.create({
+      customerId,
+      activityId: this.generateId("activity"),
+      type: "email",
+      subject: subject || "邮件退信",
+      content: `邮件发送异常：${recipientEmail}${reason ? `；${reason}` : ""}`,
+    });
+    await this.activityRepository.save(activity);
+    return customer;
+  }
+
+  async refreshEmailSentSummary(customerId: number) {
+    const customer = await this.findOne(customerId);
+    const logs = await this.emailLogRepository.find({
+      where: { customerId: customer.customerId, status: "sent" as any },
+      order: { sentAt: "ASC" },
+    });
+    customer.emailSentCount = logs.length;
+    customer.firstEmailSentAt = logs[0]?.sentAt || null;
+    customer.lastEmailSentAt = logs[logs.length - 1]?.sentAt || null;
+    if (
+      logs.length === 0 &&
+      !["qualified", "opportunity", "proposal", "negotiation", "won", "lost", "closed"].includes(customer.journeyStage)
+    ) {
+      customer.journeyStage = "new";
+    }
+    return this.customerRepository.save(customer);
   }
 
   async create(createCustomerDto: CreateCustomerDto) {
@@ -273,6 +325,7 @@ export class CustomersService {
     );
     const customer = this.customerRepository.create({
       ...rest,
+      journeyStage: rest.journeyStage || "new",
       customerId: this.generateId("cus"),
     });
 
@@ -1687,6 +1740,7 @@ export class CustomersService {
         const customer = this.customerRepository.create({
           ...data,
           ownerId,
+          journeyStage: "new",
           customerId: this.generateId("cus"),
         });
         const saved = await this.customerRepository.save(customer);
@@ -1738,7 +1792,7 @@ export class CustomersService {
     const customer = this.customerRepository.create({
       ...profile,
       ownerId,
-      journeyStage: "lead",
+      journeyStage: "new",
       customerId: this.generateId("cus"),
     });
     return {

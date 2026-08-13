@@ -21,6 +21,8 @@ import {
   saveSmtpProfile,
   testSmtpProfile,
   saveImapProfile,
+  testImapProfile,
+  checkMailboxBounces,
   changePassword,
   saveAiProfile,
   testAiProfile,
@@ -90,9 +92,14 @@ export function SettingsPage() {
     imapPort: "993",
     imapSecure: true,
     imapUser: "",
+    imapPass: "",
     imapMailbox: "INBOX",
     imapScanLimit: "50",
     imapUseSmtpCredentials: false,
+    credentialStatus: undefined as "saved" | "reentry_required" | "not_set" | undefined,
+    imapLastCheckedAt: "",
+    imapLastCheckStatus: undefined as "ok" | "error" | undefined,
+    imapLastCheckMessage: "",
   });
 
   const [passwordForm, setPasswordForm] = useState({
@@ -120,6 +127,12 @@ export function SettingsPage() {
   const [aiTesting, setAiTesting] = useState(false);
   const [smtpTesting, setSmtpTesting] = useState(false);
   const [smtpTestFeedback, setSmtpTestFeedback] = useState<{
+    type: "testing" | "success" | "error";
+    message: string;
+  } | null>(null);
+  const [imapTesting, setImapTesting] = useState(false);
+  const [imapChecking, setImapChecking] = useState(false);
+  const [imapFeedback, setImapFeedback] = useState<{
     type: "testing" | "success" | "error";
     message: string;
   } | null>(null);
@@ -156,40 +169,49 @@ export function SettingsPage() {
   const [accountInfo, setAccountInfo] = useState<User | null>(null);
   const [accountForm, setAccountForm] = useState({ displayName: "", email: "" });
 
+  const applySmtpProfile = (smtpProfile: Awaited<ReturnType<typeof getSmtpProfile>> | null) => {
+    if (!smtpProfile) return;
+    setSmtpForm({
+      smtpProvider: smtpProfile.smtpProvider || "custom",
+      smtpHost: smtpProfile.smtpHost || "",
+      smtpPort: smtpProfile.smtpPort?.toString() || "465",
+      smtpSecure: smtpProfile.smtpSecure ?? true,
+      smtpUser: smtpProfile.smtpUser || "",
+      smtpFrom: smtpProfile.smtpFrom || "",
+      smtpPass: "",
+      credentialStatus: smtpProfile.credentialStatus || "not_set",
+    });
+  };
+
+  const applyImapProfile = (imapProfile: Awaited<ReturnType<typeof getImapProfile>> | null) => {
+    if (!imapProfile) return;
+    setImapForm({
+      imapEnabled: imapProfile.imapEnabled ?? false,
+      imapHost: imapProfile.imapHost || "",
+      imapPort: imapProfile.imapPort?.toString() || "993",
+      imapSecure: imapProfile.imapSecure ?? true,
+      imapUser: imapProfile.imapUser || "",
+      imapPass: "",
+      imapMailbox: imapProfile.imapMailbox || "INBOX",
+      imapScanLimit: imapProfile.imapScanLimit?.toString() || "50",
+      imapUseSmtpCredentials: imapProfile.imapUseSmtpCredentials ?? false,
+      credentialStatus: imapProfile.credentialStatus || "not_set",
+      imapLastCheckedAt: imapProfile.imapLastCheckedAt || "",
+      imapLastCheckStatus: imapProfile.imapLastCheckStatus,
+      imapLastCheckMessage: imapProfile.imapLastCheckMessage || "",
+    });
+  };
+
   const fetchData = useCallback(async () => {
-    if (!isAdmin) {
-      setIsLoading(false);
-      return;
-    }
     setIsLoading(true);
     try {
-      const [smtpProfile, imapProfile, aiProfile, profiles] = await Promise.all([
-        getSmtpProfile(), getImapProfile(), getAiProfile(), getSearchProfiles(),
+      const [smtpProfile, imapProfile] = await Promise.all([
+        getSmtpProfile(), getImapProfile(),
       ]);
-      if (smtpProfile) {
-        setSmtpForm({
-          smtpProvider: smtpProfile.smtpProvider || "custom",
-          smtpHost: smtpProfile.smtpHost || "",
-          smtpPort: smtpProfile.smtpPort?.toString() || "465",
-          smtpSecure: smtpProfile.smtpSecure ?? true,
-          smtpUser: smtpProfile.smtpUser || "",
-          smtpFrom: smtpProfile.smtpFrom || "",
-          smtpPass: "",
-          credentialStatus: smtpProfile.credentialStatus || "not_set",
-        });
-      }
-      if (imapProfile) {
-        setImapForm({
-          imapEnabled: imapProfile.imapEnabled ?? false,
-          imapHost: imapProfile.imapHost || "",
-          imapPort: imapProfile.imapPort?.toString() || "993",
-          imapSecure: imapProfile.imapSecure ?? true,
-          imapUser: imapProfile.imapUser || "",
-          imapMailbox: imapProfile.imapMailbox || "INBOX",
-          imapScanLimit: imapProfile.imapScanLimit?.toString() || "50",
-          imapUseSmtpCredentials: imapProfile.imapUseSmtpCredentials ?? false,
-        });
-      }
+      applySmtpProfile(smtpProfile);
+      applyImapProfile(imapProfile);
+      if (!isAdmin) return;
+      const [aiProfile, profiles] = await Promise.all([getAiProfile(), getSearchProfiles()]);
       // AI Profile
       if (aiProfile) {
         setAiProfileForm({
@@ -296,14 +318,74 @@ export function SettingsPage() {
         imapPort: parseInt(imapForm.imapPort),
         imapSecure: imapForm.imapSecure,
         imapUser: imapForm.imapUser,
+        pass: imapForm.imapPass || undefined,
         imapMailbox: imapForm.imapMailbox,
         imapScanLimit: parseInt(imapForm.imapScanLimit),
         imapUseSmtpCredentials: imapForm.imapUseSmtpCredentials,
       });
       toast.success("IMAP 配置已保存");
+      setImapForm((current) => ({
+        ...current,
+        imapPass: "",
+        credentialStatus: current.imapUseSmtpCredentials ? current.credentialStatus : "saved",
+      }));
       fetchData();
     } catch {
       // Error handled by API client
+    }
+  };
+
+  const handleTestImap = async () => {
+    if (!imapForm.imapEnabled) {
+      toast.error("请先启用 IMAP 收信");
+      return;
+    }
+    setImapTesting(true);
+    setImapFeedback({ type: "testing", message: "正在保存配置并连接 IMAP 服务器，请稍候（最长约 15 秒）..." });
+    try {
+      await saveImapProfile({
+        imapEnabled: imapForm.imapEnabled,
+        imapHost: imapForm.imapHost,
+        imapPort: parseInt(imapForm.imapPort),
+        imapSecure: imapForm.imapSecure,
+        imapUser: imapForm.imapUser,
+        pass: imapForm.imapPass || undefined,
+        imapMailbox: imapForm.imapMailbox,
+        imapScanLimit: parseInt(imapForm.imapScanLimit),
+        imapUseSmtpCredentials: imapForm.imapUseSmtpCredentials,
+      });
+      const result = await testImapProfile();
+      const message = result.message || "IMAP 连接测试成功";
+      toast.success(message);
+      setImapFeedback({ type: "success", message });
+      setImapForm((current) => ({ ...current, imapPass: "", credentialStatus: "saved" }));
+      fetchData();
+    } catch (error) {
+      setImapFeedback({
+        type: "error",
+        message: error instanceof Error ? error.message : "IMAP 连接测试失败，请核对服务器、端口和授权码",
+      });
+    } finally {
+      setImapTesting(false);
+    }
+  };
+
+  const handleCheckBounces = async () => {
+    setImapChecking(true);
+    setImapFeedback({ type: "testing", message: "正在检查收件箱退信..." });
+    try {
+      const result = await checkMailboxBounces();
+      const message = result.message || `已检查 ${result.checked} 封邮件，识别退信 ${result.bounced} 封`;
+      toast.success(message);
+      setImapFeedback({ type: "success", message });
+      fetchData();
+    } catch (error) {
+      setImapFeedback({
+        type: "error",
+        message: error instanceof Error ? error.message : "退信检查失败，请先测试 IMAP 连接",
+      });
+    } finally {
+      setImapChecking(false);
     }
   };
 
@@ -594,19 +676,7 @@ export function SettingsPage() {
     } else if (role === "sales") {
       void Promise.all([
         accountRequest,
-        getSmtpProfile().then((smtpProfile) => {
-          if (!smtpProfile) return;
-          setSmtpForm({
-            smtpProvider: smtpProfile.smtpProvider || "custom",
-            smtpHost: smtpProfile.smtpHost || "",
-            smtpPort: smtpProfile.smtpPort?.toString() || "465",
-            smtpSecure: smtpProfile.smtpSecure ?? true,
-            smtpUser: smtpProfile.smtpUser || "",
-            smtpFrom: smtpProfile.smtpFrom || "",
-            smtpPass: "",
-            credentialStatus: smtpProfile.credentialStatus || "not_set",
-          });
-        }),
+        fetchData(),
       ]).finally(() => setIsLoading(false));
     } else {
       void accountRequest.finally(() => setIsLoading(false));
@@ -1057,11 +1127,11 @@ export function SettingsPage() {
           </Card>
 
           {/* IMAP Settings */}
-          <Card hidden={!isAdmin}>
+          <Card hidden={role === "viewer"}>
             <CardHeader>
-              <CardTitle>IMAP 收信配置</CardTitle>
+              <CardTitle>个人邮箱 IMAP 收信监控</CardTitle>
               <CardDescription>
-                配置邮件接收服务，用于自动收取客户回复。密码会加密保存。
+                当前账号独立监控自己的收件箱，用于识别退信和发送失败回执。授权码会加密保存。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1118,6 +1188,21 @@ export function SettingsPage() {
                     />
                   </div>
                   <div className="space-y-2">
+                    <Label>密码 / IMAP 授权码</Label>
+                    <Input
+                      type="password"
+                      placeholder={imapForm.credentialStatus === "saved" ? "已保存，留空则不修改" : "输入邮箱密码"}
+                      value={imapForm.imapPass}
+                      onChange={(e) => setImapForm({ ...imapForm, imapPass: e.target.value })}
+                      disabled={!imapForm.imapEnabled || imapForm.imapUseSmtpCredentials}
+                    />
+                    {imapForm.imapUseSmtpCredentials ? (
+                      <p className="text-xs text-muted-foreground">当前使用已保存的 SMTP 授权码。</p>
+                    ) : imapForm.credentialStatus === "saved" ? (
+                      <p className="text-xs text-muted-foreground">密码已加密保存。留空保存时继续使用已有密码。</p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
                     <Label>邮箱目录</Label>
                     <Input
                       type="text"
@@ -1147,10 +1232,47 @@ export function SettingsPage() {
                   />
                   <Label htmlFor="imapUseSmtpCredentials" className="cursor-pointer">使用 SMTP 凭证</Label>
                 </div>
-                <Button type="submit" disabled={!imapForm.imapEnabled}>
-                  <Save className="mr-2 h-4 w-4" />
-                  保存 IMAP 配置
-                </Button>
+                {imapForm.imapLastCheckedAt && (
+                  <p className={`text-xs ${imapForm.imapLastCheckStatus === "error" ? "text-red-600" : "text-muted-foreground"}`}>
+                    最近检查：{new Date(imapForm.imapLastCheckedAt).toLocaleString()}；{imapForm.imapLastCheckMessage || "无结果"}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit" disabled={!imapForm.imapEnabled}>
+                    <Save className="mr-2 h-4 w-4" />
+                    保存 IMAP 配置
+                  </Button>
+                  <Button type="button" variant="outline" onClick={handleTestImap} disabled={!imapForm.imapEnabled || imapTesting}>
+                    {imapTesting ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <TestTube className="mr-2 h-4 w-4" />
+                    )}
+                    {imapTesting ? "正在连接..." : "保存并测试连接"}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={handleCheckBounces} disabled={!imapForm.imapEnabled || imapChecking}>
+                    {imapChecking ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    {imapChecking ? "正在检查..." : "立即检查退信"}
+                  </Button>
+                </div>
+                {imapFeedback && (
+                  <div
+                    role="status"
+                    className={`rounded-lg border px-4 py-3 text-sm ${
+                      imapFeedback.type === "success"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                        : imapFeedback.type === "error"
+                          ? "border-red-300 bg-red-50 text-red-800"
+                          : "border-blue-300 bg-blue-50 text-blue-800"
+                    }`}
+                  >
+                    {imapFeedback.message}
+                  </div>
+                )}
               </form>
             </CardContent>
           </Card>

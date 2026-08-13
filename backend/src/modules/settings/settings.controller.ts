@@ -20,6 +20,7 @@ import {
 
 interface RequestUser { sub: number; role: 'admin' | 'sales' | 'viewer' }
 const smtpOwnerId = (user: RequestUser) => user.role === 'sales' ? String(user.sub) : undefined;
+const mailboxOwnerId = smtpOwnerId;
 
 @Controller('settings')
 @Roles('admin')
@@ -97,13 +98,22 @@ export class SettingsController {
   // ==================== IMAP Profile ====================
 
   @Get('imap-profile')
-  getImapProfile() {
-    return this.settingsService.getImapProfile();
+  @Roles('admin', 'sales')
+  getImapProfile(@CurrentUser() user: RequestUser) {
+    return this.settingsService.getImapProfile(mailboxOwnerId(user));
   }
 
   @Post('imap-profile')
-  saveImapProfile(@Body() profile: ImapProfileDto) {
-    return this.settingsService.saveImapProfile(profile);
+  @Roles('admin', 'sales')
+  saveImapProfile(@Body() profile: ImapProfileDto, @CurrentUser() user: RequestUser) {
+    return this.settingsService.saveImapProfile(profile, mailboxOwnerId(user));
+  }
+
+  @Post('imap-profile/test')
+  @Roles('admin', 'sales')
+  @HttpCode(200)
+  testImapProfile(@CurrentUser() user: RequestUser) {
+    return this.settingsService.testImapProfile(mailboxOwnerId(user));
   }
 
   // ==================== Email Policy ====================

@@ -967,8 +967,20 @@ export async function saveImapProfile(
   await api("/api/settings/imap-profile", { method: "POST", body: data });
 }
 
-export async function checkMailboxBounces(): Promise<void> {
-  await api("/api/email-bounces/check", { method: "POST" });
+export async function testImapProfile(): Promise<{
+  ok: boolean;
+  message?: string;
+}> {
+  return api("/api/settings/imap-profile/test", { method: "POST" });
+}
+
+export async function checkMailboxBounces(): Promise<{
+  ok: boolean;
+  checked: number;
+  bounced: number;
+  message?: string;
+}> {
+  return api("/api/email-bounces/check", { method: "POST" });
 }
 
 // Import API

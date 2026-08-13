@@ -53,6 +53,15 @@ export class EmailLog {
   @Column({ name: 'message_id', type: 'varchar', length: 255, default: '' })
   messageId: string;
 
+  @Column({ name: 'bounce_message_id', type: 'varchar', length: 255, default: '' })
+  bounceMessageId: string;
+
+  @Column({ name: 'bounce_code', type: 'varchar', length: 50, default: '' })
+  bounceCode: string;
+
+  @Column({ name: 'monitored_at', type: 'timestamp', nullable: true })
+  monitoredAt: Date | null;
+
   @Column({ type: 'int', default: 1 })
   attempt: number;
 

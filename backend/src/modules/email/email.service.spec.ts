@@ -15,8 +15,18 @@ describe('EmailService ownership', () => {
     save: jest.fn(async (value) => value),
     delete: jest.fn(),
   };
+  const logRepository = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+    create: jest.fn((value) => value),
+    save: jest.fn(async (value) => value),
+    delete: jest.fn(),
+    remove: jest.fn(),
+    count: jest.fn(),
+  };
   const recipientRepository = {
     find: jest.fn(),
+    findOne: jest.fn(),
     count: jest.fn(),
     create: jest.fn((value) => value),
     save: jest.fn(async (value) => value),
@@ -28,15 +38,24 @@ describe('EmailService ownership', () => {
     findContactByIdentifier: jest.fn(),
     assertCustomerOwner: jest.fn(),
     isCustomerEmailMarketingAllowed: jest.fn().mockResolvedValue(true),
+    markEmailDeliveryFailed: jest.fn(),
+    refreshEmailSentSummary: jest.fn(),
+  };
+  const settingsService = {
+    listEnabledImapCredentials: jest.fn(),
+  };
+  const suppressionService = {
+    add: jest.fn(),
+    isSuppressed: jest.fn().mockResolvedValue(false),
   };
   const service = new EmailService(
     templateRepository as any,
     taskRepository as any,
-    {} as any,
+    logRepository as any,
     recipientRepository as any,
     customersService as any,
-    {} as any,
-    {} as any,
+    settingsService as any,
+    suppressionService as any,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -229,5 +248,83 @@ describe('EmailService ownership', () => {
       customerIds: '["customer:CUS-99"]',
     })).resolves.toBe(0);
     expect(recipientRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('marks a sent email as bounced and updates the linked task/customer', async () => {
+    const log = {
+      id: 11,
+      ownerId: '7',
+      customerId: 'cus_1',
+      emailTaskId: 'etask_1',
+      recipientEmail: 'buyer@example.com',
+      subject: 'Quote',
+      status: 'sent',
+      messageId: 'msg-1@example.com',
+      bounceMessageId: '',
+    };
+    const task = {
+      id: 3,
+      emailTaskId: 'etask_1',
+      ownerId: '7',
+      successfulSendCount: 1,
+      failedSendCount: 0,
+      skippedSendCount: 0,
+    };
+    const recipient = {
+      id: 4,
+      taskId: 3,
+      email: 'buyer@example.com',
+      status: 'sent',
+      lastError: null,
+    };
+    logRepository.findOne.mockResolvedValue(log);
+    taskRepository.findOne.mockResolvedValue(task);
+    recipientRepository.findOne.mockResolvedValue(recipient);
+    recipientRepository.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(0);
+    customersService.findByIdentifier.mockResolvedValue({ id: 8, customerId: 'cus_1' });
+
+    const parsed = {
+      subject: 'Delivery Status Notification (Failure)',
+      text: 'Final-Recipient: rfc822; buyer@example.com\nStatus: 5.1.1\nDiagnostic-Code: smtp; 550 No such user\nMessage-ID: <msg-1@example.com>',
+      html: false,
+      headers: new Map([
+        ['x-failed-recipients', 'buyer@example.com'],
+        ['status', '5.1.1'],
+        ['diagnostic-code', 'smtp; 550 No such user'],
+      ]),
+      references: '<msg-1@example.com>',
+      from: { value: [{ address: 'mailer-daemon@example.com' }] },
+    };
+
+    const bounce = (service as any).extractBounceInfo(parsed, {
+      messageId: '<bounce-1@example.com>',
+      from: [{ address: 'mailer-daemon@example.com' }],
+      subject: parsed.subject,
+    });
+    await expect((service as any).applyBounceInfo(bounce, '7')).resolves.toBe(true);
+
+    expect(logRepository.save).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'bounced',
+      bounceCode: '5.1.1',
+      bounceMessageId: 'bounce-1@example.com',
+    }));
+    expect(recipientRepository.save).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      lastError: expect.stringContaining('550 No such user'),
+    }));
+    expect(customersService.markEmailDeliveryFailed).toHaveBeenCalledWith(
+      8,
+      'Quote',
+      'buyer@example.com',
+      expect.stringContaining('550 No such user'),
+      true,
+    );
+    expect(customersService.refreshEmailSentSummary).toHaveBeenCalledWith(8);
+    expect(suppressionService.add).toHaveBeenCalledWith(expect.objectContaining({
+      email: 'buyer@example.com',
+    }));
   });
 });
