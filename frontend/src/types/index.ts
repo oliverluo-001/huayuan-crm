@@ -498,6 +498,43 @@ export interface Quote {
   updatedAt: string;
 }
 
+export type QuoteOutputLanguage = "zh" | "en" | "bilingual";
+
+export interface QuoteBrandAsset {
+  storedName: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  updatedAt: string;
+}
+
+export interface QuoteOutputProfile {
+  companyNameZh: string;
+  companyNameEn: string;
+  taglineZh: string;
+  taglineEn: string;
+  addressZh: string;
+  addressEn: string;
+  phone: string;
+  email: string;
+  website: string;
+  contactName: string;
+  contactTitle: string;
+  contactPhone: string;
+  contactEmail: string;
+  bankName: string;
+  bankAddress: string;
+  accountName: string;
+  accountNumber: string;
+  swiftCode: string;
+  beneficiaryAddress: string;
+  defaultLanguage: QuoteOutputLanguage;
+  footerZh: string;
+  footerEn: string;
+  logoAsset?: QuoteBrandAsset | null;
+  signatureAsset?: QuoteBrandAsset | null;
+}
+
 // Sample types
 export interface Sample {
   id: string;

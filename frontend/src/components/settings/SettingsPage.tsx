@@ -13,6 +13,7 @@ import {
   smtpConfigurationHint,
   validateSmtpProfileDraft,
 } from "@/contracts/smtp-profile";
+import { QuoteOutputSettings } from "./QuoteOutputSettings";
 import {
   getSmtpProfile,
   getImapProfile,
@@ -1276,6 +1277,8 @@ export function SettingsPage() {
               </form>
             </CardContent>
           </Card>
+
+          <QuoteOutputSettings isAdmin={isAdmin} />
 
           {/* Change Password */}
           <Card>

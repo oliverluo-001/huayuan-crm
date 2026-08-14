@@ -1,20 +1,39 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ImapFlow } from 'imapflow';
 import { createTransport } from 'nodemailer';
+import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { Like, Repository } from 'typeorm';
 import { Setting } from './entities';
 import {
   AiProfileDto,
   EmailPolicyDto,
   ImapProfileDto,
+  QuoteOutputProfileDto,
   SearchProfileDto,
   SmtpProfileDto,
 } from './dto';
 import { CredentialCrypto, EncryptedSecret } from './credential-crypto';
 import { formatSmtpError } from '../email/smtp-error';
+import {
+  QuoteBrandAssetKind,
+  normalizeQuoteOutputProfile,
+} from './quote-output-profile';
 
 type StoredProfile = Record<string, any>;
+const QUOTE_OUTPUT_PROFILE_KEY = 'quote_output_profile';
+const BRAND_ASSET_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg']);
+const MAX_BRAND_ASSET_SIZE = 5 * 1024 * 1024;
+
+interface UploadedBrandAsset {
+  originalname: string;
+  mimetype?: string;
+  size: number;
+  buffer?: Buffer;
+}
 
 @Injectable()
 export class SettingsService {
@@ -23,6 +42,7 @@ export class SettingsService {
   constructor(
     @InjectRepository(Setting)
     private settingRepository: Repository<Setting>,
+    private readonly configService?: ConfigService,
   ) {}
 
   private get crypto() {
@@ -56,6 +76,7 @@ export class SettingsService {
     if (keyName === 'ai_profile') return this.getAiProfile();
     if (keyName === 'smtp_profile') return this.getSmtpProfile();
     if (keyName === 'imap_profile') return this.getImapProfile();
+    if (keyName === QUOTE_OUTPUT_PROFILE_KEY) return this.getQuoteOutputProfile();
     if (keyName === 'unsubscribe_secret') return null;
     return this.findRaw(keyName);
   }
@@ -424,6 +445,71 @@ export class SettingsService {
     return policy;
   }
 
+  // ==================== Quote Output Profile ====================
+
+  async getQuoteOutputProfile() {
+    return normalizeQuoteOutputProfile((await this.findRaw(QUOTE_OUTPUT_PROFILE_KEY)) || {});
+  }
+
+  async saveQuoteOutputProfile(profile: QuoteOutputProfileDto) {
+    const existing = await this.getQuoteOutputProfile();
+    const normalized = normalizeQuoteOutputProfile({
+      ...existing,
+      ...profile,
+      logoAsset: existing.logoAsset,
+      signatureAsset: existing.signatureAsset,
+    });
+    await this.upsert(QUOTE_OUTPUT_PROFILE_KEY, normalized);
+    return normalized;
+  }
+
+  async saveQuoteOutputAsset(kind: QuoteBrandAssetKind, file?: UploadedBrandAsset) {
+    this.assertBrandKind(kind);
+    this.validateBrandAsset(file);
+    const existing = await this.getQuoteOutputProfile();
+    const originalName = normalizeUploadedFilename(file!.originalname).slice(0, 255);
+    const extension = path.extname(originalName).toLowerCase();
+    const storedName = `${kind}-${randomUUID().replace(/-/g, '').slice(0, 24)}${extension}`;
+    const target = this.resolveQuoteAssetPath(storedName);
+    await fs.mkdir(this.quoteBrandAssetRoot, { recursive: true });
+    await fs.writeFile(target, file!.buffer!);
+
+    const asset = {
+      storedName,
+      originalName,
+      mimeType: (file!.mimetype || extensionToMime(extension)).slice(0, 160),
+      size: file!.size,
+      updatedAt: new Date().toISOString(),
+    };
+    const assetKey = kind === 'logo' ? 'logoAsset' : 'signatureAsset';
+    const oldStoredName = existing[assetKey]?.storedName;
+    try {
+      const profile = normalizeQuoteOutputProfile({ ...existing, [assetKey]: asset });
+      await this.upsert(QUOTE_OUTPUT_PROFILE_KEY, profile);
+      if (oldStoredName && oldStoredName !== storedName) {
+        await fs.unlink(this.resolveQuoteAssetPath(oldStoredName)).catch(() => undefined);
+      }
+      return profile;
+    } catch (error) {
+      await fs.unlink(target).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async getQuoteOutputAsset(kind: QuoteBrandAssetKind) {
+    this.assertBrandKind(kind);
+    const profile = await this.getQuoteOutputProfile();
+    const asset = kind === 'logo' ? profile.logoAsset : profile.signatureAsset;
+    if (!asset) throw new NotFoundException('报价品牌素材未配置');
+    const filePath = this.resolveQuoteAssetPath(asset.storedName);
+    try {
+      await fs.access(filePath);
+    } catch {
+      throw new NotFoundException('报价品牌素材文件不存在');
+    }
+    return { asset, filePath };
+  }
+
   async getOrCreateUnsubscribeSecret() {
     const stored = await this.findRaw('unsubscribe_secret');
     if (stored?.valueEncrypted) return this.crypto.decrypt(stored.valueEncrypted);
@@ -470,6 +556,40 @@ export class SettingsService {
     }
   }
 
+  private get quoteBrandAssetRoot() {
+    return path.resolve(
+      this.configService?.get<string>('QUOTE_BRAND_ASSET_DIR') ||
+        process.env.QUOTE_BRAND_ASSET_DIR ||
+        path.join(process.cwd(), 'storage', 'quote-output-assets'),
+    );
+  }
+
+  private assertBrandKind(kind: string): asserts kind is QuoteBrandAssetKind {
+    if (kind !== 'logo' && kind !== 'signature') {
+      throw new BadRequestException('报价品牌素材类型无效');
+    }
+  }
+
+  private validateBrandAsset(file?: UploadedBrandAsset) {
+    if (!file?.buffer?.length) throw new BadRequestException('请选择需要上传的图片');
+    if (file.size <= 0 || file.size > MAX_BRAND_ASSET_SIZE) {
+      throw new BadRequestException('图片大小必须在 5MB 以内');
+    }
+    const extension = path.extname(normalizeUploadedFilename(file.originalname)).toLowerCase();
+    if (!BRAND_ASSET_EXTENSIONS.has(extension)) {
+      throw new BadRequestException('报价 Logo 和签名仅支持 PNG、JPG 或 JPEG');
+    }
+  }
+
+  private resolveQuoteAssetPath(storedName: string) {
+    if (path.basename(storedName) !== storedName) throw new BadRequestException('报价品牌素材路径无效');
+    const resolved = path.resolve(this.quoteBrandAssetRoot, storedName);
+    if (!resolved.startsWith(`${this.quoteBrandAssetRoot}${path.sep}`)) {
+      throw new BadRequestException('报价品牌素材路径无效');
+    }
+    return resolved;
+  }
+
   private formatImapError(error: any) {
     const message = String(error?.response || error?.message || error || '').trim();
     if (/auth|login|password|credential|535|534|invalid/i.test(message)) {
@@ -483,4 +603,19 @@ export class SettingsService {
     }
     return message || 'IMAP 连接测试失败';
   }
+}
+
+function normalizeUploadedFilename(value: string) {
+  const original = path.basename(String(value || ''));
+  if (!original || Array.from(original).some((character) => character.charCodeAt(0) > 255)) {
+    return original;
+  }
+  const decoded = Buffer.from(original, 'latin1').toString('utf8');
+  if (decoded.includes('\uFFFD')) return original;
+  const roundTrip = Buffer.from(decoded, 'utf8').toString('latin1');
+  return /[\u0080-\u00ff]/.test(original) && roundTrip === original ? decoded : original;
+}
+
+function extensionToMime(extension: string) {
+  return extension === '.png' ? 'image/png' : 'image/jpeg';
 }

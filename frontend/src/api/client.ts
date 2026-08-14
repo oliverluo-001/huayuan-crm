@@ -20,6 +20,8 @@ import type {
   ProductSpecification,
   ProductVariant,
   Quote,
+  QuoteOutputLanguage,
+  QuoteOutputProfile,
   QuoteTermTemplate,
   CreateQuoteInput,
   UpdateQuoteInput,
@@ -77,6 +79,8 @@ export type {
   ProductSpecification,
   ProductVariant,
   Quote,
+  QuoteOutputLanguage,
+  QuoteOutputProfile,
   QuoteTermTemplate,
   CreateQuoteInput,
   UpdateQuoteInput,
@@ -694,6 +698,21 @@ export async function deleteQuote(id: string): Promise<void> {
   await api(`/api/quotes/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+export function quoteOutputUrl(
+  id: string,
+  format: "preview" | "pdf" | "excel" | "package" | "html",
+  language: QuoteOutputLanguage = "bilingual",
+): string {
+  const encodedId = encodeURIComponent(id);
+  const suffix =
+    format === "preview"
+      ? "preview"
+      : format === "html"
+        ? "export"
+        : `export/${format}`;
+  return `/api/quotes/${encodedId}/${suffix}?language=${encodeURIComponent(language)}`;
+}
+
 export async function getQuoteTermTemplates(): Promise<QuoteTermTemplate[]> {
   const result = await api<{ templates: QuoteTermTemplate[] }>(
     "/api/quote-term-templates",
@@ -996,6 +1015,39 @@ export async function testSmtpProfile(): Promise<{
   message?: string;
 }> {
   return api("/api/settings/smtp-profile/test", { method: "POST" });
+}
+
+export async function getQuoteOutputProfile(): Promise<QuoteOutputProfile> {
+  return api<QuoteOutputProfile>("/api/settings/quote-output-profile");
+}
+
+export async function saveQuoteOutputProfile(
+  data: Partial<QuoteOutputProfile>,
+): Promise<QuoteOutputProfile> {
+  return api<QuoteOutputProfile>("/api/settings/quote-output-profile", {
+    method: "POST",
+    body: data,
+  });
+}
+
+export async function uploadQuoteOutputAsset(
+  kind: "logo" | "signature",
+  file: File,
+): Promise<QuoteOutputProfile> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return api<QuoteOutputProfile>(
+    `/api/settings/quote-output-profile/assets/${kind}`,
+    { method: "POST", rawBody: formData },
+  );
+}
+
+export function quoteOutputAssetUrl(
+  kind: "logo" | "signature",
+  version?: string,
+): string {
+  const query = version ? `?v=${encodeURIComponent(version)}` : "";
+  return `/api/settings/quote-output-profile/assets/${kind}${query}`;
 }
 
 // IMAP Profile API

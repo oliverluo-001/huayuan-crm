@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Download, Edit, Plus, Save, Trash2 } from "lucide-react";
+import { Archive, Eye, FileSpreadsheet, FileText, Edit, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   createQuote,
@@ -20,12 +20,14 @@ import {
   getProducts,
   getQuotes,
   getQuoteTermTemplates,
+  quoteOutputUrl,
   updateQuote,
   updateQuoteTermTemplate,
   type Customer,
   type Opportunity,
   type Product,
   type Quote,
+  type QuoteOutputLanguage,
   type QuoteTermTemplate,
 } from "@/api/client";
 import { canManageCrmData } from "@/auth/permissions";
@@ -92,6 +94,11 @@ interface QuoteForm {
 
 const INCOTERMS = ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"];
 const CURRENCIES = ["USD", "EUR", "CNY", "GBP", "JPY", "AUD", "CAD", "SGD", "THB"];
+const OUTPUT_LANGUAGES: Array<{ value: QuoteOutputLanguage; label: string }> = [
+  { value: "bilingual", label: "中英双语" },
+  { value: "zh", label: "中文" },
+  { value: "en", label: "English" },
+];
 
 const createKey = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const createLine = (): QuoteLineForm => ({
@@ -160,6 +167,7 @@ export function QuotesPage() {
   const [lines, setLines] = useState<QuoteLineForm[]>([createLine()]);
   const [charges, setCharges] = useState<AdditionalChargeForm[]>([]);
   const [templateName, setTemplateName] = useState("");
+  const [outputLanguage, setOutputLanguage] = useState<QuoteOutputLanguage>("bilingual");
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -648,9 +656,23 @@ export function QuotesPage() {
       </Card>}
 
       <Card>
-        <CardHeader><CardTitle className="flex items-center justify-between">报价单列表<Badge variant="secondary">{quotes.length}</Badge></CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="flex flex-wrap items-center justify-between gap-3">
+            <span className="flex items-center gap-2">报价单列表<Badge variant="secondary">{quotes.length}</Badge></span>
+            <label className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
+              输出语言
+              <select
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                value={outputLanguage}
+                onChange={(event) => setOutputLanguage(event.target.value as QuoteOutputLanguage)}
+              >
+                {OUTPUT_LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+          </CardTitle>
+        </CardHeader>
         <Table>
-          <TableHeader><TableRow><TableHead>报价号</TableHead><TableHead>客户</TableHead><TableHead>产品</TableHead><TableHead>贸易术语</TableHead><TableHead>金额</TableHead><TableHead>参考折算</TableHead><TableHead>状态</TableHead><TableHead className="w-28">操作</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>报价号</TableHead><TableHead>客户</TableHead><TableHead>产品</TableHead><TableHead>贸易术语</TableHead><TableHead>金额</TableHead><TableHead>参考折算</TableHead><TableHead>状态</TableHead><TableHead className="w-44">操作</TableHead></TableRow></TableHeader>
           <TableBody>
             {isLoading ? [...Array(5)].map((_, index) => <TableRow key={index}>{[...Array(8)].map((__, cell) => <TableCell key={cell}><Skeleton className="h-4 w-20" /></TableCell>)}</TableRow>)
               : quotes.length === 0 ? <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">暂无报价单</TableCell></TableRow>
@@ -662,7 +684,7 @@ export function QuotesPage() {
                   <TableCell>{quote.currency} {Number(quote.total).toFixed(2)}</TableCell>
                   <TableCell>{quote.baseCurrency || "CNY"} {roundMoney(Number(quote.total || 0) * Number(quote.exchangeRate || 1)).toFixed(2)}</TableCell>
                   <TableCell><Badge variant={quote.status === "accepted" ? "default" : "secondary"}>{QUOTE_STATUSES.find((item) => item.value === quote.status)?.label || "未知状态"}</Badge></TableCell>
-                  <TableCell><div className="flex gap-1">{canManage && <Button variant="ghost" size="sm" title="编辑报价单" onClick={() => handleEdit(quote)}><Edit className="h-4 w-4" /></Button>}<a href={`/api/quotes/${quote.id}/export`} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="sm" title="导出报价单"><Download className="h-4 w-4" /></Button></a>{canManage && <Button variant="ghost" size="sm" className="text-destructive" title="删除报价单" onClick={() => handleDelete(quote.id)}><Trash2 className="h-4 w-4" /></Button>}</div></TableCell>
+                  <TableCell><div className="flex flex-wrap gap-1">{canManage && <Button variant="ghost" size="sm" title="编辑报价单" onClick={() => handleEdit(quote)}><Edit className="h-4 w-4" /></Button>}<a href={quoteOutputUrl(quote.id, "preview", outputLanguage)} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="sm" title="打印预览"><Eye className="h-4 w-4" /></Button></a><a href={quoteOutputUrl(quote.id, "pdf", outputLanguage)}><Button variant="ghost" size="sm" title="下载 PDF"><FileText className="h-4 w-4" /></Button></a><a href={quoteOutputUrl(quote.id, "excel", outputLanguage)}><Button variant="ghost" size="sm" title="下载 Excel"><FileSpreadsheet className="h-4 w-4" /></Button></a><a href={quoteOutputUrl(quote.id, "package", outputLanguage)}><Button variant="ghost" size="sm" title="打包报价附件"><Archive className="h-4 w-4" /></Button></a>{canManage && <Button variant="ghost" size="sm" className="text-destructive" title="删除报价单" onClick={() => handleDelete(quote.id)}><Trash2 className="h-4 w-4" /></Button>}</div></TableCell>
                 </TableRow>)}
           </TableBody>
         </Table>

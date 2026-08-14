@@ -49,65 +49,70 @@ describe('CustomersController sales authorization scope', () => {
 
 describe('QuotesController export', () => {
   it('exports a complete, escaped quotation document', async () => {
+    const quote = {
+      id: 1,
+      customerId: 7,
+      quoteNo: 'Q-20260809-001',
+      currency: 'USD',
+      baseCurrency: 'CNY',
+      exchangeRate: 7.2,
+      subtotal: 100,
+      freight: 20,
+      additionalCharges: [{ label: 'Documentation', amount: 5 }],
+      additionalFeeTotal: 5,
+      taxRate: 0,
+      taxAmount: 0,
+      total: 125,
+      incoterm: 'CIF',
+      originPort: 'Shanghai',
+      destinationPort: 'Bangkok',
+      deliveryTime: '30 days',
+      paymentTerms: '30% deposit',
+      packagingTerms: 'Wooden cases',
+      warrantyTerms: '12 months',
+      notes: '中文备注',
+      notesEn: 'English notes',
+      terms: '中文条款',
+      termsEn: 'English terms',
+      createdAt: '2026-08-09',
+      items: [{ productName: '<Flange>', quantity: 1, unit: 'pcs', unitPrice: 100, subtotal: 100 }],
+    };
+    const customer = {
+      id: 7,
+      company: 'Buyer & Co',
+      contact: 'Amy',
+      email: 'amy@example.com',
+      region: 'Thailand',
+    };
     const customersService = {
       assertQuoteOwner: jest.fn(),
-      findQuote: jest.fn().mockResolvedValue({
-        id: 1,
-        customerId: 7,
-        quoteNo: 'Q-20260809-001',
-        currency: 'USD',
-        baseCurrency: 'CNY',
-        exchangeRate: 7.2,
-        subtotal: 100,
-        freight: 20,
-        additionalCharges: [{ label: 'Documentation', amount: 5 }],
-        additionalFeeTotal: 5,
-        taxRate: 0,
-        taxAmount: 0,
-        total: 125,
-        incoterm: 'CIF',
-        originPort: 'Shanghai',
-        destinationPort: 'Bangkok',
-        deliveryTime: '30 days',
-        paymentTerms: '30% deposit',
-        packagingTerms: 'Wooden cases',
-        warrantyTerms: '12 months',
-        notes: '中文备注',
-        notesEn: 'English notes',
-        terms: '中文条款',
-        termsEn: 'English terms',
-        createdAt: '2026-08-09',
-        items: [{ productName: '<Flange>', quantity: 1, unit: 'pcs', unitPrice: 100, subtotal: 100 }],
-      }),
-      findOne: jest.fn().mockResolvedValue({
-        id: 7,
-        company: 'Buyer & Co',
-        contact: 'Amy',
-        email: 'amy@example.com',
-        region: 'Thailand',
-      }),
+      findQuote: jest.fn().mockResolvedValue(quote),
+      findOne: jest.fn().mockResolvedValue(customer),
+    };
+    const quoteOutputService = {
+      renderHtml: jest.fn().mockResolvedValue('<html>quotation</html>'),
+      quoteFileBase: jest.fn().mockReturnValue('quotation-Q-20260809-001.html'),
     };
     const response = {
       setHeader: jest.fn(),
       end: jest.fn(),
     };
-    const controller = new QuotesController(customersService as any);
+    const controller = new QuotesController(customersService as any, quoteOutputService as any);
 
-    await controller.export('1', response as any, { sub: 1, role: 'admin' });
+    await controller.export('1', 'bilingual', response as any, { sub: 1, role: 'admin' });
 
     expect(customersService.assertQuoteOwner).toHaveBeenCalledWith(1, undefined);
+    expect(quoteOutputService.renderHtml).toHaveBeenCalledWith(
+      quote,
+      customer,
+      'bilingual',
+      'download',
+    );
     expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'text/html; charset=utf-8');
     expect(response.setHeader).toHaveBeenCalledWith(
       'Content-Disposition',
       'attachment; filename="quotation-Q-20260809-001.html"',
     );
-    const html = response.end.mock.calls[0][0];
-    expect(html).toContain('报价单 / QUOTATION');
-    expect(html).toContain('Buyer &amp; Co');
-    expect(html).toContain('&lt;Flange&gt;');
-    expect(html).toContain('USD 125.00');
-    expect(html).toContain('Documentation');
-    expect(html).toContain('Shanghai → Bangkok');
-    expect(html).toContain('Company Terms');
+    expect(response.end).toHaveBeenCalledWith('<html>quotation</html>');
   });
 });

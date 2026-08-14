@@ -6,7 +6,12 @@ import {
   Body,
   Param,
   HttpCode,
+  Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Response } from 'express';
 import { SettingsService } from './settings.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -16,6 +21,7 @@ import {
   SmtpProfileDto,
   ImapProfileDto,
   EmailPolicyDto,
+  QuoteOutputProfileDto,
 } from './dto';
 
 interface RequestUser { sub: number; role: 'admin' | 'sales' | 'viewer' }
@@ -126,6 +132,37 @@ export class SettingsController {
   @Post('email-policy')
   saveEmailPolicy(@Body() policy: EmailPolicyDto) {
     return this.settingsService.saveEmailPolicy(policy);
+  }
+
+  // ==================== Quote Output Profile ====================
+
+  @Get('quote-output-profile')
+  @Roles('admin', 'sales')
+  getQuoteOutputProfile() {
+    return this.settingsService.getQuoteOutputProfile();
+  }
+
+  @Post('quote-output-profile')
+  saveQuoteOutputProfile(@Body() profile: QuoteOutputProfileDto) {
+    return this.settingsService.saveQuoteOutputProfile(profile);
+  }
+
+  @Post('quote-output-profile/assets/:kind')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  saveQuoteOutputAsset(@Param('kind') kind: 'logo' | 'signature', @UploadedFile() file: any) {
+    return this.settingsService.saveQuoteOutputAsset(kind, file);
+  }
+
+  @Get('quote-output-profile/assets/:kind')
+  @Roles('admin', 'sales')
+  async getQuoteOutputAsset(
+    @Param('kind') kind: 'logo' | 'signature',
+    @Res() response: Response,
+  ) {
+    const { asset, filePath } = await this.settingsService.getQuoteOutputAsset(kind);
+    response.type(asset.mimeType || 'application/octet-stream');
+    response.setHeader('Cache-Control', 'private, max-age=60');
+    return response.sendFile(filePath);
   }
 
   @Get(':key')

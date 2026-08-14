@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsNumber } from 'class-validator';
+import { IsEnum, IsString, IsOptional, IsBoolean, IsNumber } from 'class-validator';
 
 export class CreateSettingDto {
   @IsString()
@@ -203,4 +203,94 @@ export class EmailPolicyDto {
   @IsOptional()
   @IsBoolean()
   allowWeekends?: boolean;
+}
+
+export class QuoteOutputProfileDto {
+  @IsOptional()
+  @IsString()
+  companyNameZh?: string;
+
+  @IsOptional()
+  @IsString()
+  companyNameEn?: string;
+
+  @IsOptional()
+  @IsString()
+  taglineZh?: string;
+
+  @IsOptional()
+  @IsString()
+  taglineEn?: string;
+
+  @IsOptional()
+  @IsString()
+  addressZh?: string;
+
+  @IsOptional()
+  @IsString()
+  addressEn?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  website?: string;
+
+  @IsOptional()
+  @IsString()
+  contactName?: string;
+
+  @IsOptional()
+  @IsString()
+  contactTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  contactPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  contactEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @IsOptional()
+  @IsString()
+  bankAddress?: string;
+
+  @IsOptional()
+  @IsString()
+  accountName?: string;
+
+  @IsOptional()
+  @IsString()
+  accountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  swiftCode?: string;
+
+  @IsOptional()
+  @IsString()
+  beneficiaryAddress?: string;
+
+  @IsOptional()
+  @IsEnum(["zh", "en", "bilingual"])
+  defaultLanguage?: "zh" | "en" | "bilingual";
+
+  @IsOptional()
+  @IsString()
+  footerZh?: string;
+
+  @IsOptional()
+  @IsString()
+  footerEn?: string;
 }
