@@ -21,6 +21,7 @@ import {
   SamplesController,
 } from "../src/modules/customers/customers.controller";
 import { CustomersService } from "../src/modules/customers/customers.service";
+import { QuoteOutputService } from "../src/modules/customers/quote-output.service";
 import { CustomerAttachmentsController } from "../src/modules/attachments/customer-attachments.controller";
 import { CustomerAttachmentsService } from "../src/modules/attachments/customer-attachments.service";
 import { ProductsController } from "../src/modules/products/products.controller";
@@ -180,6 +181,24 @@ describe("core CRM workflows (HTTP e2e)", () => {
   let emailService: EmailService;
   let attachmentsService: CustomerAttachmentsService;
   let attachmentRoot: string;
+  const quoteOutputService = {
+    renderHtml: jest.fn((quote: any, customer: any) =>
+      Promise.resolve(
+        `<html><body>${customer.company}${(quote.items || [])
+          .map((item: any) => item.productName)
+          .join("")}</body></html>`,
+      ),
+    ),
+    createPdfBuffer: jest.fn().mockResolvedValue(Buffer.from("%PDF")),
+    createExcelBuffer: jest.fn().mockResolvedValue(Buffer.from("xlsx")),
+    createQuotePackage: jest.fn().mockResolvedValue({
+      buffer: Buffer.from("PK"),
+      fileName: "quotation.zip",
+    }),
+    quoteFileBase: jest.fn((_quote: any, extension?: string) =>
+      extension ? `quotation.${extension}` : "quotation",
+    ),
+  };
 
   const customerRepository = new MemoryRepository<any>();
   const contactRepository = new MemoryRepository<any>();
@@ -278,6 +297,7 @@ describe("core CRM workflows (HTTP e2e)", () => {
         { provide: LeadsService, useValue: leadsService },
         { provide: EmailService, useValue: emailService },
         { provide: CustomerAttachmentsService, useValue: attachmentsService },
+        { provide: QuoteOutputService, useValue: quoteOutputService },
         { provide: APP_GUARD, useClass: TestAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
       ],
@@ -299,7 +319,7 @@ describe("core CRM workflows (HTTP e2e)", () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    await app?.close();
     await fs.rm(attachmentRoot, { recursive: true, force: true });
   });
   beforeEach(() => {
