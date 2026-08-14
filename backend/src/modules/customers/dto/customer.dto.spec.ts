@@ -6,6 +6,7 @@ import {
   CreateCustomerDto,
   CreateOpportunityDto,
   CreateQuoteDto,
+  CreateQuoteTermTemplateDto,
   UpdateContactDto,
   UpdateOpportunityDto,
   UpdateQuoteDto,
@@ -39,8 +40,23 @@ describe('CRM API contracts', () => {
   it('accepts nested quote items and rejects the retired flat product contract', async () => {
     const valid = await contractErrors(CreateQuoteDto, {
       customerId: 1,
+      currency: 'USD',
+      baseCurrency: 'CNY',
+      exchangeRate: 7.2,
       freight: 20,
+      additionalCharges: [{ label: 'Documentation', amount: 15 }],
       taxRate: 13,
+      incoterm: 'CIF',
+      originPort: 'Shanghai',
+      destinationPort: 'Bangkok',
+      deliveryTime: '30 days after deposit',
+      paymentTerms: '30% deposit, 70% before shipment',
+      packagingTerms: 'Fumigated wooden cases',
+      warrantyTerms: '12 months after shipment',
+      notes: '中文备注',
+      notesEn: 'English notes',
+      terms: '中文条款',
+      termsEn: 'English terms',
       items: [
         {
           productName: 'Weld Neck Flange',
@@ -60,6 +76,17 @@ describe('CRM API contracts', () => {
       items: [],
     });
     expect(retired.length).toBeGreaterThan(0);
+  });
+
+  it('validates reusable bilingual company quote terms', async () => {
+    await expect(
+      contractErrors(CreateQuoteTermTemplateDto, {
+        name: 'Standard export terms',
+        contentZh: '中文公司条款',
+        contentEn: 'English company terms',
+        isDefault: true,
+      }),
+    ).resolves.toHaveLength(0);
   });
 
   it('accepts the P1.2 customer and contact master-data contract', async () => {

@@ -447,6 +447,21 @@ export interface QuoteItem {
   subtotal: number;
 }
 
+export interface QuoteAdditionalCharge {
+  label: string;
+  amount: number;
+}
+
+export interface QuoteTermTemplate {
+  id: string;
+  name: string;
+  contentZh?: string;
+  contentEn?: string;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Quote {
   id: string;
   quoteId?: string;
@@ -456,14 +471,28 @@ export interface Quote {
   opportunityId?: string;
   items: QuoteItem[];
   currency: string;
+  baseCurrency: string;
+  exchangeRate: number;
   freight: number;
+  additionalCharges: QuoteAdditionalCharge[];
+  additionalFeeTotal: number;
   taxRate: number;
   subtotal: number;
   taxAmount: number;
   total: number;
   validUntil?: string;
+  incoterm?: string;
+  originPort?: string;
+  destinationPort?: string;
+  deliveryTime?: string;
+  paymentTerms?: string;
+  packagingTerms?: string;
+  warrantyTerms?: string;
   notes?: string;
+  notesEn?: string;
   terms?: string;
+  termsEn?: string;
+  termTemplateId?: string;
   status: "draft" | "sent" | "accepted" | "rejected" | "expired";
   createdAt: string;
   updatedAt: string;
@@ -550,11 +579,24 @@ export interface CreateQuoteInput {
   quoteNo?: string;
   status?: Quote["status"];
   currency?: string;
+  baseCurrency?: string;
+  exchangeRate?: number;
   freight?: number;
+  additionalCharges?: QuoteAdditionalCharge[];
   taxRate?: number;
   validUntil?: string;
+  incoterm?: string;
+  originPort?: string;
+  destinationPort?: string;
+  deliveryTime?: string;
+  paymentTerms?: string;
+  packagingTerms?: string;
+  warrantyTerms?: string;
   notes?: string;
+  notesEn?: string;
   terms?: string;
+  termsEn?: string;
+  termTemplateId?: number | null;
   items: QuoteItemInput[];
 }
 

@@ -5,6 +5,7 @@ import {
   migrateOpportunityManagement,
   migrateP1AcceptanceHardening,
   migrateP21ProductCatalog,
+  migrateP22QuoteEditor,
   normalizeLegacyUserEmails,
 } from './migrate';
 
@@ -247,6 +248,44 @@ describe('database migration', () => {
     expect(columns.get('products')?.size).toBe(14);
     expect(columns.get('quote_items')?.size).toBe(13);
     expect(indexes.get('products')).toEqual(new Set(['uq_products_sku', 'idx_products_category_active']));
+  });
+
+  it('can repeat the P2.2 quote editor migration without duplicating columns or indexes', async () => {
+    const columns = new Map<string, Set<string>>();
+    const indexes = new Map<string, Set<string>>();
+    const statements: string[] = [];
+    const query = jest.fn(async (rawSql: string, params: any[] = []) => {
+      const sql = String(rawSql);
+      statements.push(sql);
+      if (sql.includes('information_schema.TABLES')) return [[{ TABLE_NAME: params[1] }], []];
+      if (sql.includes('information_schema.COLUMNS')) {
+        return [[...(columns.get(String(params[1]))?.has(String(params[2])) ? [{ COLUMN_NAME: params[2] }] : [])], []];
+      }
+      if (sql.includes('information_schema.STATISTICS')) {
+        return [[...(indexes.get(String(params[1]))?.has(String(params[2])) ? [{ INDEX_NAME: params[2] }] : [])], []];
+      }
+      const table = sql.match(/ALTER TABLE `([^`]+)`/)?.[1];
+      const column = sql.match(/ADD COLUMN `([^`]+)`/)?.[1];
+      if (table && column) {
+        if (!columns.has(table)) columns.set(table, new Set());
+        columns.get(table)!.add(column);
+      }
+      const index = sql.match(/ADD (?:UNIQUE )?INDEX `([^`]+)`/)?.[1];
+      if (table && index) {
+        if (!indexes.has(table)) indexes.set(table, new Set());
+        indexes.get(table)!.add(index);
+      }
+      return [{ affectedRows: 1 }, []];
+    });
+
+    await migrateP22QuoteEditor({ query } as any);
+    await migrateP22QuoteEditor({ query } as any);
+
+    expect(columns.get('quotes')?.size).toBe(14);
+    expect(indexes.get('quotes')).toEqual(new Set(['idx_quotes_term_template']));
+    expect(statements.some((sql) => sql.includes('CREATE TABLE IF NOT EXISTS quote_term_templates'))).toBe(true);
+    expect(statements.some((sql) => sql.includes('JSON_ARRAY()'))).toBe(true);
+    expect(statements.filter((sql) => sql.includes('ADD COLUMN'))).toHaveLength(14);
   });
 
   it('can repeat the email delivery monitoring migration and backfills send counts', async () => {

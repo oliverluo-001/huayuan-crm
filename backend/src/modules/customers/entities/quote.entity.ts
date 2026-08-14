@@ -7,13 +7,20 @@ import {
   ManyToOne,
   JoinColumn,
   OneToMany,
+  Index,
 } from 'typeorm';
 import { Customer } from '../../customers/entities/customer.entity';
 import { decimalNumberTransformer } from '../../../common/database/decimal-number.transformer';
 
 export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
 
+export interface QuoteAdditionalCharge {
+  label: string;
+  amount: number;
+}
+
 @Entity('quotes')
+@Index('idx_quotes_term_template', ['termTemplateId'])
 export class Quote {
   @PrimaryGeneratedColumn('increment', { type: 'int' })
   id: number;
@@ -36,11 +43,23 @@ export class Quote {
   @Column({ type: 'varchar', length: 10, default: 'USD' })
   currency: string;
 
+  @Column({ name: 'base_currency', type: 'varchar', length: 10, default: 'CNY' })
+  baseCurrency: string;
+
+  @Column({ name: 'exchange_rate', type: 'decimal', precision: 18, scale: 6, default: 1, transformer: decimalNumberTransformer })
+  exchangeRate: number;
+
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   subtotal: number;
 
   @Column({ type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
   freight: number;
+
+  @Column({ name: 'additional_charges', type: 'json', nullable: true })
+  additionalCharges: QuoteAdditionalCharge[] | null;
+
+  @Column({ name: 'additional_fee_total', type: 'decimal', precision: 15, scale: 2, default: 0, transformer: decimalNumberTransformer })
+  additionalFeeTotal: number;
 
   @Column({ name: 'tax_rate', type: 'decimal', precision: 5, scale: 2, default: 0, transformer: decimalNumberTransformer })
   taxRate: number;
@@ -54,11 +73,41 @@ export class Quote {
   @Column({ name: 'valid_until', type: 'date', nullable: true })
   validUntil: Date;
 
+  @Column({ type: 'varchar', length: 20, default: '' })
+  incoterm: string;
+
+  @Column({ name: 'origin_port', type: 'varchar', length: 120, default: '' })
+  originPort: string;
+
+  @Column({ name: 'destination_port', type: 'varchar', length: 120, default: '' })
+  destinationPort: string;
+
+  @Column({ name: 'delivery_time', type: 'varchar', length: 255, default: '' })
+  deliveryTime: string;
+
+  @Column({ name: 'payment_terms', type: 'text', nullable: true })
+  paymentTerms: string | null;
+
+  @Column({ name: 'packaging_terms', type: 'text', nullable: true })
+  packagingTerms: string | null;
+
+  @Column({ name: 'warranty_terms', type: 'text', nullable: true })
+  warrantyTerms: string | null;
+
   @Column({ type: 'text', nullable: true })
   notes: string;
 
+  @Column({ name: 'notes_en', type: 'text', nullable: true })
+  notesEn: string | null;
+
   @Column({ type: 'text', nullable: true })
   terms: string;
+
+  @Column({ name: 'terms_en', type: 'text', nullable: true })
+  termsEn: string | null;
+
+  @Column({ name: 'term_template_id', type: 'int', nullable: true })
+  termTemplateId: number | null;
 
   @ManyToOne(() => Customer, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'customer_id' })
@@ -154,4 +203,28 @@ export class QuoteItem {
   @ManyToOne(() => Quote, { onDelete: 'CASCADE', orphanedRowAction: 'delete' })
   @JoinColumn({ name: 'quote_id' })
   quote: Quote;
+}
+
+@Entity('quote_term_templates')
+export class QuoteTermTemplate {
+  @PrimaryGeneratedColumn('increment', { type: 'int' })
+  id: number;
+
+  @Column({ type: 'varchar', length: 120, unique: true })
+  name: string;
+
+  @Column({ name: 'content_zh', type: 'text', nullable: true })
+  contentZh: string | null;
+
+  @Column({ name: 'content_en', type: 'text', nullable: true })
+  contentEn: string | null;
+
+  @Column({ name: 'is_default', type: 'boolean', default: false })
+  isDefault: boolean;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
 }

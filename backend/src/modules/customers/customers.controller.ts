@@ -31,6 +31,8 @@ import {
   UpdateOpportunityDto,
   CreateQuoteDto,
   UpdateQuoteDto,
+  CreateQuoteTermTemplateDto,
+  UpdateQuoteTermTemplateDto,
   CreateSampleDto,
   UpdateSampleDto,
   CreateCustomerViewDto,
@@ -570,6 +572,38 @@ export class QuotesController {
   }
 }
 
+@Controller('quote-term-templates')
+export class QuoteTermTemplatesController {
+  constructor(private readonly customersService: CustomersService) {}
+
+  @Get()
+  async findAll() {
+    const templates = await this.customersService.findQuoteTermTemplates();
+    return { templates };
+  }
+
+  @Post()
+  @Roles('admin')
+  create(@Body() createDto: CreateQuoteTermTemplateDto) {
+    return this.customersService.createQuoteTermTemplate(createDto);
+  }
+
+  @Put(':id')
+  @Roles('admin')
+  update(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateQuoteTermTemplateDto,
+  ) {
+    return this.customersService.updateQuoteTermTemplate(+id, updateDto);
+  }
+
+  @Delete(':id')
+  @Roles('admin')
+  remove(@Param('id') id: string) {
+    return this.customersService.deleteQuoteTermTemplate(+id);
+  }
+}
+
 @Controller('samples')
 export class SamplesController {
   constructor(private readonly customersService: CustomersService) {}
@@ -787,8 +821,12 @@ function fmtDate(value: any): string {
 
 function renderQuoteExport(quote: any, customer: any): string {
   const currency = escapeHtml(quote.currency || 'USD');
+  const baseCurrency = escapeHtml(quote.baseCurrency || 'CNY');
   const amt = (v: any) => amount(v, currency);
   const date = fmtDate;
+  const additionalCharges = Array.isArray(quote.additionalCharges)
+    ? quote.additionalCharges
+    : [];
   const itemDescription = (item: any) => {
     if (item.description) return item.description;
     const specification = [
@@ -814,10 +852,26 @@ function renderQuoteExport(quote: any, customer: any): string {
       <td>${escapeHtml(item.unit || 'pcs')}</td>
       <td class="number">${Number(item.quantity || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
       <td class="number">${amt(item.unitPrice)}</td>
+      <td class="number">${Number(item.discount || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}%</td>
       <td class="number">${amt(item.subtotal || item.unitPrice * item.quantity)}</td>
     </tr>`,
     )
     .join('');
+
+  const chargeRows = additionalCharges
+    .map(
+      (charge: any) =>
+        `<div><span>${escapeHtml(charge.label || '附加费用')}</span><strong>${amt(charge.amount)}</strong></div>`,
+    )
+    .join('');
+  const convertedTotal =
+    Number(quote.exchangeRate || 0) > 0
+      ? Number(quote.total || 0) * Number(quote.exchangeRate)
+      : 0;
+  const tradeRoute = [quote.originPort, quote.destinationPort]
+    .filter(Boolean)
+    .map(escapeHtml)
+    .join(' → ');
 
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>报价单 ${escapeHtml(quote.quoteNo)}</title>
@@ -828,13 +882,15 @@ function renderQuoteExport(quote: any, customer: any): string {
   .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 40px; margin: 30px 0; } .meta strong { display: block; color: #68748b; font-size: 12px; } .meta span { display: block; min-height: 22px; font-size: 15px; }
   table { width: 100%; border-collapse: collapse; margin-top: 24px; } th { background: #eff5ff; text-align: left; color: #173967; } th, td { border: 1px solid #dce3ee; padding: 11px 10px; vertical-align: top; } .number { text-align: right; white-space: nowrap; } .muted { color: #68748b; font-size: 12px; }
   .totals { width: 350px; margin: 22px 0 0 auto; } .totals div { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #e5e9f0; } .totals .grand { padding-top: 12px; border-bottom: 0; font-size: 18px; font-weight: 700; color: #0b5bd3; }
-  .notes { margin-top: 38px; padding-top: 14px; border-top: 1px solid #dce3ee; white-space: pre-wrap; } footer { margin-top: 60px; color: #7b8495; font-size: 12px; }
+  .commercial { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #dce3ee; } .commercial div { padding: 10px 12px; border-bottom: 1px solid #e5e9f0; } .commercial div:nth-child(odd) { border-right: 1px solid #e5e9f0; } .commercial strong { display: block; color: #68748b; font-size: 12px; } .commercial span { white-space: pre-wrap; }
+  .notes { margin-top: 28px; padding-top: 14px; border-top: 1px solid #dce3ee; white-space: pre-wrap; } .notes h3 { margin: 0 0 8px; font-size: 14px; color: #173967; } footer { margin-top: 60px; color: #7b8495; font-size: 12px; }
   @media print { body { background: #fff; } main { width: auto; min-height: auto; margin: 0; padding: 18mm; } }
 </style></head><body><main>
-<header><div><h1>报价单 / QUOTATION</h1><h2>外贸 CRM 本地报价文件</h2></div><div class="quote-no"><span>报价编号</span><strong>${escapeHtml(quote.quoteNo)}</strong></div></header>
-<section class="meta"><div><strong>客户 / Customer</strong><span>${escapeHtml(customer?.company || '-')}</span></div><div><strong>客户地区 / Region</strong><span>${escapeHtml(customer?.region || '-')}</span></div><div><strong>联系人 / Contact</strong><span>${escapeHtml(customer?.contact || '-')}</span></div><div><strong>联系邮箱 / Email</strong><span>${escapeHtml(customer?.email || '-')}</span></div><div><strong>报价日期 / Date</strong><span>${date(quote.createdAt)}</span></div><div><strong>有效期至 / Valid Until</strong><span>${date(quote.validUntil)}</span></div></section>
-<table><thead><tr><th>#</th><th>产品 / Description</th><th>单位</th><th class="number">数量</th><th class="number">单价</th><th class="number">金额</th></tr></thead><tbody>${rows}</tbody></table>
-<section class="totals"><div><span>商品小计</span><strong>${amt(quote.subtotal)}</strong></div><div><span>运费</span><strong>${amt(quote.freight)}</strong></div><div><span>增值税 (${Number(quote.taxRate || 0).toLocaleString('en-US')}%)</span><strong>${amt(quote.taxAmount)}</strong></div><div class="grand"><span>报价总额</span><strong>${amt(quote.total)}</strong></div></section>
-<section class="notes"><strong>备注 / Notes</strong><br>${escapeHtml(quote.notes || '-')}</section><footer>本报价单由外贸 CRM 自动生成。打开文件后可使用浏览器"打印"保存为 PDF。</footer>
+<header><div><h1>报价单 / QUOTATION</h1><h2>HUAYUAN 外贸客户关系管理系统</h2></div><div class="quote-no"><span>报价编号 / Quote No.</span><strong>${escapeHtml(quote.quoteNo)}</strong></div></header>
+<section class="meta"><div><strong>客户 / Customer</strong><span>${escapeHtml(customer?.company || '-')}</span></div><div><strong>客户地区 / Region</strong><span>${escapeHtml(customer?.region || '-')}</span></div><div><strong>联系人 / Contact</strong><span>${escapeHtml(customer?.contact || '-')}</span></div><div><strong>联系邮箱 / Email</strong><span>${escapeHtml(customer?.email || '-')}</span></div><div><strong>报价日期 / Date</strong><span>${date(quote.createdAt)}</span></div><div><strong>有效期至 / Valid Until</strong><span>${date(quote.validUntil)}</span></div><div><strong>贸易术语 / Incoterms</strong><span>${escapeHtml(quote.incoterm || '-')}</span></div><div><strong>运输路线 / Route</strong><span>${tradeRoute || '-'}</span></div></section>
+<table><thead><tr><th>#</th><th>产品 / Description</th><th>单位</th><th class="number">数量</th><th class="number">单价</th><th class="number">折扣</th><th class="number">金额</th></tr></thead><tbody>${rows}</tbody></table>
+<section class="totals"><div><span>商品小计 / Subtotal</span><strong>${amt(quote.subtotal)}</strong></div><div><span>运费 / Freight</span><strong>${amt(quote.freight)}</strong></div>${chargeRows}<div><span>税费 / Tax (${Number(quote.taxRate || 0).toLocaleString('en-US')}%)</span><strong>${amt(quote.taxAmount)}</strong></div><div class="grand"><span>报价总额 / Total</span><strong>${amt(quote.total)}</strong></div>${Number(quote.exchangeRate || 0) > 0 ? `<div><span>参考折算（1 ${currency} = ${Number(quote.exchangeRate).toLocaleString('en-US', { maximumFractionDigits: 6 })} ${baseCurrency}）</span><strong>${amount(convertedTotal, baseCurrency)}</strong></div>` : ''}</section>
+<section class="commercial"><div><strong>交期 / Delivery</strong><span>${escapeHtml(quote.deliveryTime || '-')}</span></div><div><strong>付款条件 / Payment</strong><span>${escapeHtml(quote.paymentTerms || '-')}</span></div><div><strong>包装 / Packaging</strong><span>${escapeHtml(quote.packagingTerms || '-')}</span></div><div><strong>质保 / Warranty</strong><span>${escapeHtml(quote.warrantyTerms || '-')}</span></div></section>
+${quote.notes ? `<section class="notes"><h3>中文备注</h3>${escapeHtml(quote.notes)}</section>` : ''}${quote.notesEn ? `<section class="notes"><h3>English Notes</h3>${escapeHtml(quote.notesEn)}</section>` : ''}${quote.terms ? `<section class="notes"><h3>公司条款</h3>${escapeHtml(quote.terms)}</section>` : ''}${quote.termsEn ? `<section class="notes"><h3>Company Terms</h3>${escapeHtml(quote.termsEn)}</section>` : ''}<footer>本报价单由 HUAYUAN CRM 自动生成。可使用浏览器“打印”功能保存为 PDF。</footer>
 </main></body></html>`;
 }

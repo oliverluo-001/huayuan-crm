@@ -823,6 +823,15 @@ export class QuoteItemDto {
   subtotal?: number;
 }
 
+export class QuoteAdditionalChargeDto {
+  @IsString()
+  label: string;
+
+  @IsNumber()
+  @Min(0)
+  amount: number;
+}
+
 export class CreateQuoteDto {
   @IsNumber()
   customerId: number;
@@ -843,6 +852,15 @@ export class CreateQuoteDto {
   @IsOptional()
   currency?: string;
 
+  @IsString()
+  @IsOptional()
+  baseCurrency?: string;
+
+  @IsNumber()
+  @Min(0.000001)
+  @IsOptional()
+  exchangeRate?: number;
+
   @IsNumber()
   @Min(0)
   @IsOptional()
@@ -852,6 +870,12 @@ export class CreateQuoteDto {
   @Min(0)
   @IsOptional()
   freight?: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QuoteAdditionalChargeDto)
+  @IsOptional()
+  additionalCharges?: QuoteAdditionalChargeDto[];
 
   @IsNumber()
   @Min(0)
@@ -874,11 +898,51 @@ export class CreateQuoteDto {
 
   @IsString()
   @IsOptional()
+  incoterm?: string;
+
+  @IsString()
+  @IsOptional()
+  originPort?: string;
+
+  @IsString()
+  @IsOptional()
+  destinationPort?: string;
+
+  @IsString()
+  @IsOptional()
+  deliveryTime?: string;
+
+  @IsString()
+  @IsOptional()
+  paymentTerms?: string;
+
+  @IsString()
+  @IsOptional()
+  packagingTerms?: string;
+
+  @IsString()
+  @IsOptional()
+  warrantyTerms?: string;
+
+  @IsString()
+  @IsOptional()
   notes?: string;
 
   @IsString()
   @IsOptional()
+  notesEn?: string;
+
+  @IsString()
+  @IsOptional()
   terms?: string;
+
+  @IsString()
+  @IsOptional()
+  termsEn?: string;
+
+  @IsNumber()
+  @IsOptional()
+  termTemplateId?: number | null;
 
   @IsArray()
   @ArrayMinSize(1)
@@ -908,10 +972,25 @@ export class UpdateQuoteDto {
   @IsOptional()
   currency?: string;
 
+  @IsString()
+  @IsOptional()
+  baseCurrency?: string;
+
+  @IsNumber()
+  @Min(0.000001)
+  @IsOptional()
+  exchangeRate?: number;
+
   @IsNumber()
   @Min(0)
   @IsOptional()
   freight?: number;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => QuoteAdditionalChargeDto)
+  @IsOptional()
+  additionalCharges?: QuoteAdditionalChargeDto[];
 
   @IsNumber()
   @Min(0)
@@ -924,11 +1003,51 @@ export class UpdateQuoteDto {
 
   @IsString()
   @IsOptional()
+  incoterm?: string;
+
+  @IsString()
+  @IsOptional()
+  originPort?: string;
+
+  @IsString()
+  @IsOptional()
+  destinationPort?: string;
+
+  @IsString()
+  @IsOptional()
+  deliveryTime?: string;
+
+  @IsString()
+  @IsOptional()
+  paymentTerms?: string;
+
+  @IsString()
+  @IsOptional()
+  packagingTerms?: string;
+
+  @IsString()
+  @IsOptional()
+  warrantyTerms?: string;
+
+  @IsString()
+  @IsOptional()
   notes?: string;
 
   @IsString()
   @IsOptional()
+  notesEn?: string;
+
+  @IsString()
+  @IsOptional()
   terms?: string;
+
+  @IsString()
+  @IsOptional()
+  termsEn?: string;
+
+  @IsNumber()
+  @IsOptional()
+  termTemplateId?: number | null;
 
   @IsArray()
   @ArrayMinSize(1)
@@ -936,6 +1055,41 @@ export class UpdateQuoteDto {
   @Type(() => QuoteItemDto)
   @IsOptional()
   items?: QuoteItemDto[];
+}
+
+export class CreateQuoteTermTemplateDto {
+  @IsString()
+  name: string;
+
+  @IsString()
+  @IsOptional()
+  contentZh?: string;
+
+  @IsString()
+  @IsOptional()
+  contentEn?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isDefault?: boolean;
+}
+
+export class UpdateQuoteTermTemplateDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  contentZh?: string;
+
+  @IsString()
+  @IsOptional()
+  contentEn?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isDefault?: boolean;
 }
 
 export class CreateSampleDto {

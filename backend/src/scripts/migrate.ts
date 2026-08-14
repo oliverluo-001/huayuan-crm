@@ -112,6 +112,7 @@ export async function runDatabaseMigrations() {
     }
     await migrateP1AcceptanceHardening(connection);
     await migrateP21ProductCatalog(connection);
+    await migrateP22QuoteEditor(connection);
     await migrateEmailDeliveryMonitoring(connection);
     return { p03Report };
   } finally {
@@ -845,6 +846,52 @@ export async function migrateP21ProductCatalog(connection: Connection) {
     await addColumnToTable(connection, "quote_items", "inspection_requirements", "TEXT NULL");
     await addColumnToTable(connection, "quote_items", "certificate_requirements", "TEXT NULL");
   }
+
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+  console.log(`Applied migration: ${id}`);
+}
+
+export async function migrateP22QuoteEditor(connection: Connection) {
+  const id = "20260814_p22_quote_editor";
+  if (!(await tableExists(connection, "quotes"))) return;
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS quote_term_templates (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(120) NOT NULL,
+      content_zh TEXT NULL,
+      content_en TEXT NULL,
+      is_default TINYINT(1) NOT NULL DEFAULT 0,
+      created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uq_quote_term_templates_name (name),
+      KEY idx_quote_term_templates_default (is_default, name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await addColumnToTable(connection, "quotes", "base_currency", "VARCHAR(10) NOT NULL DEFAULT 'CNY'");
+  await addColumnToTable(connection, "quotes", "exchange_rate", "DECIMAL(18,6) NOT NULL DEFAULT 1");
+  await addColumnToTable(connection, "quotes", "additional_charges", "JSON NULL");
+  await addColumnToTable(connection, "quotes", "additional_fee_total", "DECIMAL(15,2) NOT NULL DEFAULT 0");
+  await addColumnToTable(connection, "quotes", "incoterm", "VARCHAR(20) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, "quotes", "origin_port", "VARCHAR(120) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, "quotes", "destination_port", "VARCHAR(120) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, "quotes", "delivery_time", "VARCHAR(255) NOT NULL DEFAULT ''");
+  await addColumnToTable(connection, "quotes", "payment_terms", "TEXT NULL");
+  await addColumnToTable(connection, "quotes", "packaging_terms", "TEXT NULL");
+  await addColumnToTable(connection, "quotes", "warranty_terms", "TEXT NULL");
+  await addColumnToTable(connection, "quotes", "notes_en", "TEXT NULL");
+  await addColumnToTable(connection, "quotes", "terms_en", "TEXT NULL");
+  await addColumnToTable(connection, "quotes", "term_template_id", "INT NULL");
+  await addIndexIfMissing(connection, "quotes", "idx_quotes_term_template", "term_template_id");
+
+  await connection.query(`
+    UPDATE quotes
+    SET base_currency = CASE WHEN TRIM(COALESCE(base_currency, '')) = '' THEN 'CNY' ELSE UPPER(base_currency) END,
+        exchange_rate = CASE WHEN COALESCE(exchange_rate, 0) <= 0 THEN 1 ELSE exchange_rate END,
+        additional_charges = COALESCE(additional_charges, JSON_ARRAY()),
+        additional_fee_total = COALESCE(additional_fee_total, 0)
+  `);
 
   await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
   console.log(`Applied migration: ${id}`);

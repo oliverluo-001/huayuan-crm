@@ -37,6 +37,7 @@ async function createCurrentSchema() {
 async function seedLegacyFixture(connection: Connection) {
   await connection.query("DROP TABLE IF EXISTS product_assets");
   await connection.query("DROP TABLE IF EXISTS product_variants");
+  await connection.query("DROP TABLE IF EXISTS quote_term_templates");
   await connection.query("ALTER TABLE products DROP INDEX idx_products_category_active");
   await connection.query(`
     ALTER TABLE products
@@ -70,6 +71,24 @@ async function seedLegacyFixture(connection: Connection) {
       DROP COLUMN packaging,
       DROP COLUMN inspection_requirements,
       DROP COLUMN certificate_requirements
+  `);
+  await connection.query("ALTER TABLE quotes DROP INDEX idx_quotes_term_template");
+  await connection.query(`
+    ALTER TABLE quotes
+      DROP COLUMN base_currency,
+      DROP COLUMN exchange_rate,
+      DROP COLUMN additional_charges,
+      DROP COLUMN additional_fee_total,
+      DROP COLUMN incoterm,
+      DROP COLUMN origin_port,
+      DROP COLUMN destination_port,
+      DROP COLUMN delivery_time,
+      DROP COLUMN payment_terms,
+      DROP COLUMN packaging_terms,
+      DROP COLUMN warranty_terms,
+      DROP COLUMN notes_en,
+      DROP COLUMN terms_en,
+      DROP COLUMN term_template_id
   `);
   await connection.query(`
     ALTER TABLE customers
@@ -197,6 +216,20 @@ async function verifyMigratedData(connection: Connection) {
     [database],
   );
   assert.equal(Number(quoteSnapshotColumns[0].count), 13, "P2.1 报价规格快照字段不完整");
+
+  const [quoteEditorTables] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'quote_term_templates'`,
+    [database],
+  );
+  assert.equal(Number(quoteEditorTables[0].count), 1, "P2.2 公司条款模板表未创建");
+  const [quoteEditorColumns] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'quotes'
+       AND COLUMN_NAME IN ('base_currency','exchange_rate','additional_charges','additional_fee_total','incoterm','origin_port','destination_port','delivery_time','payment_terms','packaging_terms','warranty_terms','notes_en','terms_en','term_template_id')`,
+    [database],
+  );
+  assert.equal(Number(quoteEditorColumns[0].count), 14, "P2.2 报价编辑器字段迁移不完整");
 
   const [samples] = await connection.query<CheckRow[]>(
     "SELECT status, sent_at FROM samples WHERE sample_id = 'SAMPLE-CI-1'",

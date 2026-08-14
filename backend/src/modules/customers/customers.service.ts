@@ -14,6 +14,7 @@ import {
   Opportunity,
   OpportunityStageHistory,
   Quote,
+  QuoteTermTemplate,
   Sample,
   Tag,
   CustomerView,
@@ -33,6 +34,8 @@ import {
   UpdateOpportunityDto,
   CreateQuoteDto,
   UpdateQuoteDto,
+  CreateQuoteTermTemplateDto,
+  UpdateQuoteTermTemplateDto,
   CreateSampleDto,
   UpdateSampleDto,
   CreateCustomerViewDto,
@@ -83,6 +86,8 @@ export class CustomersService {
     private emailLogRepository: Repository<EmailLog>,
     @InjectRepository(OpportunityStageHistory)
     private opportunityStageHistoryRepository?: Repository<OpportunityStageHistory>,
+    @InjectRepository(QuoteTermTemplate)
+    private quoteTermTemplateRepository?: Repository<QuoteTermTemplate>,
   ) {}
 
   // ==================== Customer CRUD ====================
@@ -1453,6 +1458,9 @@ export class CustomersService {
     if (!createQuoteDto.items || createQuoteDto.items.length === 0) {
       throw new BadRequestException("请至少添加一个报价产品");
     }
+    if (createQuoteDto.termTemplateId) {
+      await this.assertQuoteTermTemplateExists(createQuoteDto.termTemplateId);
+    }
 
     const {
       items,
@@ -1465,9 +1473,13 @@ export class CustomersService {
       items,
       quoteFields.freight,
       quoteFields.taxRate,
+      quoteFields.additionalCharges,
     );
     const quote = this.quoteRepository.create({
       ...quoteFields,
+      currency: this.normalizeCurrency(quoteFields.currency, "USD"),
+      baseCurrency: this.normalizeCurrency(quoteFields.baseCurrency, "CNY"),
+      exchangeRate: Number(quoteFields.exchangeRate || 1),
       ...calculated,
       quoteId: this.generateId("quote"),
       quoteNo: createQuoteDto.quoteNo || (await this.generateQuoteNo()),
@@ -1488,8 +1500,14 @@ export class CustomersService {
     ) {
       await this.findOne(updateQuoteDto.customerId);
     }
+    if (updateQuoteDto.termTemplateId) {
+      await this.assertQuoteTermTemplateExists(updateQuoteDto.termTemplateId);
+    }
     const { items, ...quoteFields } = updateQuoteDto;
     Object.assign(quote, quoteFields);
+    quote.currency = this.normalizeCurrency(quote.currency, "USD");
+    quote.baseCurrency = this.normalizeCurrency(quote.baseCurrency, "CNY");
+    quote.exchangeRate = Number(quote.exchangeRate || 1);
     const sourceItems = items
       ? items.map((item, index) => ({ ...quote.items[index], ...item }))
       : quote.items;
@@ -1497,6 +1515,7 @@ export class CustomersService {
       sourceItems as any,
       quote.freight,
       quote.taxRate,
+      quote.additionalCharges || [],
     );
     Object.assign(quote, calculated);
     return this.quoteRepository.save(quote);
@@ -1506,6 +1525,7 @@ export class CustomersService {
     items: CreateQuoteDto["items"],
     freight = 0,
     taxRate = 0,
+    additionalCharges: CreateQuoteDto["additionalCharges"] = [],
   ) {
     const calculatedItems = items.map((item) => {
       const quantity = Number(item.quantity ?? 1);
@@ -1521,15 +1541,37 @@ export class CustomersService {
     );
     const normalizedFreight = this.roundMoney(Number(freight || 0));
     const normalizedTaxRate = Number(taxRate || 0);
+    const normalizedCharges = (additionalCharges || []).map((charge) => ({
+      label: String(charge.label || "").trim(),
+      amount: this.roundMoney(Number(charge.amount || 0)),
+    }));
+    if (normalizedCharges.length > 20) {
+      throw new BadRequestException("附加费用最多允许 20 项");
+    }
+    if (normalizedCharges.some((charge) => !charge.label)) {
+      throw new BadRequestException("请填写每项附加费用的名称");
+    }
+    const additionalFeeTotal = this.roundMoney(
+      normalizedCharges.reduce((sum, charge) => sum + charge.amount, 0),
+    );
     const taxAmount = this.roundMoney((subtotal * normalizedTaxRate) / 100);
     return {
       items: calculatedItems,
       subtotal,
       freight: normalizedFreight,
+      additionalCharges: normalizedCharges,
+      additionalFeeTotal,
       taxRate: normalizedTaxRate,
       taxAmount,
-      total: this.roundMoney(subtotal + normalizedFreight + taxAmount),
+      total: this.roundMoney(
+        subtotal + normalizedFreight + additionalFeeTotal + taxAmount,
+      ),
     };
+  }
+
+  private normalizeCurrency(value: string | undefined | null, fallback: string) {
+    const normalized = String(value || fallback).trim().toUpperCase();
+    return normalized.slice(0, 10) || fallback;
   }
 
   private roundMoney(value: number) {
@@ -1540,6 +1582,106 @@ export class CustomersService {
     const result = await this.quoteRepository.delete(id);
     if (result.affected === 0) throw new NotFoundException("报价不存在");
     return { deleted: true };
+  }
+
+  async findQuoteTermTemplates() {
+    const repository = this.requireQuoteTermTemplateRepository();
+    return repository.find({
+      order: { isDefault: "DESC", name: "ASC" },
+    });
+  }
+
+  async createQuoteTermTemplate(createDto: CreateQuoteTermTemplateDto) {
+    const repository = this.requireQuoteTermTemplateRepository();
+    const payload = this.normalizeQuoteTermTemplate(createDto);
+    if (payload.isDefault) await this.clearDefaultQuoteTermTemplate();
+    try {
+      return await repository.save(repository.create(payload));
+    } catch (error: any) {
+      if (error?.code === "ER_DUP_ENTRY") {
+        throw new BadRequestException("公司条款模板名称已存在");
+      }
+      throw error;
+    }
+  }
+
+  async updateQuoteTermTemplate(
+    id: number,
+    updateDto: UpdateQuoteTermTemplateDto,
+  ) {
+    const repository = this.requireQuoteTermTemplateRepository();
+    const template = await repository.findOne({ where: { id } });
+    if (!template) throw new NotFoundException("公司条款模板不存在");
+    const payload = this.normalizeQuoteTermTemplate({
+      name: updateDto.name ?? template.name,
+      contentZh: updateDto.contentZh ?? template.contentZh ?? "",
+      contentEn: updateDto.contentEn ?? template.contentEn ?? "",
+      isDefault: updateDto.isDefault ?? template.isDefault,
+    });
+    if (payload.isDefault) await this.clearDefaultQuoteTermTemplate(id);
+    Object.assign(template, payload);
+    try {
+      return await repository.save(template);
+    } catch (error: any) {
+      if (error?.code === "ER_DUP_ENTRY") {
+        throw new BadRequestException("公司条款模板名称已存在");
+      }
+      throw error;
+    }
+  }
+
+  async deleteQuoteTermTemplate(id: number) {
+    const repository = this.requireQuoteTermTemplateRepository();
+    if (!(await repository.exist({ where: { id } }))) {
+      throw new NotFoundException("公司条款模板不存在");
+    }
+    await this.quoteRepository.update(
+      { termTemplateId: id } as any,
+      { termTemplateId: null } as any,
+    );
+    await repository.delete(id);
+    return { deleted: true };
+  }
+
+  private normalizeQuoteTermTemplate(data: CreateQuoteTermTemplateDto) {
+    const name = String(data.name || "").trim();
+    const contentZh = String(data.contentZh || "").trim();
+    const contentEn = String(data.contentEn || "").trim();
+    if (!name) throw new BadRequestException("请填写公司条款模板名称");
+    if (!contentZh && !contentEn) {
+      throw new BadRequestException("公司条款模板至少需要填写中文或英文内容");
+    }
+    return {
+      name: name.slice(0, 120),
+      contentZh,
+      contentEn,
+      isDefault: Boolean(data.isDefault),
+    };
+  }
+
+  private requireQuoteTermTemplateRepository() {
+    if (!this.quoteTermTemplateRepository) {
+      throw new BadRequestException("公司条款模板功能尚未初始化");
+    }
+    return this.quoteTermTemplateRepository;
+  }
+
+  private async assertQuoteTermTemplateExists(id: number) {
+    const repository = this.requireQuoteTermTemplateRepository();
+    if (!(await repository.exist({ where: { id } }))) {
+      throw new BadRequestException("选择的公司条款模板不存在");
+    }
+  }
+
+  private async clearDefaultQuoteTermTemplate(exceptId?: number) {
+    const repository = this.requireQuoteTermTemplateRepository();
+    const qb = repository
+      .createQueryBuilder()
+      .update(QuoteTermTemplate)
+      .set({ isDefault: false })
+      .where("is_default = :isDefault", { isDefault: true });
+    if (exceptId) qb.andWhere("id <> :exceptId", { exceptId });
+    await qb.execute();
   }
 
   private async generateQuoteNo(): Promise<string> {

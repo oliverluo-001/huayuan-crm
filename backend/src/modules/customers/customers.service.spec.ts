@@ -248,9 +248,98 @@ describe('CustomersService quote contracts', () => {
     });
   });
 
+  it('adds named additional charges while preserving the configured exchange rate', async () => {
+    const quote = await service.createQuote({
+      customerId: 1,
+      currency: 'usd',
+      baseCurrency: 'cny',
+      exchangeRate: 7.2,
+      freight: 30,
+      taxRate: 5,
+      additionalCharges: [
+        { label: 'Documentation', amount: 12.5 },
+        { label: 'Bank charge', amount: 7.5 },
+      ],
+      items: [
+        {
+          productName: 'Blind Flange',
+          quantity: 2,
+          unitPrice: 100,
+          discount: 0,
+        },
+      ],
+    });
+
+    expect(quote).toMatchObject({
+      currency: 'USD',
+      baseCurrency: 'CNY',
+      exchangeRate: 7.2,
+      subtotal: 200,
+      freight: 30,
+      additionalFeeTotal: 20,
+      taxAmount: 10,
+      total: 260,
+    });
+  });
+
   it('deletes an existing quote', async () => {
     await expect(service.deleteQuote(1)).resolves.toEqual({ deleted: true });
     expect(quoteRepository.delete).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('CustomersService quote term templates', () => {
+  const quoteRepository = { update: jest.fn() };
+  const templateRepository = {
+    find: jest.fn(),
+    findOne: jest.fn(),
+    create: jest.fn((value) => value),
+    save: jest.fn(async (value) => ({ id: 1, ...value })),
+    exist: jest.fn(),
+    delete: jest.fn(),
+  };
+  const service = new CustomersService(
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    quoteRepository as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    undefined,
+    templateRepository as any,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    templateRepository.exist.mockResolvedValue(true);
+    templateRepository.delete.mockResolvedValue({ affected: 1 });
+  });
+
+  it('creates a reusable bilingual company term template', async () => {
+    await expect(service.createQuoteTermTemplate({
+      name: ' Standard export terms ',
+      contentZh: ' 中文条款 ',
+      contentEn: ' English terms ',
+    })).resolves.toMatchObject({
+      id: 1,
+      name: 'Standard export terms',
+      contentZh: '中文条款',
+      contentEn: 'English terms',
+      isDefault: false,
+    });
+  });
+
+  it('clears quote references before deleting a term template', async () => {
+    await expect(service.deleteQuoteTermTemplate(3)).resolves.toEqual({ deleted: true });
+    expect(quoteRepository.update).toHaveBeenCalledWith(
+      { termTemplateId: 3 },
+      { termTemplateId: null },
+    );
+    expect(templateRepository.delete).toHaveBeenCalledWith(3);
   });
 });
 

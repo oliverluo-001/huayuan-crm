@@ -20,6 +20,7 @@ import type {
   ProductSpecification,
   ProductVariant,
   Quote,
+  QuoteTermTemplate,
   CreateQuoteInput,
   UpdateQuoteInput,
   Sample,
@@ -76,6 +77,7 @@ export type {
   ProductSpecification,
   ProductVariant,
   Quote,
+  QuoteTermTemplate,
   CreateQuoteInput,
   UpdateQuoteInput,
   Sample,
@@ -690,6 +692,46 @@ export async function updateQuote(
 
 export async function deleteQuote(id: string): Promise<void> {
   await api(`/api/quotes/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function getQuoteTermTemplates(): Promise<QuoteTermTemplate[]> {
+  const result = await api<{ templates: QuoteTermTemplate[] }>(
+    "/api/quote-term-templates",
+  );
+  return result.templates || [];
+}
+
+export async function createQuoteTermTemplate(data: {
+  name: string;
+  contentZh?: string;
+  contentEn?: string;
+  isDefault?: boolean;
+}): Promise<QuoteTermTemplate> {
+  return api<QuoteTermTemplate>("/api/quote-term-templates", {
+    method: "POST",
+    body: data,
+  });
+}
+
+export async function updateQuoteTermTemplate(
+  id: string,
+  data: {
+    name?: string;
+    contentZh?: string;
+    contentEn?: string;
+    isDefault?: boolean;
+  },
+): Promise<QuoteTermTemplate> {
+  return api<QuoteTermTemplate>(
+    `/api/quote-term-templates/${encodeURIComponent(id)}`,
+    { method: "PUT", body: data },
+  );
+}
+
+export async function deleteQuoteTermTemplate(id: string): Promise<void> {
+  await api(`/api/quote-term-templates/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 // Samples API
