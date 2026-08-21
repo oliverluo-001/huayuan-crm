@@ -233,7 +233,7 @@ export function LeadsPage() {
   const schedulePoll = useCallback(() => {
     if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     const hasRunning = tasks.some((t) => t.status === "running");
-    if (hasRunning && !isPollingRef.current) {
+    if (!isPollingRef.current) {
       isPollingRef.current = true;
       pollTimerRef.current = setTimeout(async () => {
         isPollingRef.current = false;
@@ -242,20 +242,20 @@ export function LeadsPage() {
           const previousActive = tasks.find((t) => t.id === activeTaskId);
           const refreshedActive = data.find((t) => t.id === activeTaskId);
           setTasks(data);
-          const activeStillRunning = data.find((t) => t.id === activeTaskId && t.status === "running");
           if (
             activeTaskId &&
-            (!activeStillRunning || Number(previousActive?.rawLeadCount || 0) !== Number(refreshedActive?.rawLeadCount || 0))
+            (
+              previousActive?.status !== refreshedActive?.status ||
+              Number(previousActive?.rawLeadCount || 0) !== Number(refreshedActive?.rawLeadCount || 0)
+            )
           ) {
             fetchLeadsForTask(activeTaskId);
           }
-          if (data.some((t) => t.status === "running")) {
-            schedulePoll();
-          }
+          schedulePoll();
         } catch {
           schedulePoll();
         }
-      }, 1800);
+      }, hasRunning ? 1800 : 10000);
     }
   }, [tasks, activeTaskId, fetchLeadsForTask]);
 
