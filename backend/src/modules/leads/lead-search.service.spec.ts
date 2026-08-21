@@ -29,7 +29,7 @@ describe('LeadSearchService', () => {
       .mockResolvedValueOnce({
         ok: true,
         text: async () => JSON.stringify({ organic: [
-          { title: 'Acme PVF Distribution', link: 'https://acme.example/contact', snippet: 'flange distributor and stockist' },
+          { title: 'Home | Acme PVF Distribution', link: 'https://acme.example/contact', snippet: 'flange distributor and stockist' },
           { title: 'Flange encyclopedia', link: 'https://en.wikipedia.org/wiki/Flange', snippet: 'flange information' },
         ] }),
       } as any)
@@ -50,6 +50,29 @@ describe('LeadSearchService', () => {
       email: 'sales@acme.example',
       sourceUrl: 'https://acme.example/contact',
       targetSegment: 'distributor',
+      fitScore: 100,
+      confidence: 'High',
     });
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({ num: 20 });
+  });
+
+  it('drops low-value training and editorial pages before crawling them', async () => {
+    settings.getSearchProfiles.mockResolvedValue([{ id: 'serper-1', name: 'Serper', apiKeySet: true }]);
+    settings.getSearchProfileCredentials.mockResolvedValue({
+      id: 'serper-1', provider: 'serper', apiUrl: 'https://google.serper.dev/search', apiKey: 'test-key',
+    });
+    const fetchMock = jest.spyOn(global, 'fetch' as any).mockResolvedValueOnce({
+      ok: true,
+      text: async () => JSON.stringify({ organic: [
+        { title: 'Flange distributor training course', link: 'https://training.example/course', snippet: 'Training for flange distributors' },
+      ] }),
+    } as any);
+
+    const result = await service.discover('flange distributor', ['flange'], ['distributor']);
+
+    expect(result.candidates).toEqual([]);
+    expect(result.crawled).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

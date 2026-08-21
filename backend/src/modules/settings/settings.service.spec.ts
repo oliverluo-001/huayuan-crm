@@ -101,4 +101,34 @@ describe('SettingsService personal mailbox profiles', () => {
       ]),
     );
   });
+
+  it('performs a real bounded search connection test', async () => {
+    rows.set('search_profiles', {
+      keyName: 'search_profiles',
+      keyValue: {
+        profiles: [{
+          id: 'serper-test',
+          name: 'Serper',
+          provider: 'serper',
+          apiUrl: 'https://google.serper.dev/search',
+          apiKey: 'test-key',
+        }],
+      },
+    });
+    const fetchMock = jest.spyOn(global, 'fetch' as any).mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ organic: [{ title: 'Buyer 1' }, { title: 'Buyer 2' }] }),
+    } as any);
+
+    await expect(service.testSearchProfile('serper-test')).resolves.toEqual({
+      ok: true,
+      message: '搜索连接成功，测试查询返回 2 条结果',
+      resultCount: 2,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://google.serper.dev/search',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    fetchMock.mockRestore();
+  });
 });

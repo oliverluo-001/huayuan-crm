@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, In, Brackets } from 'typeorm';
 import { resolveMx } from 'node:dns/promises';
@@ -41,7 +41,10 @@ const QUERY_TEMPLATES = [
 // ─── Service ─────────────────────────────────────────────────────────────
 
 @Injectable()
-export class LeadsService {
+export class LeadsService implements OnModuleInit {
+  private readonly logger = new Logger(LeadsService.name);
+  private readonly activeTaskIds = new Set<number>();
+
   constructor(
     @InjectRepository(Lead)
     private leadRepository: Repository<Lead>,
@@ -50,6 +53,18 @@ export class LeadsService {
     private leadSearchService: LeadSearchService,
     private customersService: CustomersService,
   ) {}
+
+  async onModuleInit() {
+    try {
+      const interruptedTasks = await this.leadTaskRepository.find({ where: { status: 'running' } });
+      for (const task of interruptedTasks) this.startTaskProcessor(task);
+      if (interruptedTasks.length) {
+        this.logger.log(`恢复 ${interruptedTasks.length} 个未完成的获客任务`);
+      }
+    } catch (error) {
+      this.logger.warn(`恢复获客任务失败：${this.errorMessage(error)}`);
+    }
+  }
 
   // ==================== Lead Associations ====================
 
@@ -107,14 +122,15 @@ export class LeadsService {
     const allNames = [...new Set([productName, ...aliases].map((item) => item.trim()).filter(Boolean))];
     const markets = regions.length ? regions : ['Global'];
     const buyerSegments = segments.length ? segments : ['importer', 'distributor', 'stockist'];
-    const exclusions = '-wikipedia -news -jobs -pdf';
+    const exclusions = '-wikipedia -news -jobs -careers -training -pdf -youtube -facebook';
 
     for (const name of allNames.slice(0, 5)) {
       for (const segment of buyerSegments.slice(0, 6)) {
         for (const region of markets.slice(0, 5)) {
           const market = region === 'Global' ? '' : ` "${region}"`;
-          queries.push(`"${name}" "${segment}"${market} "contact us" ${exclusions}`.trim());
-          queries.push(`"${name}" "${segment}"${market} (sales OR enquiry OR procurement) ${exclusions}`.trim());
+          queries.push(`"${name}" "${segment}"${market} (procurement OR purchasing OR RFQ) ${exclusions}`.trim());
+          queries.push(`"${name}" "${segment}"${market} ("contact us" OR enquiry OR sales) ${exclusions}`.trim());
+          queries.push(`"${name}"${market} (importer OR distributor OR stockist OR EPC) ${exclusions}`.trim());
         }
       }
     }
@@ -124,7 +140,7 @@ export class LeadsService {
         queries.push(`"${productName}" "${industry}" (supplier OR contractor OR distributor)${market} ${exclusions}`.trim());
       }
     }
-    return [...new Set(queries)].slice(0, 80);
+    return [...new Set(queries)].slice(0, 120);
   }
 
   // ==================== Leads ====================
@@ -268,7 +284,7 @@ export class LeadsService {
 
   async runTask(id: number, ownerId?: string) {
     const task = await this.findOneTask(id, ownerId);
-    if (task.status === 'running') {
+    if (this.activeTaskIds.has(task.id)) {
       return { started: false, message: '任务已经在自动运行中' };
     }
 
@@ -285,24 +301,24 @@ export class LeadsService {
     task.searchQueries = queries;
     task.status = 'running';
     task.cancelRequested = false;
+    const previousProgress = task.automationProgress || {};
     task.automationProgress = {
+      ...previousProgress,
       stage: 'starting',
       progress: 0,
       queryTotal: queries.length,
       queryIndex: task.automationCursor || 0,
       totalQueries: queries.length,
       searchedQueries: task.automationCursor || 0,
-      searchedResults: 0,
-      websitesCrawled: 0,
-      publicEmailsFound: 0,
+      searchedResults: Number(previousProgress.searchedResults || 0),
+      websitesCrawled: Number(previousProgress.websitesCrawled || 0),
+      publicEmailsFound: Number(previousProgress.publicEmailsFound || 0),
     };
     task.lastMessage = '任务已启动';
     await this.leadTaskRepository.save(task);
 
     // Start async processing (fire and forget)
-    this.processTaskAsync(task).catch((err) => {
-      console.error(`Task ${task.id} processing error:`, err.message);
-    });
+    this.startTaskProcessor(task);
 
     return { started: true };
   }
@@ -350,6 +366,10 @@ export class LeadsService {
     const totalQueries = queries.length;
     const cursor = task.automationCursor || 0;
 
+    let verifiedTargetReached = false;
+    let prequalifiedTotal = Number(task.automationProgress?.qualifiedCandidates || 0);
+    let lastValidatedPrequalified = Number(task.automationProgress?.lastValidatedCandidates || 0);
+
     for (let i = cursor; i < totalQueries; i++) {
       // Check if cancelled
       const current = await this.findOneTask(task.id);
@@ -376,7 +396,6 @@ export class LeadsService {
       };
 
       await this.leadTaskRepository.update(task.id, {
-        automationCursor: i + 1,
         automationProgress: progress as any,
         automationStage: 'searching',
         lastMessage: `正在搜索: ${query}`,
@@ -384,14 +403,16 @@ export class LeadsService {
 
       try {
         const productNames = [current.productName, ...(current.productAliases || [])].filter(Boolean);
-        const discovery = await this.leadSearchService.discover(
+        const discovery = await this.discoverWithRetry(
           query,
           productNames,
           current.targetSegments || current.buyerCompanyTypes || [],
         );
         const added = await this.saveDiscoveredCandidates(current, discovery.candidates);
+        prequalifiedTotal += added.qualified;
         const totalFound = await this.leadRepository.count({ where: { taskId: current.taskId } });
         await this.leadTaskRepository.update(task.id, {
+          automationCursor: i + 1,
           rawLeadCount: totalFound,
           leadCount: totalFound,
           automationProgress: {
@@ -401,21 +422,42 @@ export class LeadsService {
             websitesCrawled: Number(progress.websitesCrawled || 0) + discovery.crawled,
             publicEmailsFound: Number(progress.publicEmailsFound || 0) + added.withEmail,
             leadsFound: totalFound,
+            qualifiedCandidates: prequalifiedTotal,
+            lastValidatedCandidates: lastValidatedPrequalified,
           } as any,
           lastMessage: `已完成 ${i + 1}/${totalQueries} 个查询，累计发现 ${totalFound} 条企业线索`,
         });
-        if (totalFound >= Math.max(1, current.targetCount || 100)) break;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        await this.leadTaskRepository.update(task.id, {
-          automationProgress: { ...progress, searchedQueries: i + 1, lastError: message } as any,
-          lastMessage: `查询失败，继续下一条：${message}`,
-        });
-        if (/搜索 API|搜索数据源均不可用/.test(message)) {
+
+        const target = Math.max(1, current.targetCount || 100);
+        const validationStep = Math.max(1, Math.ceil(target * 0.1));
+        if (prequalifiedTotal >= target && prequalifiedTotal - lastValidatedPrequalified >= validationStep) {
+          const validation = await this.cleanLeads(task.id);
+          lastValidatedPrequalified = prequalifiedTotal;
+          verifiedTargetReached = Number(validation.summary.readyToEmail || 0) >= target;
           await this.leadTaskRepository.update(task.id, {
-            status: 'exhausted',
-            automationStage: 'failed',
-            lastMessage: message,
+            automationProgress: {
+              ...(await this.findOneTask(task.id)).automationProgress,
+              verifiedLeads: validation.summary.readyToEmail,
+              lastValidatedCandidates: lastValidatedPrequalified,
+            } as any,
+            lastMessage: verifiedTargetReached
+              ? `已达到目标：${validation.summary.readyToEmail} 条可直接联系线索`
+              : `已验证 ${validation.summary.readyToEmail} 条可直接联系线索，继续搜索`,
+          });
+          if (verifiedTargetReached) break;
+        }
+      } catch (error) {
+        const message = this.errorMessage(error);
+        const sourceUnavailable = /请先在设置中配置|搜索 API|搜索数据源均不可用|HTTP (?:401|403|429)|配额|quota|credit/i.test(message);
+        await this.leadTaskRepository.update(task.id, {
+          ...(sourceUnavailable ? {} : { automationCursor: i + 1 }),
+          automationProgress: { ...progress, searchedQueries: sourceUnavailable ? i : i + 1, lastError: message } as any,
+          lastMessage: sourceUnavailable ? `搜索源暂不可用，任务已暂停：${message}` : `查询失败，继续下一条：${message}`,
+        });
+        if (sourceUnavailable) {
+          await this.leadTaskRepository.update(task.id, {
+            status: 'paused',
+            automationStage: 'paused',
           });
           return;
         }
@@ -423,9 +465,11 @@ export class LeadsService {
     }
 
     // Mark as cleaning
+    const progressBeforeCleaning = (await this.findOneTask(task.id)).automationProgress || {};
     await this.leadTaskRepository.update(task.id, {
       automationStage: 'cleaning',
       automationProgress: {
+        ...progressBeforeCleaning,
         stage: 'cleaning',
         progress: 96,
         queryTotal: totalQueries,
@@ -436,12 +480,14 @@ export class LeadsService {
       lastMessage: '搜索完成，正在清洗数据…',
     });
 
-    await this.cleanLeads(task.id);
+    const finalValidation = await this.cleanLeads(task.id);
 
     // Mark as validating
+    const progressBeforeValidation = (await this.findOneTask(task.id)).automationProgress || {};
     await this.leadTaskRepository.update(task.id, {
       automationStage: 'validating',
       automationProgress: {
+        ...progressBeforeValidation,
         stage: 'validating',
         progress: 98,
         queryTotal: totalQueries,
@@ -455,24 +501,66 @@ export class LeadsService {
     // Mark as completed
     const finalTask = await this.findOneTask(task.id);
     const leadCount = await this.leadRepository.count({ where: { taskId: finalTask.taskId } });
+    const verifiedLeads = Number(finalValidation.summary.readyToEmail || 0);
+    const target = Math.max(1, finalTask.targetCount || 100);
+    const processedQueries = Number(finalTask.automationCursor || 0);
+    verifiedTargetReached ||= verifiedLeads >= target;
+    const queriesExhausted = processedQueries >= totalQueries;
+    const completed = verifiedTargetReached || (leadCount > 0 && !queriesExhausted);
     await this.leadTaskRepository.update(task.id, {
-      status: leadCount > 0 ? 'completed' : 'exhausted',
-      automationStage: leadCount > 0 ? 'completed' : 'failed',
-      automationCursor: totalQueries,
+      status: completed ? 'completed' : 'exhausted',
+      automationStage: 'completed',
       automationProgress: {
         stage: 'completed',
         progress: 100,
         queryTotal: totalQueries,
-        queryIndex: totalQueries,
+        queryIndex: processedQueries,
         totalQueries,
-        searchedQueries: totalQueries,
+        searchedQueries: processedQueries,
         searchedResults: Number(finalTask.automationProgress?.searchedResults || 0),
         websitesCrawled: Number(finalTask.automationProgress?.websitesCrawled || 0),
         publicEmailsFound: Number(finalTask.automationProgress?.publicEmailsFound || 0),
+        qualifiedCandidates: prequalifiedTotal,
+        verifiedLeads,
+        stopReason: verifiedTargetReached ? 'qualified_target_reached' : 'queries_exhausted',
       } as any,
-      cleanedLeadCount: leadCount,
-      lastMessage: `搜索完成，共发现 ${leadCount} 条线索`,
+      cleanedLeadCount: verifiedLeads,
+      lastMessage: verifiedTargetReached
+        ? `搜索完成，已达到目标：${verifiedLeads} 条可直接联系线索`
+        : `搜索策略已全部执行：发现 ${leadCount} 条企业线索，其中 ${verifiedLeads} 条可直接联系`,
     });
+  }
+
+  private startTaskProcessor(task: LeadTask) {
+    if (this.activeTaskIds.has(task.id)) return false;
+    this.activeTaskIds.add(task.id);
+    void this.processTaskAsync(task)
+      .catch(async (error) => {
+        const message = this.errorMessage(error);
+        this.logger.error(`获客任务 ${task.id} 中断：${message}`);
+        await this.leadTaskRepository.update(task.id, {
+          status: 'paused',
+          automationStage: 'paused',
+          lastMessage: `任务意外中断，进度已保存，可继续执行：${message}`,
+        }).catch(() => undefined);
+      })
+      .finally(() => this.activeTaskIds.delete(task.id));
+    return true;
+  }
+
+  private async discoverWithRetry(query: string, productNames: string[], segments: string[]) {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        return await this.leadSearchService.discover(query, productNames, segments);
+      } catch (error) {
+        lastError = error;
+        const message = this.errorMessage(error);
+        if (/请先在设置中配置|搜索数据源均不可用|HTTP (?:400|401|403|429)|配额|quota|credit/i.test(message)) throw error;
+        if (attempt < 3) await this.delay(attempt * 750);
+      }
+    }
+    throw lastError;
   }
 
   // ─── Task Leads ────────────────────────────────────────────────────────
@@ -575,7 +663,10 @@ export class LeadsService {
 
   async cleanLeads(taskId: number, ownerId?: string) {
     const task = await this.findOneTask(taskId, ownerId);
-    const leads = await this.leadRepository.find({ where: { taskId: task.taskId } });
+    const leads = await this.leadRepository.find({
+      where: { taskId: task.taskId },
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
 
     let readyToEmail = 0;
     let needsReview = 0;
@@ -586,6 +677,10 @@ export class LeadsService {
     const seenCompanies = new Set<string>();
 
     for (const lead of leads) {
+      if (lead.status === 'duplicate') {
+        duplicateCount++;
+        continue;
+      }
       const email = String(lead.email || '').trim().toLowerCase();
       const companyKey = `${this.normalizeCompany(lead.company)}|${String(lead.country || '').toLowerCase()}`;
       const duplicate = (email && seenEmails.has(email)) ||
@@ -605,7 +700,7 @@ export class LeadsService {
       }
 
       const validation = await this.validateLeadEmail(email);
-      const sourceReachable = lead.sourceHttpStatus >= 200 && lead.sourceHttpStatus <= 499;
+      const sourceReachable = lead.sourceHttpStatus >= 200 && lead.sourceHttpStatus < 400;
       const sourceHost = this.hostname(lead.sourceUrl || lead.website);
       const emailDomain = email.split('@')[1] || '';
       const domainMatch = Boolean(emailDomain && sourceHost &&
@@ -666,7 +761,7 @@ export class LeadsService {
 
     const total = leads.length;
     await this.leadTaskRepository.update(task.id, {
-      cleanedLeadCount: total,
+      cleanedLeadCount: readyToEmail,
       duplicateCount,
     });
 
@@ -789,6 +884,7 @@ export class LeadsService {
   private async saveDiscoveredCandidates(task: LeadTask, candidates: SearchCandidate[]) {
     let added = 0;
     let withEmail = 0;
+    let qualified = 0;
     for (const candidate of candidates) {
       const email = candidate.email.trim().toLowerCase();
       const existing = await this.leadRepository.findOne({
@@ -818,7 +914,9 @@ export class LeadsService {
         sourceHttpStatus: candidate.sourceHttpStatus,
         matchedProductKeyword: candidate.matchedProductKeyword,
         cleaningNotes: candidate.fitNote || '公开网页与产品及买家身份匹配',
-        confidence: email ? 'Medium' : 'Low',
+        leadScore: candidate.fitScore,
+        confidence: candidate.confidence,
+        leadTier: candidate.fitScore >= 75 ? 'high' : candidate.fitScore >= 55 ? 'medium' : 'review',
         recommendedAction: 'Needs Review',
         leadStatus: 'new',
         status: 'candidate',
@@ -827,8 +925,10 @@ export class LeadsService {
       await this.leadRepository.save(lead);
       added++;
       if (email) withEmail++;
+      const domainMismatch = candidate.gaps.some((gap) => gap.includes('邮箱域名与官网不一致'));
+      if (email && candidate.fitScore >= 70 && !domainMismatch) qualified++;
     }
-    return { added, withEmail };
+    return { added, withEmail, qualified };
   }
 
   private largeRegionFor(countryOrRegion: string) {
@@ -885,7 +985,15 @@ export class LeadsService {
   }
 
   private appendNote(existing: string, note: string) {
-    return [String(existing || '').trim(), note.trim()].filter(Boolean).join('；');
+    const parts = String(existing || '').split('；').map((item) => item.trim()).filter(Boolean);
+    for (const item of note.split('；').map((value) => value.trim()).filter(Boolean)) {
+      if (!parts.includes(item)) parts.push(item);
+    }
+    return parts.join('；');
+  }
+
+  private errorMessage(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
   }
 
   // ==================== Utils ====================

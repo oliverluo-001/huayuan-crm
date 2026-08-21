@@ -58,7 +58,7 @@ describe('LeadsService CRM conversion', () => {
       industries: ['Oil & Gas'],
     });
     expect(queries.some((query) => query.includes('"forged flanges"') && query.includes('"distributor"'))).toBe(true);
-    expect(queries.some((query) => query.includes('sales OR enquiry OR procurement'))).toBe(true);
+    expect(queries.some((query) => query.includes('procurement OR purchasing OR RFQ'))).toBe(true);
     expect(queries.some((query) => query.includes('"Oil & Gas"'))).toBe(true);
   });
 
@@ -89,5 +89,72 @@ describe('LeadsService CRM conversion', () => {
   it('hides tasks owned by another salesperson', async () => {
     taskRepository.findOne.mockResolvedValue({ ...task, ownerId: '8' });
     await expect(service.findOneTask(1, '7')).rejects.toThrow('任务不存在');
+  });
+
+  it('does not stop when raw results reach the target and continues until a verified contact is found', async () => {
+    const runtimeTask: any = {
+      id: 9,
+      taskId: 'task_quality',
+      productName: 'flange',
+      productAliases: [],
+      targetSegments: ['distributor'],
+      targetCount: 1,
+      searchQueries: ['query without email', 'query with verified email'],
+      automationCursor: 0,
+      automationProgress: {},
+      cancelRequested: false,
+      status: 'running',
+      ownerId: '7',
+    };
+    const savedLeads: any[] = [];
+    const runtimeLeadRepository = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((value) => value),
+      save: jest.fn(async (value) => { savedLeads.push(value); return value; }),
+      count: jest.fn(async () => savedLeads.length),
+    };
+    const runtimeTaskRepository = {
+      findOne: jest.fn(async () => runtimeTask),
+      update: jest.fn(async (_id, patch) => { Object.assign(runtimeTask, patch); return { affected: 1 }; }),
+    };
+    const candidate = (email: string) => ({
+      company: email ? 'Verified Buyer' : 'Buyer Without Email',
+      email,
+      website: email ? 'https://verified.example' : 'https://buyer.example',
+      sourceUrl: email ? 'https://verified.example/contact' : 'https://buyer.example',
+      sourceType: 'Company Website',
+      sourceName: 'Search API + public website',
+      sourceHttpStatus: 200,
+      business: 'flange distributor',
+      matchedProductKeyword: 'flange',
+      targetSegment: 'distributor',
+      fitNote: '产品和买家身份匹配',
+      fitScore: 90,
+      confidence: 'High' as const,
+      evidence: ['产品匹配'],
+      gaps: email ? [] : ['未发现公开邮箱'],
+      rawData: {},
+    });
+    const search = {
+      discover: jest.fn()
+        .mockResolvedValueOnce({ candidates: [candidate('')], searched: 20, crawled: 1 })
+        .mockResolvedValueOnce({ candidates: [candidate('sales@verified.example')], searched: 20, crawled: 1 }),
+    };
+    const runtimeService = new LeadsService(
+      runtimeLeadRepository as any,
+      runtimeTaskRepository as any,
+      search as any,
+      customers as any,
+    );
+    jest.spyOn(runtimeService, 'cleanLeads').mockResolvedValue({
+      summary: { readyToEmail: 1 },
+    } as any);
+
+    await (runtimeService as any).processTaskAsync(runtimeTask);
+
+    expect(search.discover).toHaveBeenCalledTimes(2);
+    expect(runtimeTask.automationCursor).toBe(2);
+    expect(runtimeTask.status).toBe('completed');
+    expect(runtimeTask.automationProgress.stopReason).toBe('qualified_target_reached');
   });
 });

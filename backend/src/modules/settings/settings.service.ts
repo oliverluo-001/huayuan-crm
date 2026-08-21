@@ -218,9 +218,46 @@ export class SettingsService {
   // ==================== Connection Tests ====================
 
   async testSearchProfile(id: string) {
-    const profile = await this.getSearchProfileCredentials(id);
+    const profile: StoredProfile = await this.getSearchProfileCredentials(id) as StoredProfile;
     if (!profile.apiKey) throw new BadRequestException('该搜索数据源未配置 API 密钥');
-    return { ok: true, message: '密钥已安全保存；真实搜索测试将在获客引擎恢复阶段启用' };
+    const provider = String(profile.provider || '').toLowerCase();
+    const apiUrl = String(profile.apiUrl || '').trim();
+    const query = 'industrial flange distributor';
+    try {
+      let response: Response;
+      if (provider === 'serper') {
+        response = await fetch(apiUrl.includes('serper.dev') ? apiUrl : 'https://google.serper.dev/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-API-KEY': profile.apiKey },
+          body: JSON.stringify({ q: query, num: 3 }),
+          signal: AbortSignal.timeout(15_000),
+        });
+      } else {
+        const url = new URL(apiUrl || (
+          provider === 'brave-search'
+            ? 'https://api.search.brave.com/res/v1/web/search'
+            : 'https://serpapi.com/search.json'
+        ));
+        url.searchParams.set('q', query);
+        if (provider === 'brave-search') url.searchParams.set('count', '3');
+        else url.searchParams.set('num', '3');
+        if (provider !== 'brave-search') url.searchParams.set(provider === 'serpapi' ? 'api_key' : 'key', profile.apiKey);
+        response = await fetch(url.toString(), {
+          headers: provider === 'brave-search'
+            ? { 'X-Subscription-Token': profile.apiKey, Accept: 'application/json' }
+            : undefined,
+          signal: AbortSignal.timeout(15_000),
+        });
+      }
+      const body = await response.text();
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${body.slice(0, 120)}`);
+      const data = JSON.parse(body);
+      const resultCount = (data.organic || data.organic_results || data.results || data.web?.results || []).length;
+      return { ok: true, message: `搜索连接成功，测试查询返回 ${resultCount} 条结果`, resultCount };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new BadRequestException(`搜索连接测试失败：${message}`);
+    }
   }
 
   async testAiProfile() {

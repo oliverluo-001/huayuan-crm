@@ -45,6 +45,7 @@ const AUTOMATION_STAGE_LABELS: Record<string, string> = {
   validating: "去重、验证与评分",
   completed: "已完成",
   cancelled: "已停止",
+  paused: "等待继续",
   failed: "执行失败",
 };
 
@@ -56,6 +57,7 @@ function automationProgressPercent(task: B2BLeadTask): number {
   const queryIndex = Math.max(0, Number(progress.searchedQueries ?? task.automationCursor) || 0);
   if (!task || ["completed", "exhausted", "cancelled", "failed"].includes(task.status) && !queryTotal) return 100;
   if (progress.stage === "validating" || progress.stage === "cleaning") return 96;
+  if (progress.stage === "completed") return 100;
   if (task.status === "completed" && queryIndex >= queryTotal && queryTotal > 0) return 100;
   return queryTotal ? Math.min(95, Math.round((queryIndex / queryTotal) * 100)) : task.status === "running" ? 3 : 0;
 }
@@ -70,7 +72,7 @@ function automationStageText(task: B2BLeadTask): string {
 
 function isLeadImportable(lead: B2BLead): boolean {
   if (!lead.company) return false;
-  if (!lead.website && !lead.source) return false;
+  if (!lead.website && !lead.sourceUrl && !lead.source) return false;
   if (lead.crmCustomerId) return false;
   if (lead.recommendedAction === "Remove" || lead.recommendedAction === "Hard Bounce") return false;
   return true;
@@ -237,9 +239,14 @@ export function LeadsPage() {
         isPollingRef.current = false;
         try {
           const data = await getB2BLeadTasks();
+          const previousActive = tasks.find((t) => t.id === activeTaskId);
+          const refreshedActive = data.find((t) => t.id === activeTaskId);
           setTasks(data);
           const activeStillRunning = data.find((t) => t.id === activeTaskId && t.status === "running");
-          if (!activeStillRunning && activeTaskId) {
+          if (
+            activeTaskId &&
+            (!activeStillRunning || Number(previousActive?.rawLeadCount || 0) !== Number(refreshedActive?.rawLeadCount || 0))
+          ) {
             fetchLeadsForTask(activeTaskId);
           }
           if (data.some((t) => t.status === "running")) {
@@ -661,7 +668,7 @@ export function LeadsPage() {
           </span>
         </div>
         <span>
-          {(activeTask.targetRegions || []).map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join("、")} · 目标 {activeTask.targetCount} 条 · 原始 {activeTask.rawLeadCount || 0} · 清洗后 {activeTask.cleanedLeadCount || 0} · 重复 {activeTask.duplicateCount || 0} · 已转客户 {activeTask.importedCustomerCount || 0}
+          {(activeTask.targetRegions || []).map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join("、")} · 可直接联系目标 {activeTask.targetCount} 条 · 原始 {activeTask.rawLeadCount || 0} · 已验证可联系 {Number(progress.verifiedLeads ?? activeTask.cleanedLeadCount ?? 0)} · 重复 {activeTask.duplicateCount || 0} · 已转客户 {activeTask.importedCustomerCount || 0}
         </span>
         {(activeTask.buyerIndustries || []).length > 0 && (
           <div className="lead-task-profile">
@@ -681,6 +688,7 @@ export function LeadsPage() {
             <span>搜索结果 {Number(progress.searchedResults || 0)}</span>
             <span>官网访问 {Number(progress.websitesCrawled || 0)}</span>
             <span>公开邮箱 {Number(progress.publicEmailsFound || activeTask.rawLeadCount || 0)}</span>
+            <span>高匹配候选 {Number(progress.qualifiedCandidates || 0)}</span>
           </div>
           {progress.currentQuery && (
             <div className="lead-current-query" title={progress.currentQuery}>
@@ -803,7 +811,7 @@ export function LeadsPage() {
                     </TableCell>
                     <TableCell>
                       <strong>{lead.email || "-"}</strong>
-                      <div className="meta">{lead.emailSourceDomainMatch || "-"}</div>
+                      <div className="meta">{lead.emailSourceDomainMatch ? "邮箱域名与官网一致" : "域名待核验"}</div>
                     </TableCell>
                     <TableCell>
                       {lead.country || "-"}
@@ -824,8 +832,8 @@ export function LeadsPage() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      {lead.source ? (
-                        <a href={lead.source} target="_blank" rel="noreferrer">{statusLabel(LEAD_SOURCE_TYPE_LABELS, lead.sourceType, "公开网页")}</a>
+                      {(lead.sourceUrl || lead.source) ? (
+                        <a href={lead.sourceUrl || lead.source} target="_blank" rel="noreferrer">{statusLabel(LEAD_SOURCE_TYPE_LABELS, lead.sourceType, "公开网页")}</a>
                       ) : statusLabel(LEAD_SOURCE_TYPE_LABELS, lead.sourceType, "来源未标注")}
                       <div className="meta">HTTP {lead.sourceHttpStatus || "-"}</div>
                     </TableCell>
@@ -993,7 +1001,7 @@ export function LeadsPage() {
                 />
               </div>
               <div className="form-field">
-                <label>目标数量</label>
+                <label>可直接联系线索目标</label>
                 <Input
                   name="targetCount"
                   type="number"
@@ -1002,6 +1010,7 @@ export function LeadsPage() {
                   value={targetCount}
                   onChange={(e) => setTargetCount(e.target.value)}
                 />
+                <small>系统会继续搜索，直到达到已验证的可联系线索数量，或全部策略执行完毕。</small>
               </div>
               <div className="form-field">
                 <label>搜索语言</label>

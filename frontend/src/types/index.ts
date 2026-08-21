@@ -745,6 +745,10 @@ export interface B2BAutomationProgress {
   searchedResults?: number;
   websitesCrawled?: number;
   publicEmailsFound?: number;
+  qualifiedCandidates?: number;
+  verifiedLeads?: number;
+  lastValidatedCandidates?: number;
+  stopReason?: "qualified_target_reached" | "queries_exhausted";
   currentQuery?: string;
   lastError?: string;
 }
@@ -801,6 +805,7 @@ export interface B2BLead {
   email?: string;
   phone?: string;
   contact?: string;
+  contactName?: string;
   industry?: string;
   business?: string;
   region?: string;
@@ -815,6 +820,7 @@ export interface B2BLead {
   emailConfidence?: number;
   regionStatus?: "confirmed" | "likely" | "unknown";
   source?: string;
+  sourceUrl?: string;
   sourceType?: string;
   sourceName?: string;
   sourcePage?: string;
@@ -825,6 +831,12 @@ export interface B2BLead {
   cleaningNotes?: string;
   emailSourceDomainMatch?: boolean;
   matchedProductKeyword?: string;
+  rawData?: {
+    evidence?: string[];
+    gaps?: string[];
+    fitScore?: number;
+    [key: string]: unknown;
+  };
   status: string;
   createdAt: string;
 }

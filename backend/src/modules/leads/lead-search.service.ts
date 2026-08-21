@@ -13,6 +13,10 @@ export interface SearchCandidate {
   matchedProductKeyword: string;
   targetSegment: string;
   fitNote: string;
+  fitScore: number;
+  confidence: 'High' | 'Medium' | 'Low';
+  evidence: string[];
+  gaps: string[];
   rawData: Record<string, unknown>;
 }
 
@@ -33,6 +37,8 @@ const PREFERRED_EMAIL_PREFIXES = [
   'sales', 'info', 'export', 'enquiry', 'inquiries', 'contact', 'procurement',
   'purchasing', 'rfq', 'quotes',
 ];
+const BUYER_INTENT_PATTERN = /\b(importer|distributor|stockist|wholesaler|dealer|procurement|purchasing|buyer|sourcing|epc|contractor|industrial supplier|request (?:a )?quote|rfq)\b/i;
+const LOW_VALUE_PAGE_PATTERN = /\b(job|career|vacancy|training|course|conference|exhibition|news|article|research paper|definition|what is)\b/i;
 
 const ASSOCIATIONS: Record<string, { aliases: string[]; industries: string[] }> = {
   flange: {
@@ -117,10 +123,12 @@ export class LeadSearchService {
 
   async discover(query: string, productNames: string[], segments: string[]): Promise<{ candidates: SearchCandidate[]; searched: number; crawled: number }> {
     const results = await this.search(query);
-    const relevant = results.filter((result) => this.isRelevantResult(result, productNames, segments)).slice(0, 8);
+    const relevant = this.dedupeSearchResults(results)
+      .filter((result) => this.isRelevantResult(result, productNames, segments))
+      .slice(0, 12);
     const candidates = (await Promise.all(relevant.map((result) => this.enrich(result, productNames, segments))))
       .flat()
-      .filter(Boolean);
+      .filter((candidate) => candidate.fitScore >= 45);
     return { candidates, searched: results.length, crawled: relevant.length };
   }
 
@@ -153,14 +161,14 @@ export class LeadSearchService {
       const data = await this.fetchJson(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-KEY': profile.apiKey },
-        body: JSON.stringify({ q: query, num: 10 }),
+        body: JSON.stringify({ q: query, num: 20 }),
       });
       return (data.organic || []).map((item: any) => ({ title: item.title || '', url: item.link || '', snippet: item.snippet || '' }));
     }
     if (provider === 'brave-search') {
       const url = new URL(apiUrl || 'https://api.search.brave.com/res/v1/web/search');
       url.searchParams.set('q', query);
-      url.searchParams.set('count', '10');
+      url.searchParams.set('count', '20');
       const data = await this.fetchJson(url.toString(), { headers: { 'X-Subscription-Token': profile.apiKey, Accept: 'application/json' } });
       return (data.web?.results || []).map((item: any) => ({ title: item.title || '', url: item.url || '', snippet: item.description || '' }));
     }
@@ -168,7 +176,7 @@ export class LeadSearchService {
       const url = new URL(apiUrl || 'https://serpapi.com/search.json');
       url.searchParams.set('q', query);
       url.searchParams.set('api_key', profile.apiKey);
-      url.searchParams.set('num', '10');
+      url.searchParams.set('num', '20');
       const data = await this.fetchJson(url.toString());
       return (data.organic_results || []).map((item: any) => ({ title: item.title || '', url: item.link || '', snippet: item.snippet || '' }));
     }
@@ -198,10 +206,40 @@ export class LeadSearchService {
         }
       }
     }
-    const text = this.toText(html).slice(0, 30000);
+    const text = this.toText(html).slice(0, 50000);
     const company = this.companyName(result.title, result.url);
-    const matchedProduct = productNames.find((term) => this.contains(text, term)) || productNames[0] || '';
-    const targetSegment = segments.find((term) => this.contains(`${result.title} ${result.snippet} ${text}`, term)) || '';
+    const combinedText = `${result.title} ${result.snippet} ${text}`;
+    const matchedProduct = productNames.find((term) => this.contains(combinedText, term)) || '';
+    const targetSegment = segments.find((term) => this.contains(combinedText, term)) || '';
+    const buyerIntent = BUYER_INTENT_PATTERN.test(combinedText);
+    const lowValuePage = LOW_VALUE_PAGE_PATTERN.test(`${result.title} ${result.snippet}`);
+    const sourceHost = this.hostname(result.url);
+    const emailDomainMatch = emails.some((email) => this.domainsMatch(sourceHost, email.split('@')[1] || ''));
+    const evidence = [
+      matchedProduct && `官网或搜索摘要明确提及 ${matchedProduct}`,
+      targetSegment && `符合目标买家类型 ${targetSegment}`,
+      buyerIntent && '存在采购、经销或工程承包意图词',
+      response.status >= 200 && response.status < 400 && '企业官网可访问',
+      emailDomainMatch && '公开邮箱域名与企业官网一致',
+    ].filter(Boolean) as string[];
+    const gaps = [
+      !targetSegment && '未明确识别目标买家类型',
+      !emails.length && '未发现公开邮箱',
+      !emailDomainMatch && emails.length > 0 && '公开邮箱域名与官网不一致，需复核',
+      !html && '官网内容无法读取',
+    ].filter(Boolean) as string[];
+    let fitScore = 0;
+    if (matchedProduct) fitScore += 35;
+    if (targetSegment) fitScore += 25;
+    if (buyerIntent) fitScore += 15;
+    if (response.status >= 200 && response.status < 400) fitScore += 10;
+    if (emails.length) fitScore += 5;
+    if (emailDomainMatch) fitScore += 10;
+    if (!targetSegment) fitScore -= 10;
+    if (!html) fitScore -= 10;
+    if (lowValuePage) fitScore -= 35;
+    fitScore = Math.max(0, Math.min(100, fitScore));
+    const confidence: SearchCandidate['confidence'] = fitScore >= 75 ? 'High' : fitScore >= 55 ? 'Medium' : 'Low';
     const base = {
       company,
       website: this.origin(result.url),
@@ -212,8 +250,18 @@ export class LeadSearchService {
       business: result.snippet || text.slice(0, 500),
       matchedProductKeyword: matchedProduct,
       targetSegment,
-      fitNote: [matchedProduct && `产品匹配：${matchedProduct}`, targetSegment && `客户类型：${targetSegment}`].filter(Boolean).join('；'),
-      rawData: { searchTitle: result.title, searchSnippet: result.snippet },
+      fitNote: [...evidence, ...gaps.map((gap) => `待核验：${gap}`)].join('；'),
+      fitScore,
+      confidence,
+      evidence,
+      gaps,
+      rawData: {
+        searchTitle: result.title,
+        searchSnippet: result.snippet,
+        evidence,
+        gaps,
+        fitScore,
+      },
     };
     if (!emails.length) return [{ ...base, email: '' }];
     return emails.slice(0, 3).map((email) => ({ ...base, email }));
@@ -228,10 +276,20 @@ export class LeadSearchService {
     if (BLOCKED_HOST_PARTS.some((part) => host.includes(part))) return false;
     if (BLOCKED_PATH_PARTS.some((part) => path.includes(part))) return false;
     const haystack = `${result.title} ${result.snippet}`.toLowerCase();
+    if (LOW_VALUE_PAGE_PATTERN.test(haystack)) return false;
     const productMatch = products.some((term) => this.contains(haystack, term));
-    const buyerMatch = segments.some((term) => this.contains(haystack, term)) ||
-      /supplier|distributor|stockist|importer|manufacturer|contractor|industrial|company|trading/i.test(haystack);
+    const buyerMatch = segments.some((term) => this.contains(haystack, term)) || BUYER_INTENT_PATTERN.test(haystack);
     return productMatch && buyerMatch;
+  }
+
+  private dedupeSearchResults(results: SearchResult[]) {
+    const seen = new Set<string>();
+    return results.filter((result) => {
+      const key = this.hostname(result.url) || result.url.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   private async fetchPage(url: string) {
@@ -283,9 +341,31 @@ export class LeadSearchService {
   }
 
   private companyName(title: string, url: string) {
-    const cleaned = this.toText(title).split(/\s+[|–—-]\s+/)[0].trim();
-    if (cleaned && cleaned.length <= 160) return cleaned;
+    const hostname = this.hostname(url);
+    const brand = hostname.split('.')[0].replace(/[-_]+/g, ' ').trim();
+    const generic = /^(home|contact(?: us)?|about(?: us)?|products?|welcome|official (?:site|website))$/i;
+    const fragments = this.toText(title)
+      .split(/\s+[|–—-]\s+/)
+      .map((item) => item.trim())
+      .filter((item) => item && item.length <= 160 && !generic.test(item));
+    const comparableBrand = brand.toLowerCase().replace(/[^a-z0-9\p{L}]+/gu, '');
+    const brandMatch = fragments.find((item) => {
+      const comparableItem = item.toLowerCase().replace(/[^a-z0-9\p{L}]+/gu, '');
+      return comparableBrand && (comparableItem.includes(comparableBrand) || comparableBrand.includes(comparableItem));
+    });
+    const cleaned = brandMatch || fragments[0];
+    if (cleaned) return cleaned;
     try { return new URL(url).hostname.replace(/^www\./, '').split('.')[0]; } catch { return '未识别公司'; }
+  }
+
+  private hostname(value: string) {
+    try { return new URL(value).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; }
+  }
+
+  private domainsMatch(first: string, second: string) {
+    const left = first.toLowerCase().replace(/^www\./, '');
+    const right = second.toLowerCase().replace(/^www\./, '');
+    return Boolean(left && right && (left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`)));
   }
 
   private origin(url: string) {

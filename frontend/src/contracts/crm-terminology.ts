@@ -85,7 +85,7 @@ export const B2B_TASK_STATUS_LABELS: Readonly<Record<string, string>> = {
   running: "搜索中",
   paused: "已暂停",
   completed: "本轮已完成",
-  exhausted: "未找到更多结果",
+  exhausted: "当前搜索策略已执行完",
   cancelled: "已停止",
   failed: "执行失败",
 };
