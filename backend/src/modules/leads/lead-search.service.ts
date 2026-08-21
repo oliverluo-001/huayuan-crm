@@ -175,10 +175,51 @@ export class LeadSearchService {
   }
 
   private async searchPublicWeb(query: string): Promise<SearchResult[]> {
-    await this.throttlePublicSearch();
+    const errors: string[] = [];
+    for (const source of [
+      () => this.searchDuckDuckGoHtml(query),
+      () => this.searchDuckDuckGoLite(query),
+    ]) {
+      await this.throttlePublicSearch();
+      try {
+        const results = await source();
+        if (results.length) return results;
+      } catch (error) {
+        errors.push(this.errorMessage(error));
+      }
+    }
+    if (errors.length) throw new Error(errors.join('；'));
+    return [];
+  }
+
+  private async searchDuckDuckGoHtml(query: string) {
     const url = new URL('https://html.duckduckgo.com/html/');
     url.searchParams.set('q', query);
-    const response = await fetch(url.toString(), {
+    const response = await fetch(url.toString(), this.publicSearchRequestOptions());
+    const html = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const results = this.parseDuckDuckGoResults(html);
+    if (!results.length && /captcha|anomaly|automated|blocked/i.test(html)) {
+      throw new Error('DuckDuckGo HTML 触发访问限制');
+    }
+    return results;
+  }
+
+  private async searchDuckDuckGoLite(query: string) {
+    const url = new URL('https://lite.duckduckgo.com/lite/');
+    url.searchParams.set('q', query);
+    const response = await fetch(url.toString(), this.publicSearchRequestOptions());
+    const html = await response.text();
+    if (!response.ok) throw new Error(`DuckDuckGo Lite HTTP ${response.status}`);
+    const results = this.parseDuckDuckGoLiteResults(html);
+    if (!results.length && /captcha|anomaly|automated|blocked/i.test(html)) {
+      throw new Error('DuckDuckGo Lite 触发访问限制');
+    }
+    return results;
+  }
+
+  private publicSearchRequestOptions(): RequestInit {
+    return {
       signal: AbortSignal.timeout(20_000),
       redirect: 'follow',
       headers: {
@@ -186,14 +227,7 @@ export class LeadSearchService {
         Accept: 'text/html,application/xhtml+xml',
         'Accept-Language': 'en-US,en;q=0.8',
       },
-    });
-    const html = await response.text();
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const results = this.parseDuckDuckGoResults(html);
-    if (!results.length && /captcha|anomaly|automated|blocked/i.test(html)) {
-      throw new Error('公开搜索触发访问限制，请稍后继续或配置专业搜索 API');
-    }
-    return results;
+    };
   }
 
   private parseDuckDuckGoResults(html: string): SearchResult[] {
@@ -210,6 +244,27 @@ export class LeadSearchService {
         url: resolvedUrl,
         snippet: this.decodeHtml(snippetMatch?.[1] || ''),
         sourceName: 'DuckDuckGo 公开搜索 + 企业官网',
+      });
+      if (results.length >= 20) break;
+    }
+    return results;
+  }
+
+  private parseDuckDuckGoLiteResults(html: string): SearchResult[] {
+    const blocks = String(html || '').split(/<a\b(?=[^>]*\bclass=["'][^"']*\bresult-link\b[^"']*["'])/gi).slice(1);
+    const results: SearchResult[] = [];
+    for (const block of blocks) {
+      const hrefMatch = block.match(/\bhref=["']([^"']+)["']/i);
+      const titleMatch = block.match(/^[^>]*>([\s\S]*?)<\/a>/i);
+      if (!hrefMatch || !titleMatch) continue;
+      const resolvedUrl = this.resolveDuckDuckGoUrl(hrefMatch[1]);
+      if (!resolvedUrl) continue;
+      const snippetMatch = block.match(/\bclass=["'][^"']*\bresult-snippet\b[^"']*["'][^>]*>([\s\S]*?)<\/td>/i);
+      results.push({
+        title: this.decodeHtml(titleMatch[1]),
+        url: resolvedUrl,
+        snippet: this.decodeHtml(snippetMatch?.[1] || ''),
+        sourceName: 'DuckDuckGo Lite 公开搜索 + 企业官网',
       });
       if (results.length >= 20) break;
     }
