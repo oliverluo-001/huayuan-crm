@@ -75,4 +75,30 @@ describe('LeadSearchService', () => {
     expect(result.crawled).toBe(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('uses the public HTML search fallback when no API profile is configured', async () => {
+    settings.getSearchProfiles.mockResolvedValue([]);
+    const publicHtml = `
+      <div class="result results_links results_links_deep web-result">
+        <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Facme.example%2Fcontact&amp;rut=test">Home | Acme PVF Distribution</a>
+        <a class="result__snippet" href="#">Acme is a flange distributor and industrial stockist.</a>
+      </div>`;
+    const fetchMock = jest.spyOn(global, 'fetch' as any)
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => publicHtml } as any)
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { get: () => 'text/html' },
+        text: async () => '<html><body>Flange distributor. Contact sales@acme.example</body></html>',
+      } as any);
+
+    const result = await service.discover('flange distributor', ['flange'], ['distributor']);
+
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      company: 'Acme PVF Distribution',
+      email: 'sales@acme.example',
+      sourceName: 'DuckDuckGo 公开搜索 + 企业官网',
+    });
+    expect(fetchMock.mock.calls[0][0]).toContain('html.duckduckgo.com/html/');
+  });
 });

@@ -24,14 +24,17 @@ interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  sourceName?: string;
 }
 
 const BLOCKED_HOST_PARTS = [
   'wikipedia.org', 'youtube.com', 'facebook.com', 'instagram.com', 'tiktok.com',
   'pinterest.', 'reddit.com', 'quora.com', 'amazon.', 'alibaba.com', 'made-in-china.com',
+  'indiamart.com', 'tradeindia.com', 'exportersindia.com', 'thomasnet.com', 'volza.com',
+  'kompass.com', 'yellowpages.', 'zoominfo.com', 'linkedin.com', 'crunchbase.com', 'dnb.com',
   'researchgate.net', 'sciencedirect.com', 'springer.com', 'iso.org', 'gov.',
 ];
-const BLOCKED_PATH_PARTS = ['/news/', '/article/', '/blog/', '/wiki/', '/search?', '/video/'];
+const BLOCKED_PATH_PARTS = ['/news/', '/article/', '/blog/', '/wiki/', '/search?', '/video/', '/listings/', '/directory/'];
 const EXCLUDED_EMAIL_PREFIXES = ['noreply', 'no-reply', 'donotreply', 'abuse', 'postmaster', 'hostmaster'];
 const PREFERRED_EMAIL_PREFIXES = [
   'sales', 'info', 'export', 'enquiry', 'inquiries', 'contact', 'procurement',
@@ -66,6 +69,7 @@ const ASSOCIATIONS: Record<string, { aliases: string[]; industries: string[] }> 
 @Injectable()
 export class LeadSearchService {
   private readonly logger = new Logger(LeadSearchService.name);
+  private lastPublicSearchAt = 0;
 
   constructor(private readonly settingsService: SettingsService) {}
 
@@ -135,22 +139,100 @@ export class LeadSearchService {
   private async search(query: string): Promise<SearchResult[]> {
     const profiles = (await this.settingsService.getSearchProfiles() as Array<Record<string, any>>)
       .filter((profile) => profile.apiKeySet);
-    if (!profiles.length) throw new BadRequestException('请先在设置中配置一个可用的搜索 API');
+    if (!profiles.length) {
+      try {
+        return await this.searchPublicWeb(query);
+      } catch (error) {
+        throw new BadRequestException(`公开搜索暂时不可用：${this.errorMessage(error)}`);
+      }
+    }
 
     const errors: string[] = [];
     for (const publicProfile of profiles) {
       try {
         const profile = await this.settingsService.getSearchProfileCredentials(publicProfile.id);
         const results = await this.searchWithProfile(profile, query);
-        if (results.length) return results;
+        if (results.length) {
+          return results.map((result) => ({
+            ...result,
+            sourceName: `${publicProfile.name || publicProfile.provider || '专业搜索 API'} + 企业官网`,
+          }));
+        }
       } catch (error) {
         errors.push(`${publicProfile.name || publicProfile.provider}: ${this.errorMessage(error)}`);
       }
     }
-    if (errors.length === profiles.length) {
-      throw new BadRequestException(`搜索数据源均不可用：${errors.join('；')}`);
+    try {
+      const fallback = await this.searchPublicWeb(query);
+      return fallback;
+    } catch (publicError) {
+      errors.push(`公开搜索: ${this.errorMessage(publicError)}`);
+    }
+    if (errors.length) {
+      throw new BadRequestException(`专业及公开搜索源均不可用：${errors.join('；')}`);
     }
     return [];
+  }
+
+  private async searchPublicWeb(query: string): Promise<SearchResult[]> {
+    await this.throttlePublicSearch();
+    const url = new URL('https://html.duckduckgo.com/html/');
+    url.searchParams.set('q', query);
+    const response = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(20_000),
+      redirect: 'follow',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; HuayuanCRM/1.0; +https://crm.huayuanflange.com)',
+        Accept: 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.8',
+      },
+    });
+    const html = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const results = this.parseDuckDuckGoResults(html);
+    if (!results.length && /captcha|anomaly|automated|blocked/i.test(html)) {
+      throw new Error('公开搜索触发访问限制，请稍后继续或配置专业搜索 API');
+    }
+    return results;
+  }
+
+  private parseDuckDuckGoResults(html: string): SearchResult[] {
+    const blocks = String(html || '').split(/<div\s+class=["']result\s+results_links/gi).slice(1);
+    const results: SearchResult[] = [];
+    for (const block of blocks) {
+      const titleMatch = block.match(/<a\b(?=[^>]*\bclass=["'][^"']*\bresult__a\b[^"']*["'])(?=[^>]*\bhref=["']([^"']+)["'])[^>]*>([\s\S]*?)<\/a>/i);
+      if (!titleMatch) continue;
+      const resolvedUrl = this.resolveDuckDuckGoUrl(titleMatch[1]);
+      if (!resolvedUrl) continue;
+      const snippetMatch = block.match(/<a\b[^>]*\bclass=["'][^"']*\bresult__snippet\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
+      results.push({
+        title: this.decodeHtml(titleMatch[2]),
+        url: resolvedUrl,
+        snippet: this.decodeHtml(snippetMatch?.[1] || ''),
+        sourceName: 'DuckDuckGo 公开搜索 + 企业官网',
+      });
+      if (results.length >= 20) break;
+    }
+    return results;
+  }
+
+  private resolveDuckDuckGoUrl(value: string) {
+    try {
+      const decoded = this.decodeHtml(value);
+      const redirect = new URL(decoded.startsWith('//') ? `https:${decoded}` : decoded, 'https://duckduckgo.com');
+      const target = redirect.searchParams.get('uddg');
+      const resolved = target ? new URL(target) : redirect;
+      if (!['http:', 'https:'].includes(resolved.protocol) || resolved.hostname.endsWith('duckduckgo.com')) return '';
+      return resolved.toString();
+    } catch {
+      return '';
+    }
+  }
+
+  private async throttlePublicSearch() {
+    const waitMs = Math.max(0, 1_500 - (Date.now() - this.lastPublicSearchAt));
+    if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    this.lastPublicSearchAt = Date.now();
   }
 
   private async searchWithProfile(profile: Record<string, any>, query: string): Promise<SearchResult[]> {
@@ -245,7 +327,7 @@ export class LeadSearchService {
       website: this.origin(result.url),
       sourceUrl: pageUrl,
       sourceType: pageUrl.toLowerCase().includes('contact') ? 'Contact Page' : 'Company Website',
-      sourceName: 'Search API + public website',
+      sourceName: result.sourceName || '专业搜索 API + 企业官网',
       sourceHttpStatus: response.status,
       business: result.snippet || text.slice(0, 500),
       matchedProductKeyword: matchedProduct,
@@ -386,6 +468,15 @@ export class LeadSearchService {
       .replace(/&quot;/gi, '"')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  private decodeHtml(value: string) {
+    return this.toText(String(value || '')
+      .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
+      .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(parseInt(code, 16)))
+      .replace(/&apos;|&#39;/gi, "'")
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>'));
   }
 
   private async fetchJson(url: string, init: RequestInit = {}) {

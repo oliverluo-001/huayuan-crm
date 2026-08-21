@@ -56,8 +56,18 @@ export class LeadsService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      const interruptedTasks = await this.leadTaskRepository.find({ where: { status: 'running' } });
-      for (const task of interruptedTasks) this.startTaskProcessor(task);
+      const interruptedTasks = await this.leadTaskRepository.find({
+        where: [{ status: 'running' }, { status: 'paused' }],
+      });
+      for (const task of interruptedTasks) {
+        if (task.status === 'paused') {
+          task.status = 'running';
+          task.automationStage = 'starting';
+          task.lastMessage = '已切换到可用搜索源，正在自动继续任务';
+          await this.leadTaskRepository.save(task);
+        }
+        this.startTaskProcessor(task);
+      }
       if (interruptedTasks.length) {
         this.logger.log(`恢复 ${interruptedTasks.length} 个未完成的获客任务`);
       }
@@ -448,7 +458,7 @@ export class LeadsService implements OnModuleInit {
         }
       } catch (error) {
         const message = this.errorMessage(error);
-        const sourceUnavailable = /请先在设置中配置|搜索 API|搜索数据源均不可用|HTTP (?:401|403|429)|配额|quota|credit/i.test(message);
+        const sourceUnavailable = /搜索 API|搜索源均不可用|公开搜索|HTTP (?:401|403|429)|配额|quota|credit/i.test(message);
         await this.leadTaskRepository.update(task.id, {
           ...(sourceUnavailable ? {} : { automationCursor: i + 1 }),
           automationProgress: { ...progress, searchedQueries: sourceUnavailable ? i : i + 1, lastError: message } as any,
@@ -556,7 +566,7 @@ export class LeadsService implements OnModuleInit {
       } catch (error) {
         lastError = error;
         const message = this.errorMessage(error);
-        if (/请先在设置中配置|搜索数据源均不可用|HTTP (?:400|401|403|429)|配额|quota|credit/i.test(message)) throw error;
+        if (/搜索源均不可用|公开搜索|HTTP (?:400|401|403|429)|配额|quota|credit/i.test(message)) throw error;
         if (attempt < 3) await this.delay(attempt * 750);
       }
     }

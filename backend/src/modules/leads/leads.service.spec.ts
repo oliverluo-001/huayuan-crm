@@ -157,4 +157,36 @@ describe('LeadsService CRM conversion', () => {
     expect(runtimeTask.status).toBe('completed');
     expect(runtimeTask.automationProgress.stopReason).toBe('qualified_target_reached');
   });
+
+  it('automatically resumes paused acquisition tasks when the service restarts', async () => {
+    const pausedTask: any = {
+      id: 12,
+      taskId: 'task_paused',
+      productName: 'flange',
+      status: 'paused',
+      automationCursor: 0,
+      searchQueries: ['flange importer'],
+      automationProgress: {},
+    };
+    const runtimeTaskRepository = {
+      find: jest.fn().mockResolvedValue([pausedTask]),
+      save: jest.fn(async (value) => value),
+      update: jest.fn(),
+    };
+    const runtimeService = new LeadsService(
+      {} as any,
+      runtimeTaskRepository as any,
+      {} as any,
+      customers as any,
+    );
+    const processSpy = jest.spyOn(runtimeService as any, 'processTaskAsync').mockResolvedValue(undefined);
+
+    await runtimeService.onModuleInit();
+    await Promise.resolve();
+
+    expect(pausedTask.status).toBe('running');
+    expect(pausedTask.lastMessage).toContain('自动继续任务');
+    expect(runtimeTaskRepository.save).toHaveBeenCalledWith(pausedTask);
+    expect(processSpy).toHaveBeenCalledWith(pausedTask);
+  });
 });
