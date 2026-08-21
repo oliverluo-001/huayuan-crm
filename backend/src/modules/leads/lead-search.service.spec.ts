@@ -127,4 +127,49 @@ describe('LeadSearchService', () => {
       sourceName: 'DuckDuckGo Lite 公开搜索 + 企业官网',
     });
   });
+
+  it('discovers company websites from Wikidata and crawls public contacts when search pages are blocked', async () => {
+    settings.getSearchProfiles.mockResolvedValue([]);
+    jest.spyOn(service as any, 'throttlePublicSearch').mockResolvedValue(undefined);
+    const catalogResponse = {
+      results: {
+        bindings: [{
+          company: { value: 'https://www.wikidata.org/entity/Q1' },
+          companyLabel: { value: 'Acme Energy' },
+          website: { value: 'https://acme.example/' },
+          countryLabel: { value: 'United Arab Emirates' },
+          industryLabel: { value: 'petroleum industry' },
+        }],
+      },
+    };
+    const fetchMock = jest.spyOn(global, 'fetch' as any)
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => '<html>anomaly detected</html>' } as any)
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => '<html>automated requests blocked</html>' } as any)
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => JSON.stringify(catalogResponse) } as any)
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: { get: (name: string) => name === 'content-type' ? 'text/html' : null },
+        text: async () => '<html><body>Oil and gas procurement. Flange projects. <a href="tel:+971 2 555 0100">Call</a> sales@acme.example</body></html>',
+      } as any);
+
+    const result = await service.discover(
+      'flange importer Middle East',
+      ['flange'],
+      ['oil & gas company'],
+      { regions: ['Middle East'], industries: ['Oil & Gas'] },
+    );
+
+    expect(fetchMock.mock.calls[2][0]).toContain('query.wikidata.org/sparql');
+    expect(result.mode).toBe('catalog-crawler');
+    expect(result.sourceExhausted).toBe(true);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      company: 'Acme Energy',
+      country: 'United Arab Emirates',
+      email: 'sales@acme.example',
+      phone: '+971 2 555 0100',
+      targetSegment: 'oil & gas company',
+      sourceName: 'Wikidata 公开企业目录 + 官网爬虫',
+    });
+  });
 });

@@ -379,6 +379,8 @@ export class LeadsService implements OnModuleInit {
     let verifiedTargetReached = false;
     let prequalifiedTotal = Number(task.automationProgress?.qualifiedCandidates || 0);
     let lastValidatedPrequalified = Number(task.automationProgress?.lastValidatedCandidates || 0);
+    let catalogCrawlerMode = Boolean(task.agentState?.catalogCrawlerMode);
+    let catalogBatch = Number(task.agentState?.catalogBatch || 0);
 
     for (let i = cursor; i < totalQueries; i++) {
       // Check if cancelled
@@ -417,7 +419,17 @@ export class LeadsService implements OnModuleInit {
           query,
           productNames,
           current.targetSegments || current.buyerCompanyTypes || [],
+          {
+            regions: current.targetRegions || (current.targetRegion ? [current.targetRegion] : []),
+            industries: current.buyerIndustries || [],
+            preferCatalogCrawler: catalogCrawlerMode,
+            catalogBatch,
+          },
         );
+        if (discovery.mode === 'catalog-crawler') {
+          catalogCrawlerMode = true;
+          catalogBatch += 1;
+        }
         const added = await this.saveDiscoveredCandidates(current, discovery.candidates);
         prequalifiedTotal += added.qualified;
         const totalFound = await this.leadRepository.count({ where: { taskId: current.taskId } });
@@ -434,8 +446,16 @@ export class LeadsService implements OnModuleInit {
             leadsFound: totalFound,
             qualifiedCandidates: prequalifiedTotal,
             lastValidatedCandidates: lastValidatedPrequalified,
+            sourceMode: discovery.mode,
           } as any,
-          lastMessage: `已完成 ${i + 1}/${totalQueries} 个查询，累计发现 ${totalFound} 条企业线索`,
+          agentState: {
+            ...(current.agentState || {}),
+            catalogCrawlerMode,
+            catalogBatch,
+          } as any,
+          lastMessage: discovery.mode === 'catalog-crawler'
+            ? `公开搜索受限，已完成第 ${catalogBatch} 批企业目录官网爬取，累计发现 ${totalFound} 条线索`
+            : `已完成 ${i + 1}/${totalQueries} 个查询，累计发现 ${totalFound} 条企业线索`,
         });
 
         const target = Math.max(1, current.targetCount || 100);
@@ -456,9 +476,10 @@ export class LeadsService implements OnModuleInit {
           });
           if (verifiedTargetReached) break;
         }
+        if (discovery.mode === 'catalog-crawler' && discovery.sourceExhausted) break;
       } catch (error) {
         const message = this.errorMessage(error);
-        const sourceUnavailable = /搜索 API|搜索源均不可用|公开搜索|HTTP (?:401|403|429)|配额|quota|credit/i.test(message);
+        const sourceUnavailable = /搜索 API|搜索源均不可用|公开搜索|企业目录|Wikidata|HTTP (?:401|403|429)|配额|quota|credit/i.test(message);
         await this.leadTaskRepository.update(task.id, {
           ...(sourceUnavailable ? {} : { automationCursor: i + 1 }),
           automationProgress: { ...progress, searchedQueries: sourceUnavailable ? i : i + 1, lastError: message } as any,
@@ -558,15 +579,25 @@ export class LeadsService implements OnModuleInit {
     return true;
   }
 
-  private async discoverWithRetry(query: string, productNames: string[], segments: string[]) {
+  private async discoverWithRetry(
+    query: string,
+    productNames: string[],
+    segments: string[],
+    options: {
+      regions?: string[];
+      industries?: string[];
+      preferCatalogCrawler?: boolean;
+      catalogBatch?: number;
+    } = {},
+  ) {
     let lastError: unknown;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        return await this.leadSearchService.discover(query, productNames, segments);
+        return await this.leadSearchService.discover(query, productNames, segments, options);
       } catch (error) {
         lastError = error;
         const message = this.errorMessage(error);
-        if (/搜索源均不可用|公开搜索|HTTP (?:400|401|403|429)|配额|quota|credit/i.test(message)) throw error;
+        if (/搜索源均不可用|公开搜索|企业目录|Wikidata|HTTP (?:400|401|403|429)|配额|quota|credit/i.test(message)) throw error;
         if (attempt < 3) await this.delay(attempt * 750);
       }
     }
@@ -717,9 +748,11 @@ export class LeadsService implements OnModuleInit {
         (sourceHost === emailDomain || sourceHost.endsWith(`.${emailDomain}`) || emailDomain.endsWith(`.${sourceHost}`)));
       const freeEmail = /^(gmail|yahoo|hotmail|outlook|live|icloud|qq|163|126)\./i.test(emailDomain);
       const preferredEmail = /^(sales|info|export|enquiry|inquiries|contact|procurement|purchasing|rfq|quotes)@/i.test(email);
+      const catalogIndustry = String(lead.rawData?.catalogIndustry || '');
 
       let score = 0;
       if (lead.matchedProductKeyword) score += 25;
+      if (catalogIndustry) score += 15;
       if (lead.targetSegment || lead.buyerType) score += 20;
       if (sourceReachable) score += 20;
       if (domainMatch) score += 15;
@@ -910,10 +943,11 @@ export class LeadsService implements OnModuleInit {
         leadId: this.generateId('lead'),
         company: candidate.company,
         email,
+        phone: candidate.phone,
         website: candidate.website,
         region,
-        country: region,
-        largeRegion: this.largeRegionFor(region),
+        country: candidate.country || region,
+        largeRegion: this.largeRegionFor(candidate.country || region),
         business: candidate.business,
         targetSegment: candidate.targetSegment,
         buyerType: candidate.targetSegment,

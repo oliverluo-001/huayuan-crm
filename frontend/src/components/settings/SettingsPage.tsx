@@ -804,9 +804,9 @@ export function SettingsPage() {
                   </>
                 ) : (
                   <>
-                    <strong>自动获客搜索：未连接专业搜索接口</strong>
+                    <strong>自动获客搜索：使用公开企业索引与官网爬虫</strong>
                     <p className="text-muted-foreground">
-                      系统会尝试公开搜索，但云服务器可能受到访问限制。生产获客请配置 Brave Search、Serper 或 SerpApi。
+                      无需密钥也可按地区和下游行业发现企业官网、提取公开联系方式并验证邮箱；专业接口仅用于扩大覆盖。
                     </p>
                   </>
                 )}
@@ -883,7 +883,7 @@ export function SettingsPage() {
               {/* Search profile list */}
               {searchProfiles.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  尚未配置专业搜索接口。公开搜索仅作临时备用，受到限制时任务会保存进度并暂停；配置接口后可从原进度继续。
+                  尚未配置专业搜索接口。系统将使用公开企业目录和官网爬虫，覆盖范围取决于公开目录中的企业与官网资料。
                 </p>
               ) : (
                 <div className="space-y-2">

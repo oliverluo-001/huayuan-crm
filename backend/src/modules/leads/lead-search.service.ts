@@ -4,6 +4,7 @@ import { SettingsService } from '../settings/settings.service';
 export interface SearchCandidate {
   company: string;
   email: string;
+  phone: string;
   website: string;
   sourceUrl: string;
   sourceType: string;
@@ -18,6 +19,7 @@ export interface SearchCandidate {
   evidence: string[];
   gaps: string[];
   rawData: Record<string, unknown>;
+  country?: string;
 }
 
 interface SearchResult {
@@ -25,6 +27,23 @@ interface SearchResult {
   url: string;
   snippet: string;
   sourceName?: string;
+  catalogCountry?: string;
+  catalogIndustry?: string;
+}
+
+export interface LeadDiscoveryOptions {
+  regions?: string[];
+  industries?: string[];
+  preferCatalogCrawler?: boolean;
+  catalogBatch?: number;
+}
+
+export interface LeadDiscoveryResult {
+  candidates: SearchCandidate[];
+  searched: number;
+  crawled: number;
+  mode: 'web-search' | 'catalog-crawler';
+  sourceExhausted?: boolean;
 }
 
 const BLOCKED_HOST_PARTS = [
@@ -42,6 +61,33 @@ const PREFERRED_EMAIL_PREFIXES = [
 ];
 const BUYER_INTENT_PATTERN = /\b(importer|distributor|stockist|wholesaler|dealer|procurement|purchasing|buyer|sourcing|epc|contractor|industrial supplier|request (?:a )?quote|rfq)\b/i;
 const LOW_VALUE_PAGE_PATTERN = /\b(job|career|vacancy|training|course|conference|exhibition|news|article|research paper|definition|what is)\b/i;
+
+const REGION_COUNTRY_QIDS: Record<string, string[]> = {
+  'Middle East': ['Q878', 'Q851', 'Q846', 'Q842', 'Q398', 'Q817', 'Q796', 'Q810', 'Q43', 'Q801'],
+  'Southeast Asia': ['Q334', 'Q833', 'Q252', 'Q869', 'Q881', 'Q928', 'Q424', 'Q836', 'Q819', 'Q921'],
+  'North America': ['Q30', 'Q16', 'Q96'],
+  Europe: ['Q145', 'Q183', 'Q55', 'Q38', 'Q142', 'Q29', 'Q31', 'Q36', 'Q20', 'Q34', 'Q35', 'Q27'],
+  Oceania: ['Q408', 'Q664'],
+  Africa: ['Q258', 'Q1033', 'Q114', 'Q79', 'Q1028', 'Q117', 'Q924', 'Q916'],
+  'South America': ['Q298', 'Q419', 'Q155', 'Q414', 'Q739', 'Q736'],
+  'South Asia': ['Q668', 'Q843', 'Q902', 'Q854'],
+  'East Asia': ['Q17', 'Q884', 'Q148', 'Q865'],
+};
+
+const INDUSTRY_QIDS: Array<{ pattern: RegExp; qids: string[] }> = [
+  { pattern: /oil|gas|petroleum/i, qids: ['Q862571'] },
+  { pattern: /petrochemical/i, qids: ['Q16070574'] },
+  { pattern: /chemical/i, qids: ['Q207652'] },
+  { pattern: /power|energy|electric/i, qids: ['Q2316331'] },
+  { pattern: /water|wastewater/i, qids: ['Q1058719'] },
+  { pattern: /ship|marine/i, qids: ['Q474200'] },
+  { pattern: /construction|infrastructure/i, qids: ['Q13405640'] },
+  { pattern: /mining|metallurgy/i, qids: ['Q1945600'] },
+  { pattern: /food|beverage/i, qids: ['Q540912'] },
+  { pattern: /pharmaceutical/i, qids: ['Q507443'] },
+];
+
+const CATALOG_BATCH_SIZE = 12;
 
 const ASSOCIATIONS: Record<string, { aliases: string[]; industries: string[] }> = {
   flange: {
@@ -70,6 +116,7 @@ const ASSOCIATIONS: Record<string, { aliases: string[]; industries: string[] }> 
 export class LeadSearchService {
   private readonly logger = new Logger(LeadSearchService.name);
   private lastPublicSearchAt = 0;
+  private readonly catalogCache = new Map<string, { expiresAt: number; results: SearchResult[] }>();
 
   constructor(private readonly settingsService: SettingsService) {}
 
@@ -125,15 +172,102 @@ export class LeadSearchService {
     }
   }
 
-  async discover(query: string, productNames: string[], segments: string[]): Promise<{ candidates: SearchCandidate[]; searched: number; crawled: number }> {
-    const results = await this.search(query);
+  async discover(
+    query: string,
+    productNames: string[],
+    segments: string[],
+    options: LeadDiscoveryOptions = {},
+  ): Promise<LeadDiscoveryResult> {
+    let results: SearchResult[] = [];
+    let mode: LeadDiscoveryResult['mode'] = 'web-search';
+    let sourceExhausted = false;
+
+    if (!options.preferCatalogCrawler) {
+      try {
+        results = await this.search(query);
+      } catch (searchError) {
+        this.logger.warn(`公开网页搜索不可用，切换到企业目录爬虫：${this.errorMessage(searchError)}`);
+        mode = 'catalog-crawler';
+      }
+    } else {
+      mode = 'catalog-crawler';
+    }
+
+    if (mode === 'catalog-crawler') {
+      const catalog = await this.searchPublicCompanyCatalog(options.regions || [], options.industries || []);
+      const batch = Math.max(0, Number(options.catalogBatch || 0));
+      const offset = batch * CATALOG_BATCH_SIZE;
+      results = catalog.slice(offset, offset + CATALOG_BATCH_SIZE);
+      sourceExhausted = offset + CATALOG_BATCH_SIZE >= catalog.length;
+      if (!results.length) {
+        throw new BadRequestException('公开企业目录未找到符合当前地区和行业条件的官网，请扩大地区或下游行业范围');
+      }
+    }
+
     const relevant = this.dedupeSearchResults(results)
-      .filter((result) => this.isRelevantResult(result, productNames, segments))
-      .slice(0, 12);
-    const candidates = (await Promise.all(relevant.map((result) => this.enrich(result, productNames, segments))))
+      .filter((result) => mode === 'catalog-crawler' || this.isRelevantResult(result, productNames, segments))
+      .slice(0, CATALOG_BATCH_SIZE);
+    const candidates = (await Promise.all(relevant.map((result) => this.enrich(
+      result,
+      productNames,
+      segments,
+      options.industries || [],
+    ))))
       .flat()
       .filter((candidate) => candidate.fitScore >= 45);
-    return { candidates, searched: results.length, crawled: relevant.length };
+    return { candidates, searched: results.length, crawled: relevant.length, mode, sourceExhausted };
+  }
+
+  private async searchPublicCompanyCatalog(regions: string[], industries: string[]): Promise<SearchResult[]> {
+    const countryQids = [...new Set(regions.flatMap((region) => REGION_COUNTRY_QIDS[region] || []))];
+    const industryQids = [...new Set(industries.flatMap((industry) =>
+      INDUSTRY_QIDS.filter((entry) => entry.pattern.test(industry)).flatMap((entry) => entry.qids),
+    ))];
+    const cacheKey = `${countryQids.sort().join(',')}|${industryQids.sort().join(',')}`;
+    const cached = this.catalogCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.results;
+
+    const countryClause = countryQids.length
+      ? `VALUES ?country { ${countryQids.map((qid) => `wd:${qid}`).join(' ')} }`
+      : '';
+    const industryClause = industryQids.length
+      ? `VALUES ?industry { ${industryQids.map((qid) => `wd:${qid}`).join(' ')} }`
+      : '';
+    const countryPattern = countryQids.length ? 'wdt:P17 ?country;' : '';
+    const industryPattern = industryQids.length ? 'wdt:P452 ?industry;' : '';
+    const query = `
+      SELECT DISTINCT ?company ?companyLabel ?website ?countryLabel ?industryLabel WHERE {
+        ${countryClause}
+        ${industryClause}
+        ?company ${countryPattern} ${industryPattern} wdt:P856 ?website.
+        SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+      }
+      LIMIT 120
+    `;
+    const url = new URL('https://query.wikidata.org/sparql');
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('query', query);
+    const response = await fetch(url.toString(), {
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        Accept: 'application/sparql-results+json',
+        'User-Agent': 'HuayuanCRM/1.0 (public company discovery; https://crm.huayuanflange.com)',
+      },
+    });
+    const body = await response.text();
+    if (!response.ok) throw new Error(`Wikidata 企业目录 HTTP ${response.status}`);
+    let data: any;
+    try { data = JSON.parse(body); } catch { throw new Error('Wikidata 企业目录返回了无法解析的数据'); }
+    const results = this.dedupeSearchResults((data?.results?.bindings || []).map((binding: any) => ({
+      title: String(binding.companyLabel?.value || binding.company?.value || '未识别公司'),
+      url: String(binding.website?.value || ''),
+      snippet: [binding.industryLabel?.value, binding.countryLabel?.value].filter(Boolean).join(' · '),
+      sourceName: 'Wikidata 公开企业目录 + 官网爬虫',
+      catalogCountry: String(binding.countryLabel?.value || ''),
+      catalogIndustry: String(binding.industryLabel?.value || ''),
+    }))).filter((result) => this.isSafePublicUrl(result.url));
+    this.catalogCache.set(cacheKey, { expiresAt: Date.now() + 30 * 60_000, results });
+    return results;
   }
 
   private async search(query: string): Promise<SearchResult[]> {
@@ -325,16 +459,24 @@ export class LeadSearchService {
     return items.map((item: any) => ({ title: item.title || '', url: item.link || item.url || '', snippet: item.snippet || item.description || '' }));
   }
 
-  private async enrich(result: SearchResult, productNames: string[], segments: string[]): Promise<SearchCandidate[]> {
+  private async enrich(
+    result: SearchResult,
+    productNames: string[],
+    segments: string[],
+    industries: string[],
+  ): Promise<SearchCandidate[]> {
     let pageUrl = result.url;
     let response = await this.fetchPage(pageUrl);
     let html = response.html;
     let emails = this.extractEmails(html);
+    let phone = this.extractPhone(html);
     if (!emails.length) {
       const contactUrl = this.findContactUrl(html, result.url);
       if (contactUrl && contactUrl !== result.url) {
         const contactResponse = await this.fetchPage(contactUrl);
         const contactEmails = this.extractEmails(contactResponse.html);
+        const contactPhone = this.extractPhone(contactResponse.html);
+        if (contactPhone) phone = contactPhone;
         if (contactEmails.length) {
           pageUrl = contactUrl;
           response = contactResponse;
@@ -347,13 +489,16 @@ export class LeadSearchService {
     const company = this.companyName(result.title, result.url);
     const combinedText = `${result.title} ${result.snippet} ${text}`;
     const matchedProduct = productNames.find((term) => this.contains(combinedText, term)) || '';
-    const targetSegment = segments.find((term) => this.contains(combinedText, term)) || '';
+    const matchedIndustry = result.catalogIndustry || industries.find((term) => this.contains(combinedText, term)) || '';
+    const targetSegment = segments.find((term) => this.contains(combinedText, term)) ||
+      this.segmentForCatalogIndustry(result.catalogIndustry || '', segments);
     const buyerIntent = BUYER_INTENT_PATTERN.test(combinedText);
     const lowValuePage = LOW_VALUE_PAGE_PATTERN.test(`${result.title} ${result.snippet}`);
     const sourceHost = this.hostname(result.url);
     const emailDomainMatch = emails.some((email) => this.domainsMatch(sourceHost, email.split('@')[1] || ''));
     const evidence = [
       matchedProduct && `官网或搜索摘要明确提及 ${matchedProduct}`,
+      matchedIndustry && `公开企业目录或官网行业匹配：${matchedIndustry}`,
       targetSegment && `符合目标买家类型 ${targetSegment}`,
       buyerIntent && '存在采购、经销或工程承包意图词',
       response.status >= 200 && response.status < 400 && '企业官网可访问',
@@ -367,6 +512,7 @@ export class LeadSearchService {
     ].filter(Boolean) as string[];
     let fitScore = 0;
     if (matchedProduct) fitScore += 35;
+    if (matchedIndustry) fitScore += 25;
     if (targetSegment) fitScore += 25;
     if (buyerIntent) fitScore += 15;
     if (response.status >= 200 && response.status < 400) fitScore += 10;
@@ -379,6 +525,7 @@ export class LeadSearchService {
     const confidence: SearchCandidate['confidence'] = fitScore >= 75 ? 'High' : fitScore >= 55 ? 'Medium' : 'Low';
     const base = {
       company,
+      phone,
       website: this.origin(result.url),
       sourceUrl: pageUrl,
       sourceType: pageUrl.toLowerCase().includes('contact') ? 'Contact Page' : 'Company Website',
@@ -395,10 +542,13 @@ export class LeadSearchService {
       rawData: {
         searchTitle: result.title,
         searchSnippet: result.snippet,
+        catalogCountry: result.catalogCountry || '',
+        catalogIndustry: result.catalogIndustry || '',
         evidence,
         gaps,
         fitScore,
       },
+      country: result.catalogCountry || '',
     };
     if (!emails.length) return [{ ...base, email: '' }];
     return emails.slice(0, 3).map((email) => ({ ...base, email }));
@@ -431,14 +581,25 @@ export class LeadSearchService {
 
   private async fetchPage(url: string) {
     try {
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(12_000),
-        redirect: 'follow',
-        headers: { 'User-Agent': 'HuayuanCRM/1.0 (+public business contact research)', Accept: 'text/html,application/xhtml+xml' },
-      });
-      const contentType = response.headers.get('content-type') || '';
-      const html = contentType.includes('text/html') ? await response.text() : '';
-      return { status: response.status, html };
+      let currentUrl = url;
+      for (let redirectCount = 0; redirectCount < 4; redirectCount++) {
+        if (!this.isSafePublicUrl(currentUrl)) return { status: 0, html: '' };
+        const response = await fetch(currentUrl, {
+          signal: AbortSignal.timeout(12_000),
+          redirect: 'manual',
+          headers: { 'User-Agent': 'HuayuanCRM/1.0 (+public business contact research)', Accept: 'text/html,application/xhtml+xml' },
+        });
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get('location');
+          if (!location) return { status: response.status, html: '' };
+          currentUrl = new URL(location, currentUrl).toString();
+          continue;
+        }
+        const contentType = response.headers.get('content-type') || '';
+        const html = contentType.includes('text/html') ? await response.text() : '';
+        return { status: response.status, html };
+      }
+      return { status: 0, html: '' };
     } catch {
       return { status: 0, html: '' };
     }
@@ -471,6 +632,17 @@ export class LeadSearchService {
     return valid.sort((a, b) => this.emailRank(a) - this.emailRank(b));
   }
 
+  private extractPhone(html: string) {
+    const telLink = String(html || '').match(/href=["']tel:([^"']+)["']/i)?.[1] || '';
+    let decoded = telLink;
+    try { decoded = decodeURIComponent(telLink); } catch { /* keep the original public value */ }
+    decoded = decoded.replace(/[^\d+()\-\s.]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/\d{7,}/.test(decoded.replace(/\D/g, ''))) return decoded.slice(0, 100);
+    const text = this.toText(html);
+    const match = text.match(/(?:phone|tel|telephone|mobile|whatsapp|电话)\s*[:：]?\s*(\+?\d[\d()\-\s.]{6,}\d)/i);
+    return String(match?.[1] || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+  }
+
   private emailRank(email: string) {
     const prefix = email.split('@')[0];
     const preferred = PREFERRED_EMAIL_PREFIXES.indexOf(prefix);
@@ -495,8 +667,42 @@ export class LeadSearchService {
     try { return new URL(url).hostname.replace(/^www\./, '').split('.')[0]; } catch { return '未识别公司'; }
   }
 
+  private segmentForCatalogIndustry(industry: string, segments: string[]) {
+    const rules: Array<[RegExp, RegExp]> = [
+      [/petroleum|oil|gas|petrochemical/i, /oil\s*&?\s*gas company|industrial supplier|epc contractor/i],
+      [/electric power|energy/i, /power plant|energy company|epc contractor/i],
+      [/shipbuilding|marine/i, /shipyard|marine company/i],
+      [/construction/i, /construction|infrastructure contractor|epc contractor/i],
+      [/chemical|mining|water/i, /industrial supplier|oem manufacturer|epc contractor/i],
+    ];
+    const rule = rules.find(([industryPattern]) => industryPattern.test(industry));
+    return rule ? segments.find((segment) => rule[1].test(segment)) || '' : '';
+  }
+
   private hostname(value: string) {
     try { return new URL(value).hostname.toLowerCase().replace(/^www\./, ''); } catch { return ''; }
+  }
+
+  private isSafePublicUrl(value: string) {
+    try {
+      const url = new URL(value);
+      if (!['http:', 'https:'].includes(url.protocol)) return false;
+      const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+      if (!host || host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) return false;
+      if (host === '::1' || host.startsWith('fe80:') || host.startsWith('fc') || host.startsWith('fd')) return false;
+      const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+      if (ipv4) {
+        const parts = ipv4.slice(1).map(Number);
+        if (parts.some((part) => part > 255)) return false;
+        if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0 ||
+          (parts[0] === 169 && parts[1] === 254) ||
+          (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+          (parts[0] === 192 && parts[1] === 168)) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private domainsMatch(first: string, second: string) {
