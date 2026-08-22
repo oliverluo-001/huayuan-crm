@@ -741,6 +741,9 @@ export interface B2BAutomationProgress {
   leadsFound?: number;
   leadsCleaned?: number;
   leadsValidated?: number;
+  sourceMode?: "web-search" | "multi-source-crawler";
+  sourceNames?: string[];
+  sourceErrors?: string[];
   duplicateRemoved?: number;
   searchedResults?: number;
   websitesCrawled?: number;

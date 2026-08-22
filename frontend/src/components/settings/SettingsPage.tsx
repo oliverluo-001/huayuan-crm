@@ -804,7 +804,7 @@ export function SettingsPage() {
                   </>
                 ) : (
                   <>
-                    <strong>自动获客搜索：使用公开企业索引与官网爬虫</strong>
+                    <strong>自动获客搜索：使用多来源企业发现与官网深度爬取</strong>
                     <p className="text-muted-foreground">
                       无需密钥也可按地区和下游行业发现企业官网、提取公开联系方式并验证邮箱；专业接口仅用于扩大覆盖。
                     </p>
@@ -883,7 +883,7 @@ export function SettingsPage() {
               {/* Search profile list */}
               {searchProfiles.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  尚未配置专业搜索接口。系统将使用公开企业目录和官网爬虫，覆盖范围取决于公开目录中的企业与官网资料。
+                  尚未配置专业搜索接口。系统将自动组合 Wikidata、公开行业/展商目录、Common Crawl 企业域名索引和官网深度爬取；单一来源不可用时会跳过并继续其他来源。
                 </p>
               ) : (
                 <div className="space-y-2">

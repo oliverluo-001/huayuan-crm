@@ -379,8 +379,10 @@ export class LeadsService implements OnModuleInit {
     let verifiedTargetReached = false;
     let prequalifiedTotal = Number(task.automationProgress?.qualifiedCandidates || 0);
     let lastValidatedPrequalified = Number(task.automationProgress?.lastValidatedCandidates || 0);
-    let catalogCrawlerMode = Boolean(task.agentState?.catalogCrawlerMode);
-    let catalogBatch = Number(task.agentState?.catalogBatch || 0);
+    let multiSourceCrawlerMode = Boolean(
+      task.agentState?.multiSourceCrawlerMode || task.agentState?.catalogCrawlerMode,
+    );
+    let sourceBatch = Number(task.agentState?.sourceBatch ?? task.agentState?.catalogBatch ?? 0);
 
     for (let i = cursor; i < totalQueries; i++) {
       // Check if cancelled
@@ -422,13 +424,13 @@ export class LeadsService implements OnModuleInit {
           {
             regions: current.targetRegions || (current.targetRegion ? [current.targetRegion] : []),
             industries: current.buyerIndustries || [],
-            preferCatalogCrawler: catalogCrawlerMode,
-            catalogBatch,
+            preferMultiSourceCrawler: multiSourceCrawlerMode,
+            sourceBatch,
           },
         );
-        if (discovery.mode === 'catalog-crawler') {
-          catalogCrawlerMode = true;
-          catalogBatch += 1;
+        if (discovery.mode === 'multi-source-crawler') {
+          multiSourceCrawlerMode = true;
+          sourceBatch += 1;
         }
         const added = await this.saveDiscoveredCandidates(current, discovery.candidates);
         prequalifiedTotal += added.qualified;
@@ -447,14 +449,16 @@ export class LeadsService implements OnModuleInit {
             qualifiedCandidates: prequalifiedTotal,
             lastValidatedCandidates: lastValidatedPrequalified,
             sourceMode: discovery.mode,
+            sourceNames: discovery.sources || [],
+            sourceErrors: discovery.sourceErrors || [],
           } as any,
           agentState: {
             ...(current.agentState || {}),
-            catalogCrawlerMode,
-            catalogBatch,
+            multiSourceCrawlerMode,
+            sourceBatch,
           } as any,
-          lastMessage: discovery.mode === 'catalog-crawler'
-            ? `公开搜索受限，已完成第 ${catalogBatch} 批企业目录官网爬取，累计发现 ${totalFound} 条线索`
+          lastMessage: discovery.mode === 'multi-source-crawler'
+            ? `已完成第 ${sourceBatch} 批多来源企业发现与官网深度核验（${(discovery.sources || []).join('、') || '公开目录'}），累计发现 ${totalFound} 条线索`
             : `已完成 ${i + 1}/${totalQueries} 个查询，累计发现 ${totalFound} 条企业线索`,
         });
 
@@ -476,10 +480,10 @@ export class LeadsService implements OnModuleInit {
           });
           if (verifiedTargetReached) break;
         }
-        if (discovery.mode === 'catalog-crawler' && discovery.sourceExhausted) break;
+        if (discovery.mode === 'multi-source-crawler' && discovery.sourceExhausted) break;
       } catch (error) {
         const message = this.errorMessage(error);
-        const sourceUnavailable = /搜索 API|搜索源均不可用|公开搜索|企业目录|Wikidata|HTTP (?:401|403|429)|配额|quota|credit/i.test(message);
+        const sourceUnavailable = /搜索 API|搜索源均不可用|所有公开企业来源|公开搜索|企业目录|行业目录|展商目录|Wikidata|Common Crawl|HTTP (?:401|403|429)|配额|quota|credit/i.test(message);
         await this.leadTaskRepository.update(task.id, {
           ...(sourceUnavailable ? {} : { automationCursor: i + 1 }),
           automationProgress: { ...progress, searchedQueries: sourceUnavailable ? i : i + 1, lastError: message } as any,
@@ -542,6 +546,7 @@ export class LeadsService implements OnModuleInit {
       status: completed ? 'completed' : 'exhausted',
       automationStage: 'completed',
       automationProgress: {
+        ...(finalTask.automationProgress || {}),
         stage: 'completed',
         progress: 100,
         queryTotal: totalQueries,
@@ -586,6 +591,8 @@ export class LeadsService implements OnModuleInit {
     options: {
       regions?: string[];
       industries?: string[];
+      preferMultiSourceCrawler?: boolean;
+      sourceBatch?: number;
       preferCatalogCrawler?: boolean;
       catalogBatch?: number;
     } = {},
@@ -597,7 +604,7 @@ export class LeadsService implements OnModuleInit {
       } catch (error) {
         lastError = error;
         const message = this.errorMessage(error);
-        if (/搜索源均不可用|公开搜索|企业目录|Wikidata|HTTP (?:400|401|403|429)|配额|quota|credit/i.test(message)) throw error;
+        if (/搜索源均不可用|所有公开企业来源|公开搜索|企业目录|行业目录|展商目录|Wikidata|Common Crawl|HTTP (?:400|401|403|429)|配额|quota|credit/i.test(message)) throw error;
         if (attempt < 3) await this.delay(attempt * 750);
       }
     }

@@ -695,10 +695,18 @@ export function LeadsPage() {
               当前：{progress.currentQuery}
             </div>
           )}
+          {(progress.sourceNames || []).length > 0 && (
+            <div className="lead-current-query" title={(progress.sourceNames || []).join("、")}>
+              本批来源：{(progress.sourceNames || []).join("、")}
+            </div>
+          )}
         </div>
         <small>
           {activeTask.lastMessage || ""}
-          {(progress as any).lastError ? ` · 最近错误：${(progress as any).lastError}` : ""}
+          {progress.lastError ? ` · 最近错误：${progress.lastError}` : ""}
+          {(progress.sourceErrors || []).length > 0
+            ? ` · 已跳过不可用来源：${(progress.sourceErrors || []).join("；")}`
+            : ""}
         </small>
       </div>
     );
