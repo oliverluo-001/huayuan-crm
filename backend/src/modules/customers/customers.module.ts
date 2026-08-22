@@ -18,6 +18,7 @@ import { EmailLog, EmailTaskRecipient } from '../email/entities';
 import { CustomerAttachment } from '../attachments/customer-attachment.entity';
 import { Product } from '../products/entities';
 import { Lead } from '../leads/entities';
+import { User } from '../auth/entities/user.entity';
 import { SettingsModule } from '../settings/settings.module';
 import { CustomersService } from './customers.service';
 import { QuoteOutputService } from './quote-output.service';
@@ -57,6 +58,7 @@ import { CustomerDuplicatesService } from './customer-duplicates.service';
       CustomerAttachment,
       Product,
       Lead,
+      User,
     ]),
   ],
   controllers: [

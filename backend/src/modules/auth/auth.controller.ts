@@ -54,10 +54,9 @@ export class AuthController {
   @Post('register')
   async register(
     @Body() dto: RegisterDto,
-    @Res({ passthrough: true }) res: Response,
+    @Res({ passthrough: true }) _res: Response,
   ) {
     const result = await this.authService.register(dto);
-    if ('token' in result && result.token) this.setSessionCookie(res, result.token);
     return this.withoutToken(result);
   }
 

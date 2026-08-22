@@ -1578,7 +1578,12 @@ export function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-6">
               <form onSubmit={handleCreateUser} className="space-y-4 border rounded-lg p-4">
-                <h4 className="font-medium text-sm">新建账号</h4>
+                <div>
+                  <h4 className="font-medium text-sm">新建账号</h4>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    所有自主注册账号一律先进入待审批状态，只有超级管理员批准后才能登录。
+                  </p>
+                </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>用户名 *</Label>

@@ -72,7 +72,14 @@ describe('CustomersService imports', () => {
       ]),
     );
 
-    expect(result).toEqual({ created: 2, updated: 0, skipped: 0, total: 2 });
+    expect(result).toEqual({
+      created: 2,
+      updated: 0,
+      skipped: 0,
+      blocked: 0,
+      blockedDuplicates: [],
+      total: 2,
+    });
     expect(customerRepository.create).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -113,7 +120,14 @@ describe('CustomersService imports', () => {
       ]),
     );
 
-    expect(result).toEqual({ created: 0, updated: 1, skipped: 0, total: 1 });
+    expect(result).toEqual({
+      created: 0,
+      updated: 1,
+      skipped: 0,
+      blocked: 0,
+      blockedDuplicates: [],
+      total: 1,
+    });
     expect(existing).toMatchObject({
       company: 'Original Company',
       contact: 'Original Contact',
@@ -140,9 +154,116 @@ describe('CustomersService imports', () => {
       '7',
     );
 
-    expect(result).toEqual({ created: 0, updated: 0, skipped: 1, total: 1 });
+    expect(result).toEqual({
+      created: 0,
+      updated: 0,
+      skipped: 1,
+      blocked: 1,
+      blockedDuplicates: [
+        {
+          incomingCompany: 'Incoming Override',
+          existingCompany: 'Protected Account',
+          matchedBy: 'email',
+        },
+      ],
+      total: 1,
+    });
     expect(existing.company).toBe('Protected Account');
     expect(customerRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('blocks cross-sales duplicates found by domain, phone, and company name', async () => {
+    customerRepository.find.mockResolvedValue([
+      {
+        id: 3,
+        customerId: 'cus_3',
+        company: 'Acme Industrial Co., Ltd.',
+        email: 'buyer@acme-industrial.com',
+        phone: '+66 2 123 4567',
+        website: 'https://www.acme-industrial.com',
+        ownerId: '8',
+      },
+    ]);
+
+    const result = await service.parseAndImport(
+      upload([
+        { Company: 'Domain Match', Website: 'acme-industrial.com' },
+        { Company: 'Phone Match', Phone: '0066-2-123-4567' },
+        { Company: 'Acme Industrial' },
+      ]),
+      '7',
+    );
+
+    expect(result.created).toBe(0);
+    expect(result.updated).toBe(0);
+    expect(result.skipped).toBe(3);
+    expect(result.blocked).toBe(3);
+    expect(result.blockedDuplicates.map((item) => item.matchedBy)).toEqual([
+      'domain',
+      'phone',
+      'company',
+    ]);
+    expect(customerRepository.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('CustomersService bulk assignment', () => {
+  it('transfers selected customers and their opportunities to an active salesperson', async () => {
+    const customers = [
+      { id: 11, ownerId: '2', collaboratorIds: ['4'] },
+      { id: 12, ownerId: '', collaboratorIds: [] },
+    ];
+    const customerRepository = {
+      find: jest.fn().mockResolvedValue(customers),
+      save: jest.fn(async (values) => values),
+    };
+    const opportunityRepository = { update: jest.fn().mockResolvedValue({ affected: 2 }) };
+    const activityRepository = {
+      create: jest.fn((value) => value),
+      save: jest.fn(async (values) => values),
+    };
+    const userRepository = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 7,
+        username: 'sales.7',
+        displayName: '销售七组',
+        role: 'sales',
+        status: 'active',
+        active: true,
+      }),
+    };
+    const service = new CustomersService(
+      customerRepository as any,
+      {} as any,
+      activityRepository as any,
+      {} as any,
+      opportunityRepository as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      undefined,
+      undefined,
+      userRepository as any,
+    );
+
+    const result = await service.bulkAssign({ ids: [11, 12], ownerId: '7' });
+
+    expect(result).toEqual({ updated: 2, ownerId: '7', ownerName: '销售七组' });
+    expect(customers).toEqual([
+      { id: 11, ownerId: '7', collaboratorIds: [] },
+      { id: 12, ownerId: '7', collaboratorIds: [] },
+    ]);
+    expect(opportunityRepository.update).toHaveBeenCalledWith(
+      expect.anything(),
+      { ownerId: '7', collaboratorIds: [] },
+    );
+    expect(activityRepository.save).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ customerId: 11, subject: '客户负责人已分配' }),
+      ]),
+    );
   });
 });
 

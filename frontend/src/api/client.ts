@@ -308,6 +308,14 @@ export async function getCustomers(
   return api<CustomerListResult>(`/api/customers?${query}`);
 }
 
+export async function getCustomerIds(
+  filters: Record<string, string>,
+): Promise<string[]> {
+  const query = new URLSearchParams(filters).toString();
+  const ids = await api<Array<string | number>>(`/api/customers/ids?${query}`);
+  return ids.map(String);
+}
+
 export async function getCustomer360(id: string): Promise<Customer360> {
   return api<Customer360>(`/api/customers/${encodeURIComponent(id)}/360`);
 }
@@ -333,7 +341,10 @@ export async function deleteCustomer(id: string): Promise<void> {
 }
 
 export async function bulkDeleteCustomers(ids: string[]): Promise<void> {
-  await api("/api/customers/bulk-delete", { method: "POST", body: { ids } });
+  await api("/api/customers/bulk-delete", {
+    method: "POST",
+    body: { ids: ids.map(Number) },
+  });
 }
 
 export async function bulkUpdateCustomerTags(
@@ -343,7 +354,7 @@ export async function bulkUpdateCustomerTags(
 ): Promise<void> {
   await api("/api/customers/bulk-tags", {
     method: "POST",
-    body: { ids, tag, action },
+    body: { ids: ids.map(Number), tag, action },
   });
 }
 
@@ -353,7 +364,17 @@ export async function bulkUpdateCustomerTier(
 ): Promise<void> {
   await api("/api/customers/bulk-tier", {
     method: "POST",
-    body: { ids, tier },
+    body: { ids: ids.map(Number), tier },
+  });
+}
+
+export async function bulkAssignCustomers(
+  ids: string[],
+  ownerId: string,
+): Promise<{ updated: number; ownerId: string; ownerName: string }> {
+  return api("/api/customers/bulk-assign", {
+    method: "POST",
+    body: { ids: ids.map(Number), ownerId },
   });
 }
 
@@ -1083,6 +1104,12 @@ export async function importCustomers(file: File): Promise<{
   created: number;
   updated: number;
   skipped: number;
+  blocked: number;
+  blockedDuplicates: Array<{
+    incomingCompany: string;
+    existingCompany: string;
+    matchedBy: "email" | "domain" | "phone" | "company";
+  }>;
 }> {
   const formData = new FormData();
   formData.append("file", file);
@@ -1094,6 +1121,7 @@ export async function previewImport(file: File): Promise<{
   withEmail: number;
   duplicateCount: number;
   duplicateUploadCount: number;
+  blockedCount: number;
 }> {
   const formData = new FormData();
   formData.append("file", file);

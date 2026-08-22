@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, Like, FindOptionsWhere, In, Not, IsNull } from "typeorm";
+import { DataSource, Repository, Like, FindOptionsWhere, In, Not, IsNull } from "typeorm";
 import * as xlsx from "xlsx";
 import {
   Customer,
@@ -25,6 +25,7 @@ import {
   BulkTagsDto,
   BulkDeleteDto,
   BulkTierDto,
+  BulkAssignCustomersDto,
   CreateContactDto,
   UpdateContactDto,
   CreateActivityDto,
@@ -42,6 +43,7 @@ import {
   UpdateCustomerViewDto,
 } from "./dto";
 import { EmailLog } from "../email/entities/email-log.entity";
+import { User } from "../auth/entities/user.entity";
 
 export interface OpportunityActor {
   userId: string;
@@ -61,8 +63,35 @@ interface UploadedFile {
   stream?: any;
 }
 
+type ImportDuplicateMatchType = "email" | "domain" | "phone" | "company";
+
+interface ImportDuplicateIndexes {
+  email: Map<string, Customer>;
+  domain: Map<string, Customer>;
+  phone: Map<string, Customer>;
+  company: Map<string, Customer>;
+}
+
+const PUBLIC_IMPORT_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "yahoo.com",
+  "icloud.com",
+  "qq.com",
+  "163.com",
+  "126.com",
+  "foxmail.com",
+  "proton.me",
+  "protonmail.com",
+]);
+
 @Injectable()
 export class CustomersService {
+  private importQueue: Promise<void> = Promise.resolve();
+
   constructor(
     @InjectRepository(Customer)
     private customerRepository: Repository<Customer>,
@@ -88,6 +117,9 @@ export class CustomersService {
     private opportunityStageHistoryRepository?: Repository<OpportunityStageHistory>,
     @InjectRepository(QuoteTermTemplate)
     private quoteTermTemplateRepository?: Repository<QuoteTermTemplate>,
+    @InjectRepository(User)
+    private userRepository?: Repository<User>,
+    private dataSource?: DataSource,
   ) {}
 
   // ==================== Customer CRUD ====================
@@ -437,9 +469,7 @@ export class CustomersService {
   async findAllIds(filters: Record<string, any> = {}) {
     const result = await this.findAll(filters);
     const customers = (result as any).customers || result;
-    return (Array.isArray(customers) ? customers : []).map(
-      (c: any) => c.customerId,
-    );
+    return (Array.isArray(customers) ? customers : []).map((c: any) => c.id);
   }
 
   async deleteAll() {
@@ -549,6 +579,80 @@ export class CustomersService {
       { tier: bulkTierDto.tier as any },
     );
     return { updated: result.affected || 0, tier: bulkTierDto.tier };
+  }
+
+  async bulkAssign(bulkAssignDto: BulkAssignCustomersDto) {
+    const ownerId = String(bulkAssignDto.ownerId || "").trim();
+    const numericOwnerId = Number(ownerId);
+    if (!ownerId || !Number.isInteger(numericOwnerId) || numericOwnerId <= 0) {
+      throw new BadRequestException("请选择有效的销售负责人");
+    }
+    const owner = this.userRepository
+      ? await this.userRepository.findOne({
+          where: {
+            id: numericOwnerId,
+            role: "sales",
+            status: "active",
+            active: true,
+          },
+        })
+      : null;
+    if (this.userRepository && !owner) {
+      throw new BadRequestException("所选销售账号不存在、未审批或已停用");
+    }
+    const ids = [...new Set(bulkAssignDto.ids.map(Number))].filter(
+      (id) => Number.isInteger(id) && id > 0,
+    );
+    if (!ids.length) throw new BadRequestException("请至少选择一个客户");
+
+    const assign = async (
+      customerRepository: Repository<Customer>,
+      opportunityRepository: Repository<Opportunity>,
+      activityRepository: Repository<Activity>,
+    ) => {
+      const customers = await customerRepository.find({ where: { id: In(ids) } });
+      if (!customers.length) throw new NotFoundException("没有找到可分配的客户");
+      for (const customer of customers) {
+        customer.ownerId = ownerId;
+        customer.collaboratorIds = [];
+      }
+      await customerRepository.save(customers);
+      await opportunityRepository.update(
+        { customerId: In(customers.map((customer) => customer.id)) },
+        { ownerId, collaboratorIds: [] },
+      );
+      await activityRepository.save(
+        customers.map((customer) =>
+          activityRepository.create({
+            customerId: customer.id,
+            activityId: this.generateId("activity"),
+            type: "note",
+            subject: "客户负责人已分配",
+            content: `由超级管理员分配给 ${owner?.displayName || owner?.username || ownerId}；原协作者授权已清除。`,
+          }),
+        ),
+      );
+      return {
+        updated: customers.length,
+        ownerId,
+        ownerName: owner?.displayName || owner?.username || ownerId,
+      };
+    };
+
+    if (this.dataSource) {
+      return this.dataSource.transaction((manager) =>
+        assign(
+          manager.getRepository(Customer),
+          manager.getRepository(Opportunity),
+          manager.getRepository(Activity),
+        ),
+      );
+    }
+    return assign(
+      this.customerRepository,
+      this.opportunityRepository,
+      this.activityRepository,
+    );
   }
 
   private async findAccessibleCustomers(
@@ -1805,59 +1909,90 @@ export class CustomersService {
 
   // ==================== Import/Export ====================
 
-  async parseAndPreview(file: UploadedFile) {
+  async parseAndPreview(file: UploadedFile, ownerId = "") {
     const rows = await this.parseExcelFile(file);
     const normalizedRows = rows.map((row) =>
       this.normalizeImportedMasterRow(row),
     );
     const customers = await this.customerRepository.find();
-    const existingEmails = new Set(
-      customers.filter((c) => c.email).map((c) => this.normalizeEmail(c.email)),
-    );
+    const contacts = await this.loadImportContacts();
+    const existingIndexes = this.buildImportDuplicateIndexes(customers, contacts);
+    const uploadIndexes = this.emptyImportDuplicateIndexes();
 
     const duplicates: any[] = [];
-    const duplicateUploadEmails = new Set<string>();
-    const seenUploadEmails = new Set<string>();
+    const duplicateUploadKeys = new Set<string>();
+    let duplicateUploadCount = 0;
+    let blockedCount = 0;
 
-    for (const row of normalizedRows) {
-      const email = row.email;
-      if (!email) continue;
-      if (seenUploadEmails.has(email)) {
-        duplicateUploadEmails.add(email);
-      }
-      seenUploadEmails.add(email);
-      if (existingEmails.has(email)) {
+    normalizedRows.forEach((row, index) => {
+      const existingMatch = this.findImportDuplicate(row, existingIndexes);
+      if (existingMatch) {
+        const blocked = Boolean(
+          ownerId && !this.hasCustomerAccess(existingMatch.customer, ownerId),
+        );
+        if (blocked) blockedCount++;
         duplicates.push({
-          email,
-          existingCompany:
-            customers.find((c) => c.email?.toLowerCase() === email)?.company ||
-            "",
+          matchedBy: existingMatch.type,
+          matchedValue: existingMatch.value,
+          existingCompany: existingMatch.customer.company || "",
           incomingCompany: row.company,
+          blocked,
         });
       }
-    }
+      const uploadMatch = this.findImportDuplicate(row, uploadIndexes);
+      if (uploadMatch) {
+        duplicateUploadCount++;
+        duplicateUploadKeys.add(`${uploadMatch.type}:${uploadMatch.value}`);
+      } else {
+        this.addImportCustomerToIndexes(
+          uploadIndexes,
+          { ...row, id: -(index + 1) } as Customer,
+        );
+      }
+    });
 
     return {
       total: rows.length,
       withEmail: normalizedRows.filter((row) => row.email).length,
       duplicateCount: duplicates.length,
-      duplicateUploadCount: duplicateUploadEmails.size,
+      duplicateUploadCount,
+      blockedCount,
       duplicates: duplicates.slice(0, 20),
-      duplicateUploadEmails: [...duplicateUploadEmails].slice(0, 20),
+      duplicateUploadKeys: [...duplicateUploadKeys].slice(0, 20),
     };
   }
 
   async parseAndImport(file: UploadedFile, ownerId = "") {
+    const previousImport = this.importQueue;
+    let releaseImport!: () => void;
+    this.importQueue = new Promise<void>((resolve) => {
+      releaseImport = resolve;
+    });
+    await previousImport;
+    try {
+      return await this.performImport(file, ownerId);
+    } finally {
+      releaseImport();
+    }
+  }
+
+  private async performImport(file: UploadedFile, ownerId = "") {
     const rows = await this.parseExcelFile(file);
     let created = 0;
     let updated = 0;
     let skipped = 0;
+    let blocked = 0;
+    const blockedDuplicates: Array<{
+      incomingCompany: string;
+      existingCompany: string;
+      matchedBy: ImportDuplicateMatchType;
+    }> = [];
 
     const existingCustomers = await this.customerRepository.find();
-    const customersByEmail = new Map(
-      existingCustomers
-        .filter((customer) => customer.email)
-        .map((customer) => [this.normalizeEmail(customer.email), customer]),
+    const contacts = await this.loadImportContacts();
+    const duplicateIndexes = this.buildImportDuplicateIndexes(
+      existingCustomers,
+      contacts,
     );
 
     for (const row of rows) {
@@ -1866,17 +2001,25 @@ export class CustomersService {
         skipped++;
         continue;
       }
-      const existing = data.email
-        ? customersByEmail.get(data.email)
-        : undefined;
+      const duplicateMatch = this.findImportDuplicate(data, duplicateIndexes);
+      const existing = duplicateMatch?.customer;
 
       if (existing) {
         if (ownerId && !this.hasCustomerAccess(existing, ownerId)) {
+          blocked++;
           skipped++;
+          if (blockedDuplicates.length < 20) {
+            blockedDuplicates.push({
+              incomingCompany: data.company,
+              existingCompany: existing.company,
+              matchedBy: duplicateMatch!.type,
+            });
+          }
           continue;
         }
         Object.assign(existing, this.mergeImportedCustomer(data, existing));
         await this.customerRepository.save(existing);
+        this.addImportCustomerToIndexes(duplicateIndexes, existing);
         updated++;
       } else {
         const customer = this.customerRepository.create({
@@ -1886,12 +2029,19 @@ export class CustomersService {
           customerId: this.generateId("cus"),
         });
         const saved = await this.customerRepository.save(customer);
-        if (saved.email) customersByEmail.set(saved.email, saved);
+        this.addImportCustomerToIndexes(duplicateIndexes, saved);
         created++;
       }
     }
 
-    return { created, updated, skipped, total: rows.length };
+    return {
+      created,
+      updated,
+      skipped,
+      blocked,
+      blockedDuplicates,
+      total: rows.length,
+    };
   }
 
   async upsertLeadCustomer(data: Partial<Customer>, ownerId = "") {
@@ -2104,6 +2254,137 @@ export class CustomersService {
     return String(value || "")
       .trim()
       .toLowerCase();
+  }
+
+  private async loadImportContacts() {
+    if (typeof (this.contactRepository as any)?.find !== "function") return [];
+    return this.contactRepository.find();
+  }
+
+  private emptyImportDuplicateIndexes(): ImportDuplicateIndexes {
+    return {
+      email: new Map(),
+      domain: new Map(),
+      phone: new Map(),
+      company: new Map(),
+    };
+  }
+
+  private buildImportDuplicateIndexes(
+    customers: Customer[],
+    contacts: Contact[] = [],
+  ) {
+    const indexes = this.emptyImportDuplicateIndexes();
+    const customersById = new Map(customers.map((customer) => [customer.id, customer]));
+    customers.forEach((customer) =>
+      this.addImportCustomerToIndexes(indexes, customer),
+    );
+    for (const contact of contacts) {
+      const customer = customersById.get(contact.customerId);
+      if (!customer) continue;
+      const email = this.normalizeEmail(contact.email || "");
+      if (email && !indexes.email.has(email)) indexes.email.set(email, customer);
+      const domain = this.importEmailDomain(email);
+      if (domain && !indexes.domain.has(domain)) indexes.domain.set(domain, customer);
+      for (const rawPhone of [contact.phone, contact.whatsapp]) {
+        const phone = this.normalizeImportPhone(rawPhone || "");
+        if (phone && !indexes.phone.has(phone)) indexes.phone.set(phone, customer);
+      }
+    }
+    return indexes;
+  }
+
+  private addImportCustomerToIndexes(
+    indexes: ImportDuplicateIndexes,
+    customer: Customer,
+  ) {
+    const email = this.normalizeEmail(customer.email || "");
+    if (email && !indexes.email.has(email)) indexes.email.set(email, customer);
+    const domains = [
+      this.importEmailDomain(email),
+      this.normalizeImportDomain(customer.website || ""),
+    ].filter(Boolean);
+    for (const domain of domains) {
+      if (!indexes.domain.has(domain)) indexes.domain.set(domain, customer);
+    }
+    const phone = this.normalizeImportPhone(customer.phone || "");
+    if (phone && !indexes.phone.has(phone)) indexes.phone.set(phone, customer);
+    const company = this.normalizeImportCompany(customer.company || "");
+    if (company && !indexes.company.has(company)) indexes.company.set(company, customer);
+  }
+
+  private findImportDuplicate(
+    incoming: Partial<Customer>,
+    indexes: ImportDuplicateIndexes,
+  ): { type: ImportDuplicateMatchType; value: string; customer: Customer } | null {
+    const candidates: Array<[ImportDuplicateMatchType, string]> = [
+      ["email", this.normalizeEmail(incoming.email || "")],
+      ["phone", this.normalizeImportPhone(incoming.phone || "")],
+      ["domain", this.importEmailDomain(incoming.email || "")],
+      ["domain", this.normalizeImportDomain(incoming.website || "")],
+      ["company", this.normalizeImportCompany(incoming.company || "")],
+    ];
+    for (const [type, value] of candidates) {
+      if (!value) continue;
+      const customer = indexes[type].get(value);
+      if (customer) return { type, value, customer };
+    }
+    return null;
+  }
+
+  private importEmailDomain(value: string) {
+    const email = this.normalizeEmail(value);
+    const domain = email.includes("@") ? email.split("@")[1] : "";
+    return domain && !PUBLIC_IMPORT_EMAIL_DOMAINS.has(domain) ? domain : "";
+  }
+
+  private normalizeImportDomain(value: string) {
+    const raw = String(value || "").trim().toLowerCase();
+    if (!raw) return "";
+    try {
+      const url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+      return url.hostname.replace(/^www\./, "").replace(/\.$/, "");
+    } catch {
+      return raw
+        .replace(/^https?:\/\//, "")
+        .split("/")[0]
+        .split(":")[0]
+        .replace(/^www\./, "")
+        .replace(/\.$/, "");
+    }
+  }
+
+  private normalizeImportPhone(value: string) {
+    let digits = String(value || "").replace(/(?:ext\.?|x|转)\s*\d+$/i, "");
+    digits = digits.replace(/\D/g, "");
+    if (digits.startsWith("00")) digits = digits.slice(2);
+    return digits.length >= 7 ? digits : "";
+  }
+
+  private normalizeImportCompany(value: string) {
+    let company = String(value || "")
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/&/g, "and")
+      .replace(/[（(].*?[）)]/g, "")
+      .replace(/[^\p{L}\p{N}]+/gu, "");
+    const suffixes = [
+      "companylimited", "coltd", "colimited", "corporation", "incorporated",
+      "privatelimited", "pteltd", "sdnbhd", "limited", "company", "corp",
+      "inc", "llc", "ltd", "gmbh", "有限责任公司", "股份有限公司", "有限公司",
+    ];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const suffix of suffixes) {
+        if (company.endsWith(suffix) && company.length > suffix.length + 2) {
+          company = company.slice(0, -suffix.length);
+          changed = true;
+          break;
+        }
+      }
+    }
+    return company.length >= 3 ? company : "";
   }
 
   // ==================== Customer Views ====================

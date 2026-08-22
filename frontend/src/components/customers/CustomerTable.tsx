@@ -37,6 +37,8 @@ import {
   bulkDeleteCustomers,
   bulkUpdateCustomerTags,
   bulkUpdateCustomerTier,
+  bulkAssignCustomers,
+  getCustomerIds,
   createCustomerTag,
   deleteCustomerTag,
   getCustomerTags,
@@ -130,6 +132,9 @@ export function CustomerTable(_props: CustomerTableProps) {
   // Bulk tag/tier
   const [bulkTag, setBulkTag] = useState("");
   const [bulkTier, setBulkTier] = useState("");
+  const [bulkOwnerId, setBulkOwnerId] = useState("");
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
+  const [isAssigning, setIsAssigning] = useState(false);
 
   // Import
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -144,12 +149,12 @@ export function CustomerTable(_props: CustomerTableProps) {
       const duplicateCount = preview.duplicateCount + preview.duplicateUploadCount;
       if (duplicateCount > 0) {
         const confirmed = window.confirm(
-          `检测到 ${duplicateCount} 条重复邮箱。继续后只会补齐现有客户的空白字段，不会覆盖已有公司名称、联系方式或业务资料；如需选择冲突值，请导入后使用“重复客户”合并预览。是否继续？`,
+          `已与总客户池比对，检测到 ${duplicateCount} 条重复记录（按邮箱、企业域名、电话或公司名称识别）${preview.blockedCount ? `，其中 ${preview.blockedCount} 条属于其他销售或未授权范围，将自动跳过` : ""}。可访问的重复客户只会补齐空白字段，不会覆盖重要业务资料。是否继续？`,
         );
         if (!confirmed) return;
       }
       const result = await importCustomers(file);
-      toast.success(`导入完成：新增 ${result.created} 条，合并 ${result.updated} 条，跳过 ${result.skipped} 条。`);
+      toast.success(`导入完成：新增 ${result.created} 条，合并 ${result.updated} 条，跳过 ${result.skipped} 条${result.blocked ? `（其中跨销售重复 ${result.blocked} 条）` : ""}。`);
       const resetFilters = emptyCustomerFilters();
       setCustomerPreset("all");
       setPage(1);
@@ -189,7 +194,7 @@ export function CustomerTable(_props: CustomerTableProps) {
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(new Set(customers.map((c) => c.id)));
+      setSelectedIds(new Set(customers.map((customer) => String(customer.id))));
     } else {
       setSelectedIds(new Set());
     }
@@ -197,10 +202,11 @@ export function CustomerTable(_props: CustomerTableProps) {
 
   const handleSelectOne = (id: string, checked: boolean) => {
     const newSet = new Set(selectedIds);
+    const normalizedId = String(id);
     if (checked) {
-      newSet.add(id);
+      newSet.add(normalizedId);
     } else {
-      newSet.delete(id);
+      newSet.delete(normalizedId);
     }
     setSelectedIds(newSet);
   };
@@ -240,6 +246,33 @@ export function CustomerTable(_props: CustomerTableProps) {
     await bulkUpdateCustomerTier([...selectedIds], bulkTier);
     toast.success("客户分层已更新");
     fetchCustomers();
+  };
+
+  const handleSelectAllMatching = async () => {
+    setIsSelectingAll(true);
+    try {
+      const ids = await getCustomerIds(filters);
+      setSelectedIds(new Set(ids));
+      toast.success(`已选择当前筛选结果中的 ${ids.length} 个客户`);
+    } finally {
+      setIsSelectingAll(false);
+    }
+  };
+
+  const handleBulkAssign = async () => {
+    if (role !== "admin" || !bulkOwnerId || !selectedIds.size) return;
+    const salesperson = userDirectory.find((user) => user.id === bulkOwnerId);
+    const ownerName = salesperson?.displayName || salesperson?.username || "所选销售";
+    if (!confirm(`确认将选中的 ${selectedIds.size} 个客户转交给“${ownerName}”？客户及其商机负责人会同步更新，原协作者授权会清除。`)) return;
+    setIsAssigning(true);
+    try {
+      const result = await bulkAssignCustomers([...selectedIds], bulkOwnerId);
+      toast.success(`已将 ${result.updated} 个客户分配给 ${result.ownerName}`);
+      setSelectedIds(new Set());
+      await fetchCustomers();
+    } finally {
+      setIsAssigning(false);
+    }
   };
 
   const handleSaveView = async () => {
@@ -541,6 +574,40 @@ export function CustomerTable(_props: CustomerTableProps) {
             <Button size="sm" variant="outline" className="h-7 text-xs" disabled={selectedIds.size === 0} onClick={() => handleBulkTag("add")}>添加标签</Button>
             <Button size="sm" variant="outline" className="h-7 text-xs" disabled={selectedIds.size === 0} onClick={() => handleBulkTag("remove")}>移除标签</Button>
           </div>
+          {role === "admin" && (
+            <div className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
+              <span className="text-xs font-medium whitespace-nowrap">客户分配</span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs"
+                disabled={isSelectingAll || total === 0}
+                onClick={handleSelectAllMatching}
+              >
+                {isSelectingAll ? "选择中..." : `一键全选筛选结果（${total}）`}
+              </Button>
+              <Select value={bulkOwnerId} onValueChange={(value) => value !== null && setBulkOwnerId(value)}>
+                <SelectTrigger className="h-7 text-xs w-[150px]">
+                  <SelectValue placeholder="选择销售负责人" />
+                </SelectTrigger>
+                <SelectContent>
+                  {userDirectory.filter((user) => user.role === "sales").map((user) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {user.displayName || user.username}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                className="h-7 text-xs"
+                disabled={!bulkOwnerId || selectedIds.size === 0 || isAssigning}
+                onClick={handleBulkAssign}
+              >
+                {isAssigning ? "分配中..." : "分配选中客户"}
+              </Button>
+            </div>
+          )}
           <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground whitespace-nowrap">客户分层</span>
             <Select value={bulkTier} onValueChange={(v) => v !== null && setBulkTier(v)}>
@@ -648,7 +715,7 @@ export function CustomerTable(_props: CustomerTableProps) {
             <TableRow>
               {canManage && <TableHead className="w-10">
                 <Checkbox
-                  checked={customers.length > 0 && selectedIds.size === customers.length}
+                  checked={customers.length > 0 && customers.every((customer) => selectedIds.has(String(customer.id)))}
                   onCheckedChange={handleSelectAll}
                 />
               </TableHead>}
@@ -688,7 +755,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                 <TableRow key={customer.id}>
                   {canManage && <TableCell>
                     <Checkbox
-                      checked={selectedIds.has(customer.id)}
+                      checked={selectedIds.has(String(customer.id))}
                       onCheckedChange={(checked) => handleSelectOne(customer.id, !!checked)}
                     />
                   </TableCell>}
@@ -704,6 +771,11 @@ export function CustomerTable(_props: CustomerTableProps) {
                         {customer.business || "未填写主营业务"}
                       </p>
                       <p className="text-xs text-muted-foreground">{customer.email || "未填写邮箱"}</p>
+                      {role === "admin" && (
+                        <p className="text-xs text-muted-foreground">
+                          负责人：{userDirectory.find((user) => user.id === String(customer.ownerId))?.displayName || "未分配"}
+                        </p>
+                      )}
                       <div className="flex flex-wrap items-center gap-1 mt-0.5">
                         {customer.emailStatus === "invalid" && (
                           <Badge variant="destructive" className="text-[10px] px-1 py-0">邮箱异常</Badge>

@@ -23,6 +23,7 @@ import {
   BulkTagsDto,
   BulkDeleteDto,
   BulkTierDto,
+  BulkAssignCustomersDto,
   CreateContactDto,
   UpdateContactDto,
   CreateActivityDto,
@@ -134,6 +135,12 @@ export class CustomersController {
     return this.customersService.bulkTier(bulkTierDto, this.salesOwnerId(user));
   }
 
+  @Post('bulk-assign')
+  @Roles('admin')
+  bulkAssign(@Body() bulkAssignDto: BulkAssignCustomersDto) {
+    return this.customersService.bulkAssign(bulkAssignDto);
+  }
+
   // ==================== 360 View ====================
 
   @Get(':id/360')
@@ -165,11 +172,14 @@ export class CustomersController {
   @Post('import/preview')
   @Roles('admin', 'sales')
   @UseInterceptors(FileInterceptor('file'))
-  async previewImport(@UploadedFile() file: any) {
+  async previewImport(
+    @UploadedFile() file: any,
+    @CurrentUser() user: RequestUser,
+  ) {
     if (!file) {
       throw new BadRequestException('请上传文件');
     }
-    return this.customersService.parseAndPreview(file);
+    return this.customersService.parseAndPreview(file, this.salesOwnerId(user));
   }
 
   @Post('import')
@@ -187,10 +197,11 @@ export class CustomersController {
     @Query() query: Record<string, any>,
     @CurrentUser() user: RequestUser,
   ) {
-    return this.customersService.findAllIds({
-      ...query,
-      ownerId: this.salesOwnerId(user),
-    });
+    const scoped = { ...query };
+    if (user.role === 'sales' || query.ownerId === 'me') {
+      scoped.ownerId = String(user.sub);
+    }
+    return this.customersService.findAllIds(scoped);
   }
 
   @Get(':id')
@@ -824,11 +835,17 @@ export class ImportController {
   @Post('preview')
   @Roles('admin', 'sales')
   @UseInterceptors(FileInterceptor('file'))
-  async previewImport(@UploadedFile() file: any) {
+  async previewImport(
+    @UploadedFile() file: any,
+    @CurrentUser() user: RequestUser,
+  ) {
     if (!file) {
       throw new BadRequestException('请上传文件');
     }
-    return this.customersService.parseAndPreview(file);
+    return this.customersService.parseAndPreview(
+      file,
+      user.role === 'sales' ? String(user.sub) : '',
+    );
   }
 
   @Post()

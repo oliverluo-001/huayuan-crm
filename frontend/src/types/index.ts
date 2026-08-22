@@ -6,7 +6,7 @@ export interface AuthStatus {
   displayName?: string;
   userId?: string;
   role?: string;
-  registrationMode?: "approval" | "open" | "disabled";
+  registrationMode?: "approval" | "disabled";
   registrationEnabled?: boolean;
   registrationRequiresApproval?: boolean;
 }

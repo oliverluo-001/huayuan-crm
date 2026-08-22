@@ -25,7 +25,7 @@ import {
 export class AuthService {
   private readonly maxLoginAttempts: number;
   private readonly lockMinutes: number;
-  private readonly registrationMode: 'approval' | 'open' | 'disabled';
+  private readonly registrationMode: 'approval' | 'disabled';
 
   constructor(
     @InjectRepository(User)
@@ -36,9 +36,10 @@ export class AuthService {
     this.maxLoginAttempts = this.positiveInt('LOGIN_MAX_ATTEMPTS', 5);
     this.lockMinutes = this.positiveInt('LOGIN_LOCK_MINUTES', 15);
     const mode = this.configService.get<string>('REGISTRATION_MODE', 'approval');
-    this.registrationMode = ['approval', 'open', 'disabled'].includes(mode)
-      ? (mode as 'approval' | 'open' | 'disabled')
-      : 'approval';
+    // Public registration can be disabled, but it can never bypass the sole
+    // super administrator's approval. Legacy "open" deployments are treated
+    // as approval mode so a configuration drift cannot activate accounts.
+    this.registrationMode = mode === 'disabled' ? 'disabled' : 'approval';
   }
 
   async getStatus(token?: string) {
@@ -53,7 +54,7 @@ export class AuthService {
       role: user?.role || '',
       registrationMode: this.registrationMode,
       registrationEnabled: this.registrationMode !== 'disabled',
-      registrationRequiresApproval: this.registrationMode === 'approval',
+      registrationRequiresApproval: this.registrationMode !== 'disabled',
     };
   }
 
@@ -86,25 +87,23 @@ export class AuthService {
       throw new ForbiddenException('当前系统未开放在线注册，请联系管理员');
     }
     await this.assertUniqueIdentity(registerDto.username, registerDto.email);
-    const active = this.registrationMode === 'open';
     const user = this.userRepository.create({
       username: registerDto.username.trim(),
       displayName: registerDto.displayName.trim(),
       email: registerDto.email.trim().toLowerCase(),
       role: 'sales',
-      status: active ? 'active' : 'pending',
-      active,
+      status: 'pending',
+      active: false,
       registrationSource: 'self',
       passwordHash: await bcrypt.hash(registerDto.password, 12),
       tokenVersion: 0,
       failedLoginAttempts: 0,
       lockedUntil: null,
       lastLoginAt: null,
-      approvedAt: active ? new Date() : null,
+      approvedAt: null,
       approvedBy: null,
     });
     await this.userRepository.save(user);
-    if (active) return { ...this.loginResult(user), requiresApproval: false };
     return {
       ok: true,
       requiresApproval: true,

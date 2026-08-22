@@ -362,6 +362,8 @@ describe("core CRM workflows (HTTP e2e)", () => {
       created: 1,
       updated: 0,
       skipped: 0,
+      blocked: 0,
+      blockedDuplicates: [],
       total: 1,
     });
     expect(customerRepository.items).toEqual([

@@ -11,6 +11,8 @@ describe('AuthService online accounts', () => {
   let users: User[];
   let repository: any;
   let service: AuthService;
+  let configService: ConfigService;
+  let jwtService: JwtService;
 
   beforeEach(() => {
     users = [];
@@ -36,11 +38,11 @@ describe('AuthService online accounts', () => {
       findOne: jest.fn(),
       createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
     };
-    const jwtService = {
+    jwtService = {
       sign: jest.fn().mockReturnValue('signed-session'),
       verifyAsync: jest.fn(),
     } as unknown as JwtService;
-    const configService = {
+    configService = {
       get: jest.fn((name: string, fallback?: string) => {
         if (name === 'REGISTRATION_MODE') return 'approval';
         return fallback;
@@ -82,6 +84,28 @@ describe('AuthService online accounts', () => {
     expect(status.initialized).toBe(false);
     expect(status.registrationEnabled).toBe(true);
     expect(result.requiresApproval).toBe(true);
+  });
+
+  it('treats legacy open registration configuration as approval-only', async () => {
+    (configService.get as jest.Mock).mockImplementation(
+      (name: string, fallback?: string) =>
+        name === 'REGISTRATION_MODE' ? 'open' : fallback,
+    );
+    service = new AuthService(repository, jwtService, configService);
+
+    const status = await service.getStatus();
+    const result = await service.register({
+      username: 'legacy.open',
+      displayName: 'Legacy Open',
+      email: 'legacy-open@example.com',
+      password: 'StrongPass123!',
+    });
+
+    expect(status.registrationMode).toBe('approval');
+    expect(status.registrationRequiresApproval).toBe(true);
+    expect(result.requiresApproval).toBe(true);
+    expect(users[0].status).toBe('pending');
+    expect(users[0].active).toBe(false);
   });
 
   it('does not allow a pending account to log in', async () => {

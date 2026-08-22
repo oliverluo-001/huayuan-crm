@@ -324,6 +324,16 @@ export class BulkTierDto {
   tier: "A" | "B" | "C" | "D" | "";
 }
 
+export class BulkAssignCustomersDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsNumber({}, { each: true })
+  ids: number[];
+
+  @IsString()
+  ownerId: string;
+}
+
 export class CreateContactDto {
   @IsString()
   name: string;
