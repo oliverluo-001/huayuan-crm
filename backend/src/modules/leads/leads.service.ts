@@ -953,7 +953,8 @@ export class LeadsService implements OnModuleInit {
         phone: candidate.phone,
         website: candidate.website,
         region,
-        country: candidate.country || region,
+        // The selected search region is a targeting condition, not proof of the company's country.
+        country: candidate.country || '',
         largeRegion: this.largeRegionFor(candidate.country || region),
         business: candidate.business,
         targetSegment: candidate.targetSegment,

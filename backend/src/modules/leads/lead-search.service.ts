@@ -349,7 +349,7 @@ export class LeadSearchService {
       : '';
     const countryPattern = countryQids.length ? '(wdt:P17|wdt:P159/wdt:P17) ?country;' : '';
     const industryPattern = industryQids.length
-      ? 'wdt:P452 ?companyIndustry. ?companyIndustry wdt:P279* ?industry.'
+      ? '?company wdt:P452 ?companyIndustry. ?companyIndustry wdt:P279* ?industry.'
       : '';
     const query = `
       SELECT DISTINCT ?company ?companyLabel ?website ?countryLabel ?companyIndustryLabel WHERE {
@@ -372,7 +372,10 @@ export class LeadSearchService {
       },
     });
     const body = await response.text();
-    if (!response.ok) throw new Error(`Wikidata 企业目录 HTTP ${response.status}`);
+    if (!response.ok) {
+      const detail = this.toText(body).slice(0, 240);
+      throw new Error(`Wikidata 企业目录 HTTP ${response.status}${detail ? `：${detail}` : ''}`);
+    }
     let data: any;
     try { data = JSON.parse(body); } catch { throw new Error('Wikidata 企业目录返回了无法解析的数据'); }
     const results = this.dedupeSearchResults((data?.results?.bindings || []).map((binding: any) => ({

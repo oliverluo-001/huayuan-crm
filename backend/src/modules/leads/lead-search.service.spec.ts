@@ -168,6 +168,8 @@ describe('LeadSearchService', () => {
     );
 
     expect(fetchMock.mock.calls[2][0]).toContain('query.wikidata.org/sparql');
+    const wikidataUrl = new URL(String(fetchMock.mock.calls[2][0]));
+    expect(wikidataUrl.searchParams.get('query')).toContain('?company wdt:P452 ?companyIndustry.');
     expect(result.mode).toBe('multi-source-crawler');
     expect(result.sourceExhausted).toBe(true);
     expect(result.candidates).toHaveLength(1);
