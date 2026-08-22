@@ -2,6 +2,7 @@ import {
   ensureInitialAdmin,
   migrateCustomerDuplicateManagement,
   migrateEmailDeliveryMonitoring,
+  migrateLeadRegionCountryCleanup,
   migrateOpportunityManagement,
   migrateP1AcceptanceHardening,
   migrateP21ProductCatalog,
@@ -19,6 +20,26 @@ describe('database migration', () => {
       'ALTER TABLE users MODIFY COLUMN email VARCHAR(255) NULL DEFAULT NULL',
       "UPDATE users SET email = NULL WHERE TRIM(COALESCE(email, '')) = ''",
     ]);
+  });
+
+  it('repeatedly clears broad target regions that were incorrectly stored as lead countries', async () => {
+    const query = jest.fn(async (rawSql: string, params: any[] = []) => {
+      const sql = String(rawSql);
+      if (sql.includes('information_schema.TABLES')) {
+        return [[{ TABLE_NAME: params[1] }], []];
+      }
+      return [{ affectedRows: 1 }, []];
+    });
+
+    await migrateLeadRegionCountryCleanup({ query } as any);
+    await migrateLeadRegionCountryCleanup({ query } as any);
+
+    const updates = query.mock.calls.filter(([sql]) => String(sql).includes('UPDATE leads'));
+    expect(updates).toHaveLength(2);
+    expect(updates[0][0]).toContain("SET country = ''");
+    expect(updates[0][0]).toContain("country IN (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    expect(updates[0][1]).toContain('Middle East');
+    expect(updates[0][1]).toContain('Europe');
   });
 
   it('creates the configured initial administrator and demotes every other administrator', async () => {

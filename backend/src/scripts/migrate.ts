@@ -114,6 +114,7 @@ export async function runDatabaseMigrations() {
     await migrateP21ProductCatalog(connection);
     await migrateP22QuoteEditor(connection);
     await migrateEmailDeliveryMonitoring(connection);
+    await migrateLeadRegionCountryCleanup(connection);
     return { p03Report };
   } finally {
     await connection.end();
@@ -934,6 +935,31 @@ export async function migrateEmailDeliveryMonitoring(connection: Connection) {
   `);
 
   await addIndexIfMissing(connection, "customers", "idx_customers_email_sent", "email_sent_count, journey_stage");
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+  console.log(`Applied migration: ${id}`);
+}
+
+export async function migrateLeadRegionCountryCleanup(connection: Connection) {
+  const id = "20260822_lead_region_country_cleanup";
+  if (!(await tableExists(connection, "leads"))) return;
+  const broadRegions = [
+    "Middle East",
+    "Southeast Asia",
+    "North America",
+    "Europe",
+    "Oceania",
+    "Africa",
+    "South America",
+    "South Asia",
+    "East Asia",
+  ];
+  await connection.query(
+    `UPDATE leads
+     SET country = ''
+     WHERE TRIM(COALESCE(country, '')) = TRIM(COALESCE(region, ''))
+       AND country IN (${broadRegions.map(() => "?").join(", ")})`,
+    broadRegions,
+  );
   await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
   console.log(`Applied migration: ${id}`);
 }
