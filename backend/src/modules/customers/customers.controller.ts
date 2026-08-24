@@ -39,9 +39,12 @@ import {
   UpdateSampleDto,
   CreateCustomerViewDto,
   UpdateCustomerViewDto,
+  SaveQuoteOutputTemplateDto,
+  UpdateQuoteOutputTemplateDto,
 } from './dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { QuoteOutputTemplatesService } from './quote-output-templates.service';
 
 interface RequestUser {
   sub: number;
@@ -511,6 +514,7 @@ export class QuotesController {
   constructor(
     private readonly customersService: CustomersService,
     private readonly quoteOutputService: QuoteOutputService,
+    private readonly quoteOutputTemplatesService: QuoteOutputTemplatesService,
   ) {}
 
   @Get()
@@ -541,7 +545,11 @@ export class QuotesController {
       createQuoteDto.customerId,
       requestOwnerId(user),
     );
-    return this.customersService.createQuote(createQuoteDto);
+    const layout = await this.quoteOutputTemplatesService.resolveLayout(
+      createQuoteDto.outputLayout,
+      createQuoteDto.outputTemplateId,
+    );
+    return this.customersService.createQuote({ ...createQuoteDto, ...layout });
   }
 
   @Put(':id')
@@ -558,7 +566,18 @@ export class QuotesController {
         requestOwnerId(user),
       );
     }
-    return this.customersService.updateQuote(+id, updateQuoteDto);
+    const layout =
+      updateQuoteDto.outputLayout !== undefined ||
+      updateQuoteDto.outputTemplateId !== undefined
+        ? await this.quoteOutputTemplatesService.resolveLayout(
+            updateQuoteDto.outputLayout,
+            updateQuoteDto.outputTemplateId,
+          )
+        : {};
+    return this.customersService.updateQuote(+id, {
+      ...updateQuoteDto,
+      ...layout,
+    });
   }
 
   @Delete(':id')
@@ -676,6 +695,45 @@ export class QuotesController {
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${pack.fileName}"`);
     res.end(pack.buffer);
+  }
+}
+
+@Controller('quote-output-templates')
+export class QuoteOutputTemplatesController {
+  constructor(
+    private readonly quoteOutputTemplatesService: QuoteOutputTemplatesService,
+  ) {}
+
+  @Get()
+  async findAll(@CurrentUser() user: RequestUser) {
+    const templates = await this.quoteOutputTemplatesService.findAll(
+      user.role === 'admin',
+    );
+    return { templates };
+  }
+
+  @Post()
+  @Roles('admin')
+  create(
+    @Body() dto: SaveQuoteOutputTemplateDto,
+    @CurrentUser() user: RequestUser,
+  ) {
+    return this.quoteOutputTemplatesService.create(dto, String(user.sub));
+  }
+
+  @Put(':id')
+  @Roles('admin')
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateQuoteOutputTemplateDto,
+  ) {
+    return this.quoteOutputTemplatesService.update(+id, dto);
+  }
+
+  @Delete(':id')
+  @Roles('admin')
+  remove(@Param('id') id: string) {
+    return this.quoteOutputTemplatesService.remove(+id);
   }
 }
 

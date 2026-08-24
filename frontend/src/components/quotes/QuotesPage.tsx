@@ -19,6 +19,7 @@ import {
   getOpportunities,
   getProducts,
   getQuotes,
+  getQuoteOutputTemplates,
   getQuoteTermTemplates,
   quoteOutputUrl,
   updateQuote,
@@ -28,8 +29,11 @@ import {
   type Product,
   type Quote,
   type QuoteOutputLanguage,
+  type QuoteOutputTemplate,
   type QuoteTermTemplate,
 } from "@/api/client";
+import { QuoteLayoutEditor } from "@/components/quotes/QuoteLayoutEditor";
+import { cloneQuoteOutputLayout, DEFAULT_QUOTE_OUTPUT_LAYOUT, type QuoteOutputLayout } from "@/contracts/quote-output-layout";
 import { canManageCrmData } from "@/auth/permissions";
 import { QUOTE_STATUS_OPTIONS as QUOTE_STATUSES } from "@/contracts/crm-terminology";
 import { calculateQuoteTotals, roundMoney } from "@/contracts/quote-calculation";
@@ -90,6 +94,7 @@ interface QuoteForm {
   terms: string;
   termsEn: string;
   termTemplateId: string;
+  outputTemplateId: string;
 }
 
 const INCOTERMS = ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"];
@@ -150,6 +155,7 @@ const createForm = (): QuoteForm => ({
   terms: "",
   termsEn: "",
   termTemplateId: "",
+  outputTemplateId: "",
 });
 
 export function QuotesPage() {
@@ -161,6 +167,8 @@ export function QuotesPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [termTemplates, setTermTemplates] = useState<QuoteTermTemplate[]>([]);
+  const [outputTemplates, setOutputTemplates] = useState<QuoteOutputTemplate[]>([]);
+  const [outputLayout, setOutputLayout] = useState<QuoteOutputLayout>(() => cloneQuoteOutputLayout(DEFAULT_QUOTE_OUTPUT_LAYOUT));
   const [isLoading, setIsLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<QuoteForm>(createForm);
@@ -172,18 +180,20 @@ export function QuotesPage() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [quotesData, customersData, productsData, opportunitiesData, templatesData] = await Promise.all([
+      const [quotesData, customersData, productsData, opportunitiesData, templatesData, outputTemplatesData] = await Promise.all([
         getQuotes(),
         getCustomers(0, 1000, {}),
         getProducts(),
         getOpportunities(),
         getQuoteTermTemplates(),
+        getQuoteOutputTemplates(),
       ]);
       setQuotes(quotesData);
       setCustomers(customersData.customers);
       setProducts(productsData);
       setOpportunities(opportunitiesData);
       setTermTemplates(templatesData);
+      setOutputTemplates(outputTemplatesData);
       const defaultTemplate = templatesData.find((template) => template.isDefault);
       if (defaultTemplate) {
         setForm((current) => current.termTemplateId || current.terms || current.termsEn ? current : {
@@ -193,6 +203,11 @@ export function QuotesPage() {
           termsEn: defaultTemplate.contentEn || "",
         });
         setTemplateName((current) => current || defaultTemplate.name);
+      }
+      const defaultOutputTemplate = outputTemplatesData.find((template) => template.isDefault) || outputTemplatesData[0];
+      if (defaultOutputTemplate) {
+        setForm((current) => current.outputTemplateId ? current : { ...current, outputTemplateId: String(defaultOutputTemplate.id) });
+        setOutputLayout(cloneQuoteOutputLayout(defaultOutputTemplate.layout));
       }
     } finally {
       setIsLoading(false);
@@ -205,16 +220,26 @@ export function QuotesPage() {
 
   const resetEditor = () => {
     const defaultTemplate = termTemplates.find((template) => template.isDefault);
+    const defaultOutputTemplate = outputTemplates.find((template) => template.isDefault) || outputTemplates[0];
     setEditingId(null);
     setForm({
       ...createForm(),
       termTemplateId: defaultTemplate ? String(defaultTemplate.id) : "",
       terms: defaultTemplate?.contentZh || "",
       termsEn: defaultTemplate?.contentEn || "",
+      outputTemplateId: defaultOutputTemplate ? String(defaultOutputTemplate.id) : "",
     });
     setTemplateName(defaultTemplate?.name || "");
     setLines([createLine()]);
     setCharges([]);
+    setOutputLayout(cloneQuoteOutputLayout(defaultOutputTemplate?.layout || DEFAULT_QUOTE_OUTPUT_LAYOUT));
+  };
+
+  const applyOutputTemplate = (value: string) => {
+    const template = outputTemplates.find((item) => String(item.id) === value);
+    if (!template) return;
+    setForm((current) => ({ ...current, outputTemplateId: String(template.id) }));
+    setOutputLayout(cloneQuoteOutputLayout(template.layout));
   };
 
   const updateLine = (key: string, updates: Partial<QuoteLineForm>) => {
@@ -382,6 +407,10 @@ export function QuotesPage() {
       terms: form.terms.trim() || undefined,
       termsEn: form.termsEn.trim() || undefined,
       termTemplateId: form.termTemplateId ? Number(form.termTemplateId) : null,
+      ...(outputLayoutLocked ? {} : {
+        outputTemplateId: form.outputTemplateId ? Number(form.outputTemplateId) : null,
+        outputLayout,
+      }),
       items: lines.map((line) => ({
         productId: line.productId || undefined,
         productName: line.productName.trim(),
@@ -449,6 +478,7 @@ export function QuotesPage() {
       terms: quote.terms || "",
       termsEn: quote.termsEn || "",
       termTemplateId: quote.termTemplateId ? String(quote.termTemplateId) : "",
+      outputTemplateId: quote.outputTemplateId ? String(quote.outputTemplateId) : "",
     });
     setTemplateName(template?.name || "");
     setCharges((quote.additionalCharges || []).map((charge) => ({ key: createKey(), label: charge.label, amount: String(charge.amount) })));
@@ -484,6 +514,7 @@ export function QuotesPage() {
       };
     }));
     setEditingId(quote.id);
+    setOutputLayout(cloneQuoteOutputLayout(quote.outputLayout || DEFAULT_QUOTE_OUTPUT_LAYOUT));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -501,6 +532,8 @@ export function QuotesPage() {
   const filteredOpportunities = form.customerId
     ? opportunities.filter((item) => String(item.customerId) === form.customerId)
     : opportunities;
+  const editingQuote = editingId ? quotes.find((quote) => quote.id === editingId) : undefined;
+  const outputLayoutLocked = Boolean(editingQuote?.outputLockedAt);
 
   return (
     <div className="space-y-6">
@@ -648,6 +681,29 @@ export function QuotesPage() {
                 <Field label="English Company Terms"><Textarea rows={5} value={form.termsEn} onChange={(event) => setForm((current) => ({ ...current, termsEn: event.target.value }))} /></Field>
               </div>
               {isAdmin && <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={handleCreateTemplate}><Save className="mr-2 h-4 w-4" />另存为新模板</Button><Button type="button" variant="outline" disabled={!form.termTemplateId} onClick={() => handleUpdateTemplate(false)}>更新所选模板</Button><Button type="button" variant="outline" disabled={!form.termTemplateId} onClick={() => handleUpdateTemplate(true)}>设为默认</Button><Button type="button" variant="ghost" className="text-destructive" disabled={!form.termTemplateId} onClick={handleDeleteTemplate}>删除模板</Button></div>}
+            </section>
+
+            <section className="space-y-4 rounded-lg border p-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold">报价版式与模块</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">选择公司模板后可为本次报价继续调整；保存的是独立快照，模板后续变化不会改动历史报价。</p>
+                </div>
+                <Field label="套用版式模板" className="w-full sm:w-72">
+                  <Select value={form.outputTemplateId || "none"} disabled={outputLayoutLocked} onValueChange={(value) => {
+                    if (!value) return;
+                    if (value === "none") {
+                      setForm((current) => ({ ...current, outputTemplateId: "" }));
+                      setOutputLayout(cloneQuoteOutputLayout(DEFAULT_QUOTE_OUTPUT_LAYOUT));
+                    } else applyOutputTemplate(value);
+                  }}>
+                    <SelectTrigger>{form.outputTemplateId ? outputTemplates.find((item) => String(item.id) === form.outputTemplateId)?.name || "选择报价版式" : "标准版式"}</SelectTrigger>
+                    <SelectContent><SelectItem value="none">标准版式</SelectItem>{outputTemplates.filter((template) => template.active).map((template) => <SelectItem key={template.id} value={String(template.id)}>{template.isDefault ? "默认 · " : ""}{template.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </Field>
+              </div>
+              {outputLayoutLocked && <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">该报价已发送或已接受，版式快照已锁定，避免正式文件被事后改写。需要新格式时请复制创建新报价。</div>}
+              <QuoteLayoutEditor value={outputLayout} onChange={setOutputLayout} disabled={outputLayoutLocked} />
             </section>
 
             <div className="flex gap-2"><Button type="submit"><Save className="mr-2 h-4 w-4" />{editingId ? "保存报价修改" : "创建报价单"}</Button>{editingId && <Button type="button" variant="outline" onClick={resetEditor}>取消编辑</Button>}</div>

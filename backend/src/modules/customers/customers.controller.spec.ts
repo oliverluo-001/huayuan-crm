@@ -97,7 +97,12 @@ describe('QuotesController export', () => {
       setHeader: jest.fn(),
       end: jest.fn(),
     };
-    const controller = new QuotesController(customersService as any, quoteOutputService as any);
+    const quoteOutputTemplatesService = { resolveLayout: jest.fn() };
+    const controller = new QuotesController(
+      customersService as any,
+      quoteOutputService as any,
+      quoteOutputTemplatesService as any,
+    );
 
     await controller.export('1', 'bilingual', response as any, { sub: 1, role: 'admin' });
 

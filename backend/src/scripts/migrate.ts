@@ -2,6 +2,7 @@ import "dotenv/config";
 import mysql, { type Connection, type RowDataPacket } from "mysql2/promise";
 import * as bcrypt from "bcrypt";
 import { migrateP03DataIntegrity } from "./p03-data-integrity";
+import { DEFAULT_QUOTE_OUTPUT_LAYOUT } from "../modules/customers/quote-output-layout";
 
 const migrationId = "20260730_online_accounts";
 const database = process.env.DB_DATABASE || "international_trade_crm";
@@ -113,6 +114,7 @@ export async function runDatabaseMigrations() {
     await migrateP1AcceptanceHardening(connection);
     await migrateP21ProductCatalog(connection);
     await migrateP22QuoteEditor(connection);
+    await migrateP25QuoteLayoutEditor(connection);
     await migrateEmailDeliveryMonitoring(connection);
     await migrateLeadRegionCountryCleanup(connection);
     return { p03Report };
@@ -893,6 +895,57 @@ export async function migrateP22QuoteEditor(connection: Connection) {
         additional_charges = COALESCE(additional_charges, JSON_ARRAY()),
         additional_fee_total = COALESCE(additional_fee_total, 0)
   `);
+
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
+  console.log(`Applied migration: ${id}`);
+}
+
+export async function migrateP25QuoteLayoutEditor(connection: Connection) {
+  const id = "20260824_p25_quote_layout_editor";
+  if (!(await tableExists(connection, "quotes"))) return;
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS quote_output_templates (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(120) NOT NULL,
+      description VARCHAR(500) NOT NULL DEFAULT '',
+      layout JSON NOT NULL,
+      is_default TINYINT(1) NOT NULL DEFAULT 0,
+      active TINYINT(1) NOT NULL DEFAULT 1,
+      created_by VARCHAR(32) NOT NULL DEFAULT '',
+      created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+      updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+      UNIQUE KEY uq_quote_output_templates_name (name),
+      KEY idx_quote_output_templates_default (is_default, active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+
+  await addColumnToTable(connection, "quotes", "output_template_id", "INT NULL");
+  await addColumnToTable(connection, "quotes", "output_layout", "JSON NULL");
+  await addColumnToTable(connection, "quotes", "output_layout_version", "INT NOT NULL DEFAULT 1");
+  await addColumnToTable(connection, "quotes", "output_locked_at", "TIMESTAMP NULL");
+  await addIndexIfMissing(connection, "quotes", "idx_quotes_output_template", "output_template_id");
+
+  const defaultLayout = JSON.stringify(DEFAULT_QUOTE_OUTPUT_LAYOUT);
+  await connection.query(
+    `INSERT INTO quote_output_templates
+      (name, description, layout, is_default, active, created_by)
+     SELECT ?, ?, ?, 1, 1, 'migration'
+     WHERE NOT EXISTS (SELECT 1 FROM quote_output_templates WHERE is_default = 1)`,
+    ["标准出口报价", "兼容原有正式报价格式的默认模块模板", defaultLayout],
+  );
+  await connection.query(
+    `UPDATE quotes q
+     LEFT JOIN quote_output_templates t ON t.is_default = 1 AND t.active = 1
+     SET q.output_template_id = COALESCE(q.output_template_id, t.id),
+         q.output_layout = COALESCE(q.output_layout, ?),
+         q.output_layout_version = 1,
+         q.output_locked_at = CASE
+           WHEN q.output_locked_at IS NULL AND q.status IN ('sent', 'accepted') THEN q.updated_at
+           ELSE q.output_locked_at
+         END`,
+    [defaultLayout],
+  );
 
   await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", [id]);
   console.log(`Applied migration: ${id}`);

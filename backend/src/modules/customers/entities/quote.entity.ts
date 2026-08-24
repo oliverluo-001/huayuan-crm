@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import { Customer } from '../../customers/entities/customer.entity';
 import { decimalNumberTransformer } from '../../../common/database/decimal-number.transformer';
+import type { QuoteOutputLayout } from '../quote-output-layout';
 
 export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired';
 
@@ -108,6 +109,18 @@ export class Quote {
 
   @Column({ name: 'term_template_id', type: 'int', nullable: true })
   termTemplateId: number | null;
+
+  @Column({ name: 'output_template_id', type: 'int', nullable: true })
+  outputTemplateId: number | null;
+
+  @Column({ name: 'output_layout', type: 'json', nullable: true })
+  outputLayout: QuoteOutputLayout | null;
+
+  @Column({ name: 'output_layout_version', type: 'int', default: 1 })
+  outputLayoutVersion: number;
+
+  @Column({ name: 'output_locked_at', type: 'timestamp', nullable: true })
+  outputLockedAt: Date | null;
 
   @ManyToOne(() => Customer, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'customer_id' })

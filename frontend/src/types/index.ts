@@ -493,6 +493,10 @@ export interface Quote {
   terms?: string;
   termsEn?: string;
   termTemplateId?: string;
+  outputTemplateId?: number | null;
+  outputLayout?: import("@/contracts/quote-output-layout").QuoteOutputLayout;
+  outputLayoutVersion?: number;
+  outputLockedAt?: string | null;
   status: "draft" | "sent" | "accepted" | "rejected" | "expired";
   createdAt: string;
   updatedAt: string;
@@ -634,6 +638,8 @@ export interface CreateQuoteInput {
   terms?: string;
   termsEn?: string;
   termTemplateId?: number | null;
+  outputTemplateId?: number | null;
+  outputLayout?: import("@/contracts/quote-output-layout").QuoteOutputLayout;
   items: QuoteItemInput[];
 }
 

@@ -56,6 +56,7 @@ import type {
   DuplicateMergePreview,
   DuplicateMergeResult,
 } from "@/types";
+import type { QuoteOutputLayout, QuoteOutputTemplate } from "@/contracts/quote-output-layout";
 
 export type {
   AuthStatus,
@@ -115,6 +116,7 @@ export type {
   DuplicateMergePreview,
   DuplicateMergeResult,
 };
+export type { QuoteOutputLayout, QuoteOutputTemplate } from "@/contracts/quote-output-layout";
 
 interface ApiOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -772,6 +774,32 @@ export async function deleteQuoteTermTemplate(id: string): Promise<void> {
   await api(`/api/quote-term-templates/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+}
+
+export async function getQuoteOutputTemplates(): Promise<QuoteOutputTemplate[]> {
+  const result = await api<{ templates: QuoteOutputTemplate[] }>("/api/quote-output-templates");
+  return result.templates || [];
+}
+
+export async function createQuoteOutputTemplate(data: {
+  name: string;
+  description?: string;
+  layout: QuoteOutputLayout;
+  isDefault?: boolean;
+  active?: boolean;
+}): Promise<QuoteOutputTemplate> {
+  return api<QuoteOutputTemplate>("/api/quote-output-templates", { method: "POST", body: data });
+}
+
+export async function updateQuoteOutputTemplate(
+  id: number,
+  data: Partial<{ name: string; description: string; layout: QuoteOutputLayout; isDefault: boolean; active: boolean }>,
+): Promise<QuoteOutputTemplate> {
+  return api<QuoteOutputTemplate>(`/api/quote-output-templates/${encodeURIComponent(id)}`, { method: "PUT", body: data });
+}
+
+export async function deleteQuoteOutputTemplate(id: number): Promise<void> {
+  await api(`/api/quote-output-templates/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 // Samples API

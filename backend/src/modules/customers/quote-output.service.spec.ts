@@ -92,6 +92,31 @@ describe("QuoteOutputService", () => {
     expect(html).toContain("Weld Neck Flange");
   });
 
+  it("renders the saved module order and custom content snapshot", async () => {
+    const html = await service.renderHtml(
+      {
+        ...quote,
+        outputLayout: {
+          version: 1,
+          accentColor: "#7c3aed",
+          sections: [
+            { id: "header", type: "header", enabled: true, titleZh: "形式发票", titleEn: "PROFORMA INVOICE" },
+            { id: "intro", type: "custom_text", enabled: true, titleZh: "项目说明", titleEn: "Project Note", contentZh: "按批准图纸生产。", contentEn: "Manufacture to approved drawings." },
+            { id: "items", type: "items", enabled: false, titleZh: "产品明细", titleEn: "Items", fields: ["description", "amount"] },
+          ],
+        },
+      } as any,
+      customer as any,
+      "bilingual",
+      "preview",
+    );
+
+    expect(html).toContain("形式发票 / PROFORMA INVOICE");
+    expect(html).toContain("按批准图纸生产");
+    expect(html).toContain("#7c3aed");
+    expect(html).not.toContain("Weld Neck Flange");
+  });
+
   it("creates a PDF buffer with Chinese font support", async () => {
     const buffer = await service.createPdfBuffer(quote as any, customer as any, "bilingual");
     expect(buffer.subarray(0, 4).toString()).toBe("%PDF");
@@ -104,8 +129,16 @@ describe("QuoteOutputService", () => {
     await workbook.xlsx.load(buffer as any);
     const sheet = workbook.getWorksheet("Quotation");
     expect(sheet?.getCell("A1").value).toContain("报价单");
-    expect(sheet?.getCell("B10").value).toContain("Weld Neck Flange");
-    expect(sheet?.getCell("G10").value).toMatchObject({ formula: "D10*E10*(1-F10)" });
+    const values: unknown[] = [];
+    const formulas: string[] = [];
+    sheet?.eachRow((row) => row.eachCell((cell) => {
+      values.push(cell.value);
+      if (cell.value && typeof cell.value === "object" && "formula" in cell.value) {
+        formulas.push(String(cell.value.formula));
+      }
+    }));
+    expect(values.some((value) => String(value).includes("Weld Neck Flange"))).toBe(true);
+    expect(formulas.some((formula) => /\*\(1-[A-Z]+\d+\)$/.test(formula))).toBe(true);
   });
 
   it("packages quote outputs into a zip archive", async () => {
