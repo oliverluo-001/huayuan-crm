@@ -91,7 +91,8 @@ export function normalizeQuoteOutputLayout(input?: Partial<QuoteOutputLayout> | 
     const type = raw.type as QuoteOutputSectionType;
     const fallbackId = `${type}-${index + 1}`;
     let id = cleanText(raw.id, 80).replace(/[^a-zA-Z0-9_-]/g, "") || fallbackId;
-    while (usedIds.has(id)) id = `${fallbackId}-${usedIds.size + 1}`;
+    let suffix = usedIds.size + 1;
+    while (usedIds.has(id)) id = `${fallbackId}-${suffix++}`;
     usedIds.add(id);
     const allowedFields = DEFAULT_FIELDS[type] || [];
     const requestedFields = Array.isArray(raw.fields) ? raw.fields.map(String) : allowedFields;

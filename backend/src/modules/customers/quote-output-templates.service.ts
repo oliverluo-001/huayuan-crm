@@ -49,6 +49,9 @@ export class QuoteOutputTemplatesService {
 
   async update(id: number, input: Partial<SaveQuoteOutputTemplateInput>) {
     const template = await this.requireOne(id);
+    if (template.isDefault && (input.active === false || input.isDefault === false)) {
+      throw new BadRequestException("请先将其他报价模板设为默认，再停用当前模板");
+    }
     if (input.name !== undefined && this.cleanName(input.name) !== template.name) {
       await this.assertUniqueName(input.name, id);
       template.name = this.cleanName(input.name);
@@ -79,6 +82,10 @@ export class QuoteOutputTemplatesService {
     layout?: QuoteOutputLayout | null,
     templateId?: number | null,
   ): Promise<{ outputTemplateId: number | null; outputLayout: QuoteOutputLayout }> {
+    if (templateId) {
+      const template = await this.requireOne(Number(templateId));
+      if (!template.active) throw new BadRequestException("所选报价模板已停用");
+    }
     if (layout) {
       return {
         outputTemplateId: templateId ? Number(templateId) : null,

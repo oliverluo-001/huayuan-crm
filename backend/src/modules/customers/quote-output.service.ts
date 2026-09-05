@@ -254,7 +254,7 @@ export class QuoteOutputService {
                 const discountCol = fieldColumn.get("discount");
                 cell.value = qtyCol && priceCol
                   ? {
-                      formula: `${excelColumn(qtyCol)}${itemRow.number}*${excelColumn(priceCol)}${itemRow.number}${discountCol ? `*(1-${excelColumn(discountCol)}${itemRow.number})` : ""}`,
+                      formula: `${excelColumn(qtyCol)}${itemRow.number}*${excelColumn(priceCol)}${itemRow.number}*(1-${discountCol ? `${excelColumn(discountCol)}${itemRow.number}` : Number(item.discount || 0) / 100})`,
                       result: Number(item.subtotal || 0),
                     }
                   : Number(item.subtotal || 0);
