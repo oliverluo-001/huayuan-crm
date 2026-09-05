@@ -6,6 +6,7 @@ export * from './todo.entity';
 export * from './opportunity.entity';
 export * from './opportunity-stage-history.entity';
 export * from './quote.entity';
+export * from './quote-output-template.entity';
 export * from './sample.entity';
 export * from './customer-view.entity';
 export * from './customer-merge-history.entity';

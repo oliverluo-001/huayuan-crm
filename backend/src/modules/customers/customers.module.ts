@@ -13,6 +13,7 @@ import {
   Tag,
   CustomerView,
   CustomerMergeHistory,
+  QuoteOutputTemplate,
 } from './entities';
 import { EmailLog, EmailTaskRecipient } from '../email/entities';
 import { CustomerAttachment } from '../attachments/customer-attachment.entity';
@@ -33,9 +34,11 @@ import {
   CustomerTagsController,
   ImportController,
   ContactsController,
+  QuoteOutputTemplatesController,
 } from './customers.controller';
 import { CustomerDuplicatesController } from './customer-duplicates.controller';
 import { CustomerDuplicatesService } from './customer-duplicates.service';
+import { QuoteOutputTemplatesService } from './quote-output-templates.service';
 
 @Module({
   imports: [
@@ -53,6 +56,7 @@ import { CustomerDuplicatesService } from './customer-duplicates.service';
       Tag,
       CustomerView,
       CustomerMergeHistory,
+      QuoteOutputTemplate,
       EmailLog,
       EmailTaskRecipient,
       CustomerAttachment,
@@ -72,9 +76,10 @@ import { CustomerDuplicatesService } from './customer-duplicates.service';
     CustomerTagsController,
     ImportController,
     ContactsController,
+    QuoteOutputTemplatesController,
     CustomerDuplicatesController,
   ],
-  providers: [CustomersService, CustomerDuplicatesService, QuoteOutputService],
-  exports: [CustomersService, CustomerDuplicatesService],
+  providers: [CustomersService, CustomerDuplicatesService, QuoteOutputService, QuoteOutputTemplatesService],
+  exports: [CustomersService, CustomerDuplicatesService, QuoteOutputTemplatesService],
 })
 export class CustomersModule {}

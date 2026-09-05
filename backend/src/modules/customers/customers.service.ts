@@ -44,6 +44,7 @@ import {
 } from "./dto";
 import { EmailLog } from "../email/entities/email-log.entity";
 import { User } from "../auth/entities/user.entity";
+import { normalizeQuoteOutputLayout } from "./quote-output-layout";
 
 export interface OpportunityActor {
   userId: string;
@@ -1554,6 +1555,8 @@ export class CustomersService {
       relations: ["customer", "items"],
     });
     if (!quote) throw new NotFoundException("报价不存在");
+    quote.outputLayout = normalizeQuoteOutputLayout(quote.outputLayout);
+    quote.outputLayoutVersion = 1;
     return quote;
   }
 
@@ -1581,6 +1584,12 @@ export class CustomersService {
     );
     const quote = this.quoteRepository.create({
       ...quoteFields,
+      outputLayout: normalizeQuoteOutputLayout(quoteFields.outputLayout),
+      outputLayoutVersion: 1,
+      outputLockedAt:
+        quoteFields.status === "sent" || quoteFields.status === "accepted"
+          ? new Date()
+          : null,
       currency: this.normalizeCurrency(quoteFields.currency, "USD"),
       baseCurrency: this.normalizeCurrency(quoteFields.baseCurrency, "CNY"),
       exchangeRate: Number(quoteFields.exchangeRate || 1),
@@ -1607,8 +1616,30 @@ export class CustomersService {
     if (updateQuoteDto.termTemplateId) {
       await this.assertQuoteTermTemplateExists(updateQuoteDto.termTemplateId);
     }
+    if (
+      quote.outputLockedAt &&
+      (updateQuoteDto.outputLayout !== undefined ||
+        updateQuoteDto.outputTemplateId !== undefined)
+    ) {
+      throw new BadRequestException(
+        "已发送或已接受的报价布局已锁定，请复制报价后创建新版本",
+      );
+    }
     const { items, ...quoteFields } = updateQuoteDto;
+    if (quoteFields.outputLayout !== undefined) {
+      quoteFields.outputLayout = normalizeQuoteOutputLayout(
+        quoteFields.outputLayout,
+      );
+    }
     Object.assign(quote, quoteFields);
+    quote.outputLayout = normalizeQuoteOutputLayout(quote.outputLayout);
+    quote.outputLayoutVersion = 1;
+    if (
+      !quote.outputLockedAt &&
+      (quote.status === "sent" || quote.status === "accepted")
+    ) {
+      quote.outputLockedAt = new Date();
+    }
     quote.currency = this.normalizeCurrency(quote.currency, "USD");
     quote.baseCurrency = this.normalizeCurrency(quote.baseCurrency, "CNY");
     quote.exchangeRate = Number(quote.exchangeRate || 1);

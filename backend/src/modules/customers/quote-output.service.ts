@@ -16,6 +16,12 @@ import {
   normalizeQuoteOutputLanguage,
 } from "../settings/quote-output-profile";
 import { Customer, Quote } from "./entities";
+import {
+  normalizeQuoteOutputLayout,
+  quoteSectionTitle,
+  type QuoteOutputLayout,
+  type QuoteOutputSection,
+} from "./quote-output-layout";
 
 type QuoteWithItems = Quote & { items?: any[] };
 const createArchiver = require("archiver") as (
@@ -34,6 +40,7 @@ interface ExportContext {
   customer: Customer;
   profile: QuoteOutputProfile;
   language: QuoteOutputLanguage;
+  layout: QuoteOutputLayout;
   logo?: BrandImage;
   signature?: BrandImage;
 }
@@ -74,34 +81,8 @@ export class QuoteOutputService {
     mode: "preview" | "download" = "download",
   ) {
     const context = await this.buildContext(quote, customer, language);
-    const rows = this.quoteItems(context.quote)
-      .map(
-        (item, index) => `
-          <tr>
-            <td>${index + 1}</td>
-            <td>
-              <strong>${escapeHtml(item.productName || "-")}</strong>
-              ${this.itemDescription(item) ? `<br><span class="muted">${escapeHtml(this.itemDescription(item))}</span>` : ""}
-            </td>
-            <td>${escapeHtml(item.unit || "pcs")}</td>
-            <td class="number">${formatNumber(item.quantity)}</td>
-            <td class="number">${this.money(item.unitPrice, context.quote.currency)}</td>
-            <td class="number">${formatNumber(item.discount)}%</td>
-            <td class="number">${this.money(item.subtotal, context.quote.currency)}</td>
-          </tr>`,
-      )
-      .join("");
-    const charges = this.additionalCharges(context.quote)
-      .map(
-        (charge) => `
-          <div><span>${escapeHtml(charge.label || "附加费用")}</span><strong>${this.money(charge.amount, context.quote.currency)}</strong></div>`,
-      )
-      .join("");
-    const route = [context.quote.originPort, context.quote.destinationPort]
-      .filter(Boolean)
-      .map(escapeHtml)
-      .join(" - ");
-    const title = this.pick(context, "报价单", "QUOTATION");
+    const header = this.activeSections(context).find((section) => section.type === "header");
+    const title = header ? quoteSectionTitle(header, context.language) : this.pick(context, "报价单", "QUOTATION");
     const toolbar =
       mode === "preview"
         ? `<div class="toolbar"><button onclick="window.print()">打印 / Print</button></div>`
@@ -118,84 +99,45 @@ export class QuoteOutputService {
     .toolbar { position: sticky; top: 0; z-index: 5; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 24px; background: rgba(255,255,255,.92); border-bottom: 1px solid #d8e0ea; }
     .toolbar button { border: 1px solid #cbd5e1; background: #111827; color: white; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
     main { width: 920px; min-height: 1180px; margin: 24px auto; padding: 50px 54px; background: white; box-shadow: 0 18px 45px rgba(15, 23, 42, .12); }
-    header { display: grid; grid-template-columns: 1fr auto; gap: 24px; padding-bottom: 22px; border-bottom: 3px solid #0f5db8; }
+    header { display: grid; grid-template-columns: 1fr auto; gap: 24px; padding-bottom: 22px; border-bottom: 3px solid ${context.layout.accentColor}; }
     .brand { display: flex; gap: 18px; align-items: center; min-width: 0; }
     .brand img { max-width: 156px; max-height: 64px; object-fit: contain; }
-    h1 { margin: 0; color: #0f3473; font-size: 30px; letter-spacing: .02em; }
+    h1 { margin: 0; color: ${context.layout.accentColor}; font-size: 30px; letter-spacing: .02em; }
     h2 { margin: 4px 0 0; color: #64748b; font-size: 14px; font-weight: 500; }
     .quote-no { text-align: right; color: #64748b; }
-    .quote-no strong { display: block; color: #0f5db8; font-size: 20px; }
+    .quote-no strong { display: block; color: ${context.layout.accentColor}; font-size: 20px; }
     .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 36px; margin: 28px 0; }
     .meta strong, .commercial strong { display: block; color: #667085; font-size: 12px; }
     .meta span { display: block; min-height: 22px; font-size: 15px; }
     table { width: 100%; border-collapse: collapse; margin-top: 22px; }
-    th { background: #eef5ff; color: #173967; text-align: left; font-size: 12px; }
+    th { background: #eef5ff; color: ${context.layout.accentColor}; text-align: left; font-size: 12px; }
     th, td { border: 1px solid #dce3ee; padding: 10px; vertical-align: top; }
     .number { text-align: right; white-space: nowrap; }
     .muted { color: #68748b; font-size: 12px; }
     .totals { width: 370px; margin: 22px 0 0 auto; }
     .totals div { display: flex; justify-content: space-between; gap: 18px; padding: 7px 0; border-bottom: 1px solid #e5e9f0; }
-    .totals .grand { border-bottom: 0; color: #0f5db8; font-size: 18px; font-weight: 700; }
+    .totals .grand { border-bottom: 0; color: ${context.layout.accentColor}; font-size: 18px; font-weight: 700; }
     .commercial { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #dce3ee; }
     .commercial div { padding: 10px 12px; border-bottom: 1px solid #e5e9f0; min-height: 58px; }
     .commercial div:nth-child(odd) { border-right: 1px solid #e5e9f0; }
     .commercial span, .notes { white-space: pre-wrap; }
     .notes { margin-top: 24px; padding-top: 12px; border-top: 1px solid #dce3ee; }
-    .notes h3 { margin: 0 0 8px; color: #173967; font-size: 14px; }
+    .notes h3 { margin: 0 0 8px; color: ${context.layout.accentColor}; font-size: 14px; }
     .bank { margin-top: 24px; padding: 14px 16px; border: 1px solid #dce3ee; background: #f8fafc; }
-    .bank h3 { margin: 0 0 10px; font-size: 14px; color: #173967; }
+    .bank h3 { margin: 0 0 10px; font-size: 14px; color: ${context.layout.accentColor}; }
     .bank dl { display: grid; grid-template-columns: 140px 1fr; gap: 6px 18px; margin: 0; }
     .bank dt { color: #667085; }
     .bank dd { margin: 0; font-weight: 600; }
     .sign { margin-top: 38px; display: flex; justify-content: space-between; align-items: end; gap: 24px; }
     .sign img { max-width: 180px; max-height: 72px; object-fit: contain; }
     footer { margin-top: 34px; color: #7b8495; font-size: 12px; }
+    .section-title { margin: 24px 0 10px; color: ${context.layout.accentColor}; font-size: 15px; }
+    .custom-text { margin-top: 20px; white-space: pre-wrap; }
+    .page-break { break-before: page; page-break-before: always; height: 1px; }
     @media print { body { background: white; } .toolbar { display: none; } main { width: auto; min-height: auto; margin: 0; padding: 16mm; box-shadow: none; } }
   </style>
 </head>
-<body>${toolbar}<main>
-  <header>
-    <div class="brand">
-      ${context.logo ? `<img src="${context.logo.dataUri}" alt="Logo" />` : ""}
-      <div>
-        <h1>${escapeHtml(title)}</h1>
-        <h2>${escapeHtml(this.companyName(context))}${this.tagline(context) ? ` · ${escapeHtml(this.tagline(context))}` : ""}</h2>
-      </div>
-    </div>
-    <div class="quote-no"><span>${escapeHtml(this.pick(context, "报价编号", "Quote No."))}</span><strong>${escapeHtml(context.quote.quoteNo || "-")}</strong></div>
-  </header>
-  <section class="meta">
-    <div><strong>${escapeHtml(this.pick(context, "客户", "Customer"))}</strong><span>${escapeHtml(customer.company || "-")}</span></div>
-    <div><strong>${escapeHtml(this.pick(context, "地区", "Region"))}</strong><span>${escapeHtml(customer.region || customer.country || "-")}</span></div>
-    <div><strong>${escapeHtml(this.pick(context, "联系人", "Contact"))}</strong><span>${escapeHtml(customer.contact || "-")}</span></div>
-    <div><strong>${escapeHtml(this.pick(context, "邮箱", "Email"))}</strong><span>${escapeHtml(customer.email || "-")}</span></div>
-    <div><strong>${escapeHtml(this.pick(context, "报价日期", "Date"))}</strong><span>${formatDate(context.quote.createdAt)}</span></div>
-    <div><strong>${escapeHtml(this.pick(context, "有效期至", "Valid Until"))}</strong><span>${formatDate(context.quote.validUntil)}</span></div>
-    <div><strong>Incoterms</strong><span>${escapeHtml(context.quote.incoterm || "-")}</span></div>
-    <div><strong>${escapeHtml(this.pick(context, "运输路线", "Route"))}</strong><span>${route || "-"}</span></div>
-  </section>
-  <table>
-    <thead><tr><th>#</th><th>${escapeHtml(this.pick(context, "产品描述", "Description"))}</th><th>${escapeHtml(this.pick(context, "单位", "Unit"))}</th><th class="number">${escapeHtml(this.pick(context, "数量", "Qty"))}</th><th class="number">${escapeHtml(this.pick(context, "单价", "Unit Price"))}</th><th class="number">${escapeHtml(this.pick(context, "折扣", "Discount"))}</th><th class="number">${escapeHtml(this.pick(context, "金额", "Amount"))}</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="7">${escapeHtml(this.pick(context, "暂无产品行", "No items"))}</td></tr>`}</tbody>
-  </table>
-  <section class="totals">
-    <div><span>${escapeHtml(this.pick(context, "商品小计", "Subtotal"))}</span><strong>${this.money(context.quote.subtotal, context.quote.currency)}</strong></div>
-    <div><span>${escapeHtml(this.pick(context, "运费", "Freight"))}</span><strong>${this.money(context.quote.freight, context.quote.currency)}</strong></div>
-    ${charges}
-    <div><span>${escapeHtml(this.pick(context, "税费", "Tax"))} (${formatNumber(context.quote.taxRate)}%)</span><strong>${this.money(context.quote.taxAmount, context.quote.currency)}</strong></div>
-    <div class="grand"><span>${escapeHtml(this.pick(context, "报价总额", "Total"))}</span><strong>${this.money(context.quote.total, context.quote.currency)}</strong></div>
-  </section>
-  <section class="commercial">
-    <div><strong>${escapeHtml(this.pick(context, "交期", "Delivery"))}</strong><span>${escapeHtml(context.quote.deliveryTime || "-")}</span></div>
-    <div><strong>${escapeHtml(this.pick(context, "付款条件", "Payment Terms"))}</strong><span>${escapeHtml(context.quote.paymentTerms || "-")}</span></div>
-    <div><strong>${escapeHtml(this.pick(context, "包装", "Packaging"))}</strong><span>${escapeHtml(context.quote.packagingTerms || "-")}</span></div>
-    <div><strong>${escapeHtml(this.pick(context, "质保", "Warranty"))}</strong><span>${escapeHtml(context.quote.warrantyTerms || "-")}</span></div>
-  </section>
-  ${this.notesHtml(context)}
-  ${this.bankHtml(context)}
-  <section class="sign"><div>${this.contactBlock(context)}</div>${context.signature ? `<img src="${context.signature.dataUri}" alt="Signature" />` : ""}</section>
-  <footer>${escapeHtml(this.footer(context))}</footer>
-</main></body></html>`;
+<body>${toolbar}<main>${this.renderHtmlSections(context)}</main></body></html>`;
   }
 
   async createPdfBuffer(quote: QuoteWithItems, customer: Customer, language?: unknown) {
@@ -248,115 +190,166 @@ export class QuoteOutputService {
       { key: "discount", width: 12 },
       { key: "amount", width: 16 },
     ];
+    let row = 1;
+    let itemRange: { first: number; last: number; amountColumn: number } | null = null;
+    const deferred: Array<{ cell: ExcelJS.Cell; kind: "subtotal" | "tax" | "total" | "conversion" }> = [];
 
-    sheet.mergeCells("A1:E1");
-    sheet.getCell("A1").value = this.pick(context, "报价单", "QUOTATION");
-    sheet.getCell("A1").font = { bold: true, size: 20, color: { argb: "FF0F3473" } };
-    sheet.getCell("A2").value = `${this.companyName(context)}${this.tagline(context) ? ` - ${this.tagline(context)}` : ""}`;
-    sheet.getCell("A2").font = { color: { argb: "FF64748B" } };
-    sheet.getCell("F1").value = this.pick(context, "报价编号", "Quote No.");
-    sheet.getCell("G1").value = quote.quoteNo || "-";
-    sheet.getCell("G1").font = { bold: true, color: { argb: "FF0F5DB8" } };
-
-    await this.addExcelImage(workbook, sheet, context.logo, "F2:G5", 150, 56);
-
-    const metaRows = [
-      [this.pick(context, "客户", "Customer"), customer.company || "-", this.pick(context, "联系人", "Contact"), customer.contact || "-"],
-      [this.pick(context, "地区", "Region"), customer.region || customer.country || "-", this.pick(context, "邮箱", "Email"), customer.email || "-"],
-      [this.pick(context, "报价日期", "Date"), formatDate(quote.createdAt), this.pick(context, "有效期至", "Valid Until"), formatDate(quote.validUntil)],
-      ["Incoterms", quote.incoterm || "-", this.pick(context, "运输路线", "Route"), [quote.originPort, quote.destinationPort].filter(Boolean).join(" - ") || "-"],
-    ];
-    let row = 4;
-    for (const meta of metaRows) {
-      sheet.getRow(row).values = [meta[0], meta[1], "", meta[2], meta[3]];
-      sheet.mergeCells(`B${row}:C${row}`);
-      sheet.mergeCells(`E${row}:G${row}`);
-      [1, 4].forEach((col) => {
-        sheet.getCell(row, col).font = { bold: true, color: { argb: "FF667085" } };
-        sheet.getCell(row, col).fill = lightFill;
-      });
-      row++;
+    for (const section of this.activeSections(context)) {
+      switch (section.type) {
+        case "header": {
+          sheet.mergeCells(`A${row}:E${row}`);
+          sheet.getCell(row, 1).value = quoteSectionTitle(section, context.language);
+          sheet.getCell(row, 1).font = { bold: true, size: 20, color: { argb: colorArgb(context.layout.accentColor) } };
+          sheet.getCell(row + 1, 1).value = `${this.companyName(context)}${this.tagline(context) ? ` - ${this.tagline(context)}` : ""}`;
+          sheet.getCell(row + 1, 1).font = { color: { argb: "FF64748B" } };
+          sheet.getCell(row, 6).value = this.pick(context, "报价编号", "Quote No.");
+          sheet.getCell(row, 7).value = quote.quoteNo || "-";
+          sheet.getCell(row, 7).font = { bold: true, color: { argb: colorArgb(context.layout.accentColor) } };
+          await this.addExcelImage(workbook, sheet, context.logo, `F${row + 1}:G${row + 3}`, 150, 56);
+          row += 5;
+          break;
+        }
+        case "customer":
+          row = this.writeExcelSection(
+            sheet,
+            row,
+            quoteSectionTitle(section, context.language),
+            this.customerRows(context)
+              .filter(([key]) => this.sectionFields(section).includes(key))
+              .map(([, label, value]) => [label, value]),
+            context.layout.accentColor,
+          ) + 1;
+          break;
+        case "items": {
+          sheet.mergeCells(`A${row}:G${row}`);
+          sheet.getCell(row, 1).value = quoteSectionTitle(section, context.language);
+          sheet.getCell(row, 1).font = { bold: true, color: { argb: colorArgb(context.layout.accentColor) } };
+          row++;
+          const labels: Record<string, string> = {
+            description: this.pick(context, "产品描述", "Description"),
+            unit: this.pick(context, "单位", "Unit"),
+            quantity: this.pick(context, "数量", "Qty"),
+            unitPrice: this.pick(context, "单价", "Unit Price"),
+            discount: this.pick(context, "折扣", "Discount"),
+            amount: this.pick(context, "金额", "Amount"),
+          };
+          const fields = this.sectionFields(section).filter((field) => labels[field]);
+          sheet.getRow(row).values = ["#", ...fields.map((field) => labels[field])];
+          styleHeader(sheet.getRow(row), context.layout.accentColor);
+          const fieldColumn = new Map(fields.map((field, index) => [field, index + 2]));
+          const first = row + 1;
+          for (const [index, item] of this.quoteItems(quote).entries()) {
+            const itemRow = sheet.getRow(first + index);
+            itemRow.getCell(1).value = index + 1;
+            for (const field of fields) {
+              const cell = itemRow.getCell(fieldColumn.get(field)!);
+              if (field === "description") cell.value = [item.productName, this.itemDescription(item)].filter(Boolean).join("\n");
+              if (field === "unit") cell.value = item.unit || "pcs";
+              if (field === "quantity") cell.value = Number(item.quantity || 0);
+              if (field === "unitPrice") cell.value = Number(item.unitPrice || 0);
+              if (field === "discount") cell.value = Number(item.discount || 0) / 100;
+              if (field === "amount") {
+                const qtyCol = fieldColumn.get("quantity");
+                const priceCol = fieldColumn.get("unitPrice");
+                const discountCol = fieldColumn.get("discount");
+                cell.value = qtyCol && priceCol
+                  ? {
+                      formula: `${excelColumn(qtyCol)}${itemRow.number}*${excelColumn(priceCol)}${itemRow.number}*(1-${discountCol ? `${excelColumn(discountCol)}${itemRow.number}` : Number(item.discount || 0) / 100})`,
+                      result: Number(item.subtotal || 0),
+                    }
+                  : Number(item.subtotal || 0);
+              }
+              cell.border = thinBorder;
+              cell.alignment = { vertical: "top", wrapText: true };
+            }
+            itemRow.getCell(1).border = thinBorder;
+            if (fieldColumn.get("quantity")) itemRow.getCell(fieldColumn.get("quantity")!).numFmt = "#,##0.00";
+            if (fieldColumn.get("unitPrice")) itemRow.getCell(fieldColumn.get("unitPrice")!).numFmt = `"${quote.currency || "USD"}" #,##0.00`;
+            if (fieldColumn.get("discount")) itemRow.getCell(fieldColumn.get("discount")!).numFmt = "0.00%";
+            if (fieldColumn.get("amount")) itemRow.getCell(fieldColumn.get("amount")!).numFmt = `"${quote.currency || "USD"}" #,##0.00`;
+            itemRow.height = this.itemDescription(item) ? 42 : 24;
+          }
+          const last = Math.max(first, first + this.quoteItems(quote).length - 1);
+          if (fieldColumn.get("amount")) itemRange = { first, last, amountColumn: fieldColumn.get("amount")! };
+          row = last + 2;
+          break;
+        }
+        case "totals": {
+          sheet.mergeCells(`A${row}:G${row}`);
+          sheet.getCell(row, 1).value = quoteSectionTitle(section, context.language);
+          sheet.getCell(row, 1).font = { bold: true, color: { argb: colorArgb(context.layout.accentColor) } };
+          row++;
+          const allowed = this.sectionFields(section);
+          const totals: Array<[string, string, number]> = [
+            ["subtotal", this.pick(context, "商品小计", "Subtotal"), Number(quote.subtotal || 0)],
+            ["freight", this.pick(context, "运费", "Freight"), Number(quote.freight || 0)],
+            ...this.additionalCharges(quote).map((charge) => ["additionalCharges", charge.label, Number(charge.amount || 0)] as [string, string, number]),
+            ["tax", this.pick(context, "税费", "Tax"), Number(quote.taxAmount || 0)],
+            ["total", this.pick(context, "报价总额", "Total"), Number(quote.total || 0)],
+            ["conversion", `${this.pick(context, "参考折算", "Reference Conversion")} (${quote.baseCurrency || "CNY"})`, roundMoney(Number(quote.total || 0) * Number(quote.exchangeRate || 1))],
+          ];
+          for (const [key, label, value] of totals.filter(([key]) => allowed.includes(key))) {
+            sheet.getCell(row, 5).value = label;
+            sheet.getCell(row, 7).value = value;
+            if (["subtotal", "tax", "total", "conversion"].includes(key)) deferred.push({ cell: sheet.getCell(row, 7), kind: key as any });
+            const emphasized = key === "total" || key === "conversion";
+            sheet.getCell(row, 5).font = { bold: emphasized };
+            sheet.getCell(row, 7).font = { bold: emphasized };
+            sheet.getCell(row, 7).numFmt = `"${key === "conversion" ? quote.baseCurrency || "CNY" : quote.currency || "USD"}" #,##0.00`;
+            row++;
+          }
+          row++;
+          break;
+        }
+        case "commercial":
+          row = this.writeExcelSection(sheet, row, quoteSectionTitle(section, context.language), this.commercialRows(context).filter(([key]) => this.sectionFields(section).includes(key)).map(([, label, value]) => [label, value]), context.layout.accentColor) + 1;
+          break;
+        case "notes":
+          row = this.writeExcelSection(sheet, row, quoteSectionTitle(section, context.language), this.excelNotes(context).filter(([key]) => this.sectionFields(section).includes(key)).map(([, label, value]) => [label, value]), context.layout.accentColor) + 1;
+          break;
+        case "bank":
+          if (this.hasBankInfo(context.profile)) row = this.writeExcelSection(sheet, row, quoteSectionTitle(section, context.language), this.bankRows(context).filter(([key]) => this.sectionFields(section).includes(key)).map(([, label, value]) => [label, value]), context.layout.accentColor) + 1;
+          break;
+        case "contact":
+          row = this.writeExcelSection(sheet, row, quoteSectionTitle(section, context.language), this.contactRows(context).filter(([key]) => this.sectionFields(section).includes(key)).map(([, label, value]) => [label, value]), context.layout.accentColor);
+          if (context.signature && this.sectionFields(section).includes("signature")) {
+            await this.addExcelImage(workbook, sheet, context.signature, `F${row}:G${row + 3}`, 150, 54);
+            row += 4;
+          }
+          row++;
+          break;
+        case "custom_text":
+          row = this.writeExcelSection(sheet, row, quoteSectionTitle(section, context.language), [["", this.customSectionContent(context, section) || "-"]], context.layout.accentColor) + 1;
+          break;
+        case "page_break":
+          sheet.getRow(row).addPageBreak();
+          row++;
+          break;
+        case "footer":
+          sheet.headerFooter.oddFooter = `&L${this.footer(context)}&RPage &P / &N`;
+          break;
+        default:
+          break;
+      }
     }
 
-    row += 1;
-    const headerRow = row;
-    sheet.getRow(headerRow).values = [
-      "#",
-      this.pick(context, "产品描述", "Description"),
-      this.pick(context, "单位", "Unit"),
-      this.pick(context, "数量", "Qty"),
-      this.pick(context, "单价", "Unit Price"),
-      this.pick(context, "折扣", "Discount"),
-      this.pick(context, "金额", "Amount"),
-    ];
-    styleHeader(sheet.getRow(headerRow));
-
-    const firstItemRow = headerRow + 1;
-    for (const [index, item] of this.quoteItems(quote).entries()) {
-      const itemRow = sheet.getRow(firstItemRow + index);
-      itemRow.values = [
-        index + 1,
-        [item.productName, this.itemDescription(item)].filter(Boolean).join("\n"),
-        item.unit || "pcs",
-        Number(item.quantity || 0),
-        Number(item.unitPrice || 0),
-        Number(item.discount || 0) / 100,
-        {
-          formula: `D${itemRow.number}*E${itemRow.number}*(1-F${itemRow.number})`,
-          result: Number(item.subtotal || 0),
-        },
-      ];
-      itemRow.height = this.itemDescription(item) ? 42 : 24;
-      itemRow.eachCell((cell) => {
-        cell.border = thinBorder;
-        cell.alignment = { vertical: "top", wrapText: true };
-      });
-      sheet.getCell(itemRow.number, 4).numFmt = "#,##0.00";
-      sheet.getCell(itemRow.number, 5).numFmt = `"${quote.currency || "USD"}" #,##0.00`;
-      sheet.getCell(itemRow.number, 6).numFmt = "0.00%";
-      sheet.getCell(itemRow.number, 7).numFmt = `"${quote.currency || "USD"}" #,##0.00`;
+    const formulaCells = Object.fromEntries(deferred.map((entry) => [entry.kind, entry.cell]));
+    if (itemRange && formulaCells.subtotal) {
+      formulaCells.subtotal.value = {
+        formula: `SUM(${excelColumn(itemRange.amountColumn)}${itemRange.first}:${excelColumn(itemRange.amountColumn)}${itemRange.last})`,
+        result: Number(quote.subtotal || 0),
+      };
     }
-    const lastItemRow = Math.max(firstItemRow, firstItemRow + this.quoteItems(quote).length - 1);
-    row = lastItemRow + 2;
-
-    const totalRows = [
-      [this.pick(context, "商品小计", "Subtotal"), { formula: `SUM(G${firstItemRow}:G${lastItemRow})`, result: Number(quote.subtotal || 0) }],
-      [this.pick(context, "运费", "Freight"), Number(quote.freight || 0)],
-      ...this.additionalCharges(quote).map((charge) => [charge.label, Number(charge.amount || 0)]),
-      [this.pick(context, "税费", "Tax"), { formula: `G${row}*${Number(quote.taxRate || 0) / 100}`, result: Number(quote.taxAmount || 0) }],
-      [this.pick(context, "报价总额", "Total"), Number(quote.total || 0)],
-      [
-        `${this.pick(context, "参考折算", "Reference Conversion")} (${quote.baseCurrency || "CNY"})`,
-        {
-          formula: `G${row + this.additionalCharges(quote).length + 3}*${Number(quote.exchangeRate || 1)}`,
-          result: roundMoney(Number(quote.total || 0) * Number(quote.exchangeRate || 1)),
-        },
-      ],
-    ];
-    const summaryStart = row;
-    for (const total of totalRows) {
-      sheet.getCell(row, 5).value = total[0] as any;
-      sheet.getCell(row, 6).value = "";
-      sheet.getCell(row, 7).value = total[1] as any;
-      sheet.getCell(row, 5).font = { bold: row >= summaryStart + totalRows.length - 2 };
-      sheet.getCell(row, 7).font = { bold: row >= summaryStart + totalRows.length - 2 };
-      sheet.getCell(row, 7).numFmt = `"${row === summaryStart + totalRows.length - 1 ? quote.baseCurrency || "CNY" : quote.currency || "USD"}" #,##0.00`;
-      row++;
+    if (formulaCells.tax) {
+      formulaCells.tax.value = { formula: `${Number(quote.subtotal || 0)}*${Number(quote.taxRate || 0) / 100}`, result: Number(quote.taxAmount || 0) };
     }
-
-    row += 1;
-    row = this.writeExcelSection(sheet, row, this.pick(context, "贸易、交付与保障条款", "Commercial Terms"), [
-      [this.pick(context, "交期", "Delivery"), quote.deliveryTime || "-"],
-      [this.pick(context, "付款条件", "Payment Terms"), quote.paymentTerms || "-"],
-      [this.pick(context, "包装", "Packaging"), quote.packagingTerms || "-"],
-      [this.pick(context, "质保", "Warranty"), quote.warrantyTerms || "-"],
-    ]);
-    row = this.writeExcelSection(sheet, row + 1, this.pick(context, "备注和公司条款", "Notes and Terms"), this.excelNotes(context));
-    if (this.hasBankInfo(context.profile)) {
-      row = this.writeExcelSection(sheet, row + 1, this.pick(context, "银行信息", "Bank Details"), this.bankRows(context));
+    if (formulaCells.total) formulaCells.total.value = Number(quote.total || 0);
+    if (formulaCells.conversion) {
+      formulaCells.conversion.value = {
+        formula: `${Number(quote.total || 0)}*${Number(quote.exchangeRate || 1)}`,
+        result: roundMoney(Number(quote.total || 0) * Number(quote.exchangeRate || 1)),
+      };
     }
-    row = this.writeExcelSection(sheet, row + 1, this.pick(context, "联系方式", "Contact"), this.contactRows(context));
-    await this.addExcelImage(workbook, sheet, context.signature, `F${row}:G${row + 3}`, 150, 54);
 
     sheet.eachRow((excelRow) => {
       excelRow.eachCell((cell) => {
@@ -418,6 +411,7 @@ export class QuoteOutputService {
       customer,
       profile,
       language: selectedLanguage,
+      layout: normalizeQuoteOutputLayout(quote.outputLayout),
       logo,
       signature,
     };
@@ -446,70 +440,117 @@ export class QuoteOutputService {
   }
 
   private drawPdf(context: ExportContext, doc: PDFKit.PDFDocument) {
-    const quote = context.quote;
-    const customer = context.customer;
-    const margin = doc.page.margins.left;
-    const pageWidth = doc.page.width - margin * 2;
-
-    if (context.logo) {
-      doc.image(context.logo.filePath, margin, 35, { fit: [135, 52] });
+    const sections = this.activeSections(context);
+    for (const section of sections) {
+      switch (section.type) {
+        case "header":
+          this.drawPdfHeader(context, doc, section);
+          break;
+        case "customer":
+          this.drawPdfCustomer(context, doc, section);
+          break;
+        case "items":
+          this.drawPdfTable(context, doc, section);
+          break;
+        case "totals":
+          this.drawPdfTotals(context, doc, section);
+          break;
+        case "commercial":
+          this.drawPdfKeyValueSection(context, doc, section, this.commercialRows(context));
+          break;
+        case "notes":
+          this.drawPdfKeyValueSection(context, doc, section, this.excelNotes(context));
+          break;
+        case "bank":
+          if (this.hasBankInfo(context.profile)) {
+            this.drawPdfKeyValueSection(context, doc, section, this.bankRows(context));
+          }
+          break;
+        case "contact":
+          this.drawPdfKeyValueSection(context, doc, section, this.contactRows(context));
+          if (context.signature && this.sectionFields(section).includes("signature")) {
+            this.ensurePdfSpace(doc, 78);
+            doc.image(context.signature.filePath, doc.page.width - doc.page.margins.right - 160, doc.y, { fit: [150, 60] });
+            doc.y += 68;
+          }
+          break;
+        case "custom_text":
+          this.drawPdfCustomText(context, doc, section);
+          break;
+        case "page_break":
+          doc.addPage();
+          break;
+        default:
+          break;
+      }
     }
-    doc
-      .font("NotoBold")
-      .fontSize(22)
-      .fillColor("#0f3473")
-      .text(this.pick(context, "报价单", "QUOTATION"), context.logo ? margin + 150 : margin, 40, {
-        width: pageWidth - 220,
-      });
-    doc
-      .font("Noto")
-      .fontSize(9)
-      .fillColor("#64748b")
-      .text(`${this.companyName(context)}${this.tagline(context) ? ` - ${this.tagline(context)}` : ""}`, {
-        width: pageWidth - 220,
-      });
-    doc
-      .font("Noto")
-      .fontSize(9)
-      .fillColor("#64748b")
-      .text(this.pick(context, "报价编号", "Quote No."), margin + pageWidth - 150, 43, { width: 150, align: "right" });
-    doc
-      .font("NotoBold")
-      .fontSize(13)
-      .fillColor("#0f5db8")
-      .text(quote.quoteNo || "-", margin + pageWidth - 150, 58, { width: 150, align: "right" });
-    doc.moveTo(margin, 98).lineTo(margin + pageWidth, 98).lineWidth(2).strokeColor("#0f5db8").stroke();
-    doc.y = 116;
-
-    const meta = [
-      [this.pick(context, "客户", "Customer"), customer.company || "-"],
-      [this.pick(context, "地区", "Region"), customer.region || customer.country || "-"],
-      [this.pick(context, "联系人", "Contact"), customer.contact || "-"],
-      [this.pick(context, "邮箱", "Email"), customer.email || "-"],
-      [this.pick(context, "报价日期", "Date"), formatDate(quote.createdAt)],
-      [this.pick(context, "有效期至", "Valid Until"), formatDate(quote.validUntil)],
-      ["Incoterms", quote.incoterm || "-"],
-      [this.pick(context, "运输路线", "Route"), [quote.originPort, quote.destinationPort].filter(Boolean).join(" - ") || "-"],
-    ];
-    for (let index = 0; index < meta.length; index += 2) {
-      const y = doc.y;
-      this.pdfMeta(doc, margin, y, meta[index][0], meta[index][1], pageWidth / 2 - 18);
-      this.pdfMeta(doc, margin + pageWidth / 2 + 18, y, meta[index + 1][0], meta[index + 1][1], pageWidth / 2 - 18);
-      doc.y = y + 38;
-    }
-
-    doc.y += 10;
-    this.drawPdfTable(context, doc);
-    this.drawPdfTotals(context, doc);
-    this.drawPdfSections(context, doc);
-    this.drawPdfFooter(context, doc);
+    if (sections.some((section) => section.type === "footer")) this.drawPdfFooter(context, doc);
   }
 
-  private drawPdfTable(context: ExportContext, doc: PDFKit.PDFDocument) {
+  private drawPdfHeader(context: ExportContext, doc: PDFKit.PDFDocument, section: QuoteOutputSection) {
     const margin = doc.page.margins.left;
-    const widths = [26, 222, 42, 50, 72, 52, 80];
+    const pageWidth = doc.page.width - margin * 2;
+    this.ensurePdfSpace(doc, 95);
+    const top = Math.max(doc.y, 36);
+    if (context.logo) doc.image(context.logo.filePath, margin, top, { fit: [135, 52] });
+    doc.font("NotoBold").fontSize(22).fillColor(context.layout.accentColor).text(
+      quoteSectionTitle(section, context.language),
+      context.logo ? margin + 150 : margin,
+      top + 5,
+      { width: pageWidth - 220 },
+    );
+    doc.font("Noto").fontSize(9).fillColor("#64748b").text(
+      `${this.companyName(context)}${this.tagline(context) ? ` - ${this.tagline(context)}` : ""}`,
+      { width: pageWidth - 220 },
+    );
+    doc.font("Noto").fontSize(9).fillColor("#64748b").text(
+      this.pick(context, "报价编号", "Quote No."), margin + pageWidth - 150, top + 8,
+      { width: 150, align: "right" },
+    );
+    doc.font("NotoBold").fontSize(13).fillColor(context.layout.accentColor).text(
+      context.quote.quoteNo || "-", margin + pageWidth - 150, top + 23,
+      { width: 150, align: "right" },
+    );
+    const lineY = top + 64;
+    doc.moveTo(margin, lineY).lineTo(margin + pageWidth, lineY).lineWidth(2).strokeColor(context.layout.accentColor).stroke();
+    doc.y = lineY + 18;
+  }
+
+  private drawPdfCustomer(context: ExportContext, doc: PDFKit.PDFDocument, section: QuoteOutputSection) {
+    const margin = doc.page.margins.left;
+    const pageWidth = doc.page.width - margin * 2;
+    const rows = this.customerRows(context).filter(([key]) => this.sectionFields(section).includes(key));
+    this.drawPdfSectionTitle(context, doc, section);
+    for (let index = 0; index < rows.length; index += 2) {
+      const left = rows[index];
+      const right = rows[index + 1];
+      const y = doc.y;
+      this.pdfMeta(doc, margin, y, left[1], left[2], pageWidth / 2 - 18);
+      if (right) this.pdfMeta(doc, margin + pageWidth / 2 + 18, y, right[1], right[2], pageWidth / 2 - 18);
+      doc.y = y + 38;
+    }
+    doc.y += 6;
+  }
+
+  private drawPdfTable(context: ExportContext, doc: PDFKit.PDFDocument, section: QuoteOutputSection) {
+    const margin = doc.page.margins.left;
+    this.drawPdfSectionTitle(context, doc, section);
+    const fieldLabels: Record<string, string> = {
+      description: this.pick(context, "产品描述", "Description"),
+      unit: this.pick(context, "单位", "Unit"),
+      quantity: this.pick(context, "数量", "Qty"),
+      unitPrice: this.pick(context, "单价", "Unit Price"),
+      discount: this.pick(context, "折扣", "Discount"),
+      amount: this.pick(context, "金额", "Amount"),
+    };
+    const fields = this.sectionFields(section).filter((field) => fieldLabels[field]);
+    const totalWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const widthHints: Record<string, number> = { unit: 42, quantity: 52, unitPrice: 76, discount: 54, amount: 82 };
+    const fixed = fields.filter((field) => field !== "description").reduce((sum, field) => sum + (widthHints[field] || 64), 26);
+    const descriptionWidth = fields.includes("description") ? Math.max(130, totalWidth - fixed) : 0;
+    const widths = [26, ...fields.map((field) => field === "description" ? descriptionWidth : widthHints[field] || Math.max(60, (totalWidth - 26) / fields.length))];
     const headerHeight = 42;
-    const headers = ["#", this.pick(context, "产品描述", "Description"), this.pick(context, "单位", "Unit"), this.pick(context, "数量", "Qty"), this.pick(context, "单价", "Unit Price"), this.pick(context, "折扣", "Discount"), this.pick(context, "金额", "Amount")];
+    const headers = ["#", ...fields.map((field) => fieldLabels[field])];
     const drawHeader = () => {
       this.ensurePdfSpace(doc, headerHeight + 12);
       let x = margin;
@@ -519,7 +560,7 @@ export class QuoteOutputService {
       headers.forEach((header, index) => {
         doc.text(header, x + 4, startY + 8, {
           width: widths[index] - 8,
-          align: index >= 3 ? "right" : "left",
+          align: index > 0 && ["quantity", "unitPrice", "discount", "amount"].includes(fields[index - 1]) ? "right" : "left",
           lineGap: 1,
         });
         x += widths[index];
@@ -529,26 +570,29 @@ export class QuoteOutputService {
     drawHeader();
     for (const [index, item] of this.quoteItems(context.quote).entries()) {
       const description = [item.productName || "-", this.itemDescription(item)].filter(Boolean).join("\n");
-      const descriptionHeight = doc.heightOfString(description, { width: widths[1] - 8 });
+      const descriptionIndex = fields.indexOf("description");
+      const descriptionHeight = descriptionIndex >= 0
+        ? doc.heightOfString(description, { width: widths[descriptionIndex + 1] - 8 })
+        : 0;
       const rowHeight = Math.max(38, descriptionHeight + 14);
       this.ensurePdfSpace(doc, rowHeight + 12, drawHeader);
       const startY = doc.y;
       let x = margin;
-      const cells = [
-        String(index + 1),
+      const values: Record<string, string> = {
         description,
-        item.unit || "pcs",
-        formatNumber(item.quantity),
-        this.money(item.unitPrice, context.quote.currency),
-        `${formatNumber(item.discount)}%`,
-        this.money(item.subtotal, context.quote.currency),
-      ];
+        unit: item.unit || "pcs",
+        quantity: formatNumber(item.quantity),
+        unitPrice: this.money(item.unitPrice, context.quote.currency),
+        discount: `${formatNumber(item.discount)}%`,
+        amount: this.money(item.subtotal, context.quote.currency),
+      };
+      const cells = [String(index + 1), ...fields.map((field) => values[field] || "-")];
       doc.font("Noto").fontSize(8).fillColor("#172033");
       cells.forEach((cell, cellIndex) => {
         doc.rect(x, startY, widths[cellIndex], rowHeight).strokeColor("#dce3ee").stroke();
         doc.text(cell, x + 4, startY + 7, {
           width: widths[cellIndex] - 8,
-          align: cellIndex >= 3 ? "right" : "left",
+          align: cellIndex > 0 && ["quantity", "unitPrice", "discount", "amount"].includes(fields[cellIndex - 1]) ? "right" : "left",
         });
         x += widths[cellIndex];
       });
@@ -556,78 +600,81 @@ export class QuoteOutputService {
     }
   }
 
-  private drawPdfTotals(context: ExportContext, doc: PDFKit.PDFDocument) {
+  private drawPdfTotals(context: ExportContext, doc: PDFKit.PDFDocument, section: QuoteOutputSection) {
     this.ensurePdfSpace(doc, 110);
+    this.drawPdfSectionTitle(context, doc, section);
     const x = doc.page.width - doc.page.margins.right - 230;
     let y = doc.y + 14;
-    const rows = [
-      [this.pick(context, "商品小计", "Subtotal"), this.money(context.quote.subtotal, context.quote.currency)],
-      [this.pick(context, "运费", "Freight"), this.money(context.quote.freight, context.quote.currency)],
-      ...this.additionalCharges(context.quote).map((charge) => [charge.label, this.money(charge.amount, context.quote.currency)]),
-      [`${this.pick(context, "税费", "Tax")} (${formatNumber(context.quote.taxRate)}%)`, this.money(context.quote.taxAmount, context.quote.currency)],
-      [this.pick(context, "报价总额", "Total"), this.money(context.quote.total, context.quote.currency)],
-    ];
-    for (const [index, row] of rows.entries()) {
-      const isGrand = index === rows.length - 1;
+    const rows = this.totalRows(context).filter(([key]) => this.sectionFields(section).includes(key));
+    for (const row of rows) {
+      const isGrand = row[0] === "total";
       doc
         .font(isGrand ? "NotoBold" : "Noto")
         .fontSize(isGrand ? 11 : 9)
-        .fillColor(isGrand ? "#0f5db8" : "#172033")
-        .text(row[0], x, y, { width: 112 })
-        .text(row[1], x + 116, y, { width: 114, align: "right" });
+        .fillColor(isGrand ? context.layout.accentColor : "#172033")
+        .text(row[1], x, y, { width: 112 })
+        .text(row[2], x + 116, y, { width: 114, align: "right" });
       y += isGrand ? 20 : 17;
     }
     doc.y = y + 6;
   }
 
-  private drawPdfSections(context: ExportContext, doc: PDFKit.PDFDocument) {
-    const sections: Array<[string, Array<[string, string]>]> = [
-      [
-        this.pick(context, "贸易、交付与保障条款", "Commercial Terms"),
-        [
-          [this.pick(context, "交期", "Delivery"), String(context.quote.deliveryTime || "-")],
-          [this.pick(context, "付款条件", "Payment Terms"), String(context.quote.paymentTerms || "-")],
-          [this.pick(context, "包装", "Packaging"), String(context.quote.packagingTerms || "-")],
-          [this.pick(context, "质保", "Warranty"), String(context.quote.warrantyTerms || "-")],
-        ],
-      ],
-      [this.pick(context, "备注和公司条款", "Notes and Terms"), this.excelNotes(context).map(([a, b]) => [a, String(b)])],
-    ];
-    if (this.hasBankInfo(context.profile)) {
-      sections.push([this.pick(context, "银行信息", "Bank Details"), this.bankRows(context)]);
+  private drawPdfKeyValueSection(
+    context: ExportContext,
+    doc: PDFKit.PDFDocument,
+    section: QuoteOutputSection,
+    sourceRows: Array<[string, string, string]>,
+  ) {
+    const rows = sourceRows.filter(([key]) => this.sectionFields(section).includes(key));
+    this.drawPdfSectionTitle(context, doc, section);
+    for (const [, label, value] of rows) {
+      this.ensurePdfSpace(doc, 28);
+      const startY = doc.y;
+      const text = value || "-";
+      const height = Math.max(22, doc.heightOfString(text, { width: 360 }) + 8);
+      doc.font("NotoBold").fontSize(8).fillColor("#667085").text(
+        label,
+        doc.page.margins.left,
+        startY + 4,
+        { width: 120 },
+      );
+      doc.font("Noto").fontSize(8).fillColor("#172033").text(
+        text,
+        doc.page.margins.left + 130,
+        startY + 4,
+        { width: 380 },
+      );
+      doc.y = startY + height;
     }
-    sections.push([this.pick(context, "联系方式", "Contact"), this.contactRows(context)]);
+  }
 
-    for (const [title, rows] of sections) {
-      this.ensurePdfSpace(doc, 70);
-      doc.font("NotoBold").fontSize(11).fillColor("#173967").text(title, doc.page.margins.left, doc.y + 6);
-      doc.y += 22;
-      for (const [label, value] of rows) {
-        this.ensurePdfSpace(doc, 28);
-        const startY = doc.y;
-        const text = value || "-";
-        const height = Math.max(22, doc.heightOfString(text, { width: 360 }) + 8);
-        doc
-          .font("NotoBold")
-          .fontSize(8)
-          .fillColor("#667085")
-          .text(label, doc.page.margins.left, startY + 4, { width: 120 });
-        doc
-          .font("Noto")
-          .fontSize(8)
-          .fillColor("#172033")
-          .text(text, doc.page.margins.left + 130, startY + 4, { width: 380 });
-        doc.y = startY + height;
-      }
-    }
+  private drawPdfCustomText(
+    context: ExportContext,
+    doc: PDFKit.PDFDocument,
+    section: QuoteOutputSection,
+  ) {
+    this.drawPdfSectionTitle(context, doc, section);
+    const content = this.customSectionContent(context, section) || "-";
+    this.ensurePdfSpace(doc, Math.min(180, doc.heightOfString(content, { width: 500 }) + 16));
+    doc.font("Noto").fontSize(9).fillColor("#172033").text(content, {
+      width: doc.page.width - doc.page.margins.left - doc.page.margins.right,
+      lineGap: 3,
+    });
+    doc.y += 8;
+  }
 
-    if (context.signature) {
-      this.ensurePdfSpace(doc, 78);
-      doc.image(context.signature.filePath, doc.page.width - doc.page.margins.right - 160, doc.y, {
-        fit: [150, 60],
-      });
-      doc.y += 68;
-    }
+  private drawPdfSectionTitle(
+    context: ExportContext,
+    doc: PDFKit.PDFDocument,
+    section: QuoteOutputSection,
+  ) {
+    this.ensurePdfSpace(doc, 32);
+    doc.font("NotoBold").fontSize(11).fillColor(context.layout.accentColor).text(
+      quoteSectionTitle(section, context.language),
+      doc.page.margins.left,
+      doc.y + 6,
+    );
+    doc.y += 22;
   }
 
   private drawPdfFooter(context: ExportContext, doc: PDFKit.PDFDocument) {
@@ -691,10 +738,10 @@ export class QuoteOutputService {
     sheet.getRow(rowNumber).height = Math.max(sheet.getRow(rowNumber).height || 0, height * 0.75);
   }
 
-  private writeExcelSection(sheet: ExcelJS.Worksheet, row: number, title: string, rows: Array<[string, string]>) {
+  private writeExcelSection(sheet: ExcelJS.Worksheet, row: number, title: string, rows: Array<[string, string]>, accentColor = "#173967") {
     sheet.mergeCells(`A${row}:G${row}`);
     sheet.getCell(row, 1).value = title;
-    sheet.getCell(row, 1).font = { bold: true, color: { argb: "FF173967" } };
+    sheet.getCell(row, 1).font = { bold: true, color: { argb: colorArgb(accentColor) } };
     sheet.getCell(row, 1).fill = lightFill;
     row++;
     for (const [label, value] of rows) {
@@ -834,60 +881,195 @@ export class QuoteOutputService {
     return [context.profile.footerZh, context.profile.footerEn].filter(Boolean).join("\n");
   }
 
-  private notesHtml(context: ExportContext) {
+  private activeSections(context: ExportContext) {
+    return context.layout.sections.filter((section) => section.enabled);
+  }
+
+  private renderHtmlSections(context: ExportContext) {
+    return this.activeSections(context)
+      .map((section) => {
+        switch (section.type) {
+          case "header":
+            return `<header><div class="brand">${context.logo ? `<img src="${context.logo.dataUri}" alt="Logo" />` : ""}<div><h1>${escapeHtml(quoteSectionTitle(section, context.language))}</h1><h2>${escapeHtml(this.companyName(context))}${this.tagline(context) ? ` · ${escapeHtml(this.tagline(context))}` : ""}</h2></div></div><div class="quote-no"><span>${escapeHtml(this.pick(context, "报价编号", "Quote No."))}</span><strong>${escapeHtml(context.quote.quoteNo || "-")}</strong></div></header>`;
+          case "customer":
+            return this.customerHtml(context, section);
+          case "items":
+            return this.itemsHtml(context, section);
+          case "totals":
+            return this.totalsHtml(context, section);
+          case "commercial":
+            return this.commercialHtml(context, section);
+          case "notes":
+            return `<h3 class="section-title">${escapeHtml(quoteSectionTitle(section, context.language))}</h3>${this.notesHtml(context, section)}`;
+          case "bank":
+            return this.bankHtml(context, section);
+          case "contact":
+            return `<h3 class="section-title">${escapeHtml(quoteSectionTitle(section, context.language))}</h3><section class="sign"><div>${this.contactBlock(context, section)}</div>${context.signature && this.sectionFields(section).includes("signature") ? `<img src="${context.signature.dataUri}" alt="Signature" />` : ""}</section>`;
+          case "footer":
+            return `<footer>${escapeHtml(this.footer(context))}</footer>`;
+          case "custom_text":
+            return `<section class="custom-text"><h3 class="section-title">${escapeHtml(quoteSectionTitle(section, context.language))}</h3>${escapeHtml(this.customSectionContent(context, section) || "-")}</section>`;
+          case "page_break":
+            return `<div class="page-break"></div>`;
+          default:
+            return "";
+        }
+      })
+      .join("");
+  }
+
+  private customerHtml(context: ExportContext, section: QuoteOutputSection) {
+    const rows = this.customerRows(context).filter(([key]) => this.sectionFields(section).includes(key));
+    return `<h3 class="section-title">${escapeHtml(quoteSectionTitle(section, context.language))}</h3><section class="meta">${rows
+      .map(([, label, value]) => `<div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value || "-")}</span></div>`)
+      .join("")}</section>`;
+  }
+
+  private itemsHtml(context: ExportContext, section: QuoteOutputSection) {
+    const fields = this.sectionFields(section);
+    const headers: Record<string, string> = {
+      description: this.pick(context, "产品描述", "Description"),
+      unit: this.pick(context, "单位", "Unit"),
+      quantity: this.pick(context, "数量", "Qty"),
+      unitPrice: this.pick(context, "单价", "Unit Price"),
+      discount: this.pick(context, "折扣", "Discount"),
+      amount: this.pick(context, "金额", "Amount"),
+    };
+    const selected = fields.filter((field) => headers[field]);
+    const rows = this.quoteItems(context.quote)
+      .map((item, index) => `<tr><td>${index + 1}</td>${selected.map((field) => `<td class="${["quantity", "unitPrice", "discount", "amount"].includes(field) ? "number" : ""}">${this.itemFieldHtml(context, item, field)}</td>`).join("")}</tr>`)
+      .join("");
+    return `<h3 class="section-title">${escapeHtml(quoteSectionTitle(section, context.language))}</h3><table><thead><tr><th>#</th>${selected.map((field) => `<th class="${["quantity", "unitPrice", "discount", "amount"].includes(field) ? "number" : ""}">${escapeHtml(headers[field])}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${selected.length + 1}">${escapeHtml(this.pick(context, "暂无产品行", "No items"))}</td></tr>`}</tbody></table>`;
+  }
+
+  private itemFieldHtml(context: ExportContext, item: any, field: string) {
+    if (field === "description") {
+      return `<strong>${escapeHtml(item.productName || "-")}</strong>${this.itemDescription(item) ? `<br><span class="muted">${escapeHtml(this.itemDescription(item))}</span>` : ""}`;
+    }
+    if (field === "unit") return escapeHtml(item.unit || "pcs");
+    if (field === "quantity") return formatNumber(item.quantity);
+    if (field === "unitPrice") return this.money(item.unitPrice, context.quote.currency);
+    if (field === "discount") return `${formatNumber(item.discount)}%`;
+    if (field === "amount") return this.money(item.subtotal, context.quote.currency);
+    return "-";
+  }
+
+  private totalsHtml(context: ExportContext, section: QuoteOutputSection) {
+    const rows = this.totalRows(context).filter(([key]) => this.sectionFields(section).includes(key));
+    return `<h3 class="section-title">${escapeHtml(quoteSectionTitle(section, context.language))}</h3><section class="totals">${rows.map(([key, label, value]) => `<div class="${key === "total" ? "grand" : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</section>`;
+  }
+
+  private commercialHtml(context: ExportContext, section: QuoteOutputSection) {
+    const rows = this.commercialRows(context).filter(([key]) => this.sectionFields(section).includes(key));
+    return `<h3 class="section-title">${escapeHtml(quoteSectionTitle(section, context.language))}</h3><section class="commercial">${rows.map(([, label, value]) => `<div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value || "-")}</span></div>`).join("")}</section>`;
+  }
+
+  private customerRows(context: ExportContext): Array<[string, string, string]> {
+    const quote = context.quote;
+    const customer = context.customer;
+    return [
+      ["company", this.pick(context, "客户", "Customer"), customer.company || "-"],
+      ["region", this.pick(context, "地区", "Region"), customer.region || customer.country || "-"],
+      ["contact", this.pick(context, "联系人", "Contact"), customer.contact || "-"],
+      ["email", this.pick(context, "邮箱", "Email"), customer.email || "-"],
+      ["date", this.pick(context, "报价日期", "Date"), formatDate(quote.createdAt)],
+      ["validUntil", this.pick(context, "有效期至", "Valid Until"), formatDate(quote.validUntil)],
+      ["incoterm", "Incoterms", quote.incoterm || "-"],
+      ["route", this.pick(context, "运输路线", "Route"), [quote.originPort, quote.destinationPort].filter(Boolean).join(" - ") || "-"],
+    ];
+  }
+
+  private totalRows(context: ExportContext): Array<[string, string, string]> {
+    const quote = context.quote;
+    return [
+      ["subtotal", this.pick(context, "商品小计", "Subtotal"), this.money(quote.subtotal, quote.currency)],
+      ["freight", this.pick(context, "运费", "Freight"), this.money(quote.freight, quote.currency)],
+      ...this.additionalCharges(quote).map((charge) => ["additionalCharges", charge.label || this.pick(context, "附加费用", "Additional Charge"), this.money(charge.amount, quote.currency)] as [string, string, string]),
+      ["tax", `${this.pick(context, "税费", "Tax")} (${formatNumber(quote.taxRate)}%)`, this.money(quote.taxAmount, quote.currency)],
+      ["total", this.pick(context, "报价总额", "Total"), this.money(quote.total, quote.currency)],
+      ["conversion", `${this.pick(context, "参考折算", "Reference Conversion")} (${quote.baseCurrency || "CNY"})`, this.money(Number(quote.total || 0) * Number(quote.exchangeRate || 1), quote.baseCurrency || "CNY")],
+    ];
+  }
+
+  private commercialRows(context: ExportContext): Array<[string, string, string]> {
+    return [
+      ["delivery", this.pick(context, "交期", "Delivery"), context.quote.deliveryTime || "-"],
+      ["payment", this.pick(context, "付款条件", "Payment Terms"), context.quote.paymentTerms || "-"],
+      ["packaging", this.pick(context, "包装", "Packaging"), context.quote.packagingTerms || "-"],
+      ["warranty", this.pick(context, "质保", "Warranty"), context.quote.warrantyTerms || "-"],
+    ];
+  }
+
+  private sectionFields(section: QuoteOutputSection) {
+    return Array.isArray(section.fields) ? section.fields : [];
+  }
+
+  private customSectionContent(context: ExportContext, section: QuoteOutputSection) {
+    if (context.language === "zh") return section.contentZh || "";
+    if (context.language === "en") return section.contentEn || "";
+    return [section.contentZh, section.contentEn].filter(Boolean).join("\n\n");
+  }
+
+  private notesHtml(context: ExportContext, section?: QuoteOutputSection) {
+    const allowed = section ? this.sectionFields(section) : ["notes", "terms"];
     const notes = this.excelNotes(context)
-      .filter(([, value]) => value && value !== "-")
-      .map(([label, value]) => `<section class="notes"><h3>${escapeHtml(label)}</h3>${escapeHtml(value)}</section>`)
+      .filter(([key]) => allowed.includes(key))
+      .filter(([, , value]) => value && value !== "-")
+      .map(([, label, value]) => `<section class="notes"><h3>${escapeHtml(label)}</h3>${escapeHtml(value)}</section>`)
       .join("");
     return notes;
   }
 
-  private excelNotes(context: ExportContext): Array<[string, string]> {
-    const rows: Array<[string, string]> = [];
+  private excelNotes(context: ExportContext): Array<[string, string, string]> {
+    const rows: Array<[string, string, string]> = [];
     if (context.language !== "en") {
-      if (context.quote.notes) rows.push(["中文备注", String(context.quote.notes)]);
-      if (context.quote.terms) rows.push(["公司条款", String(context.quote.terms)]);
+      if (context.quote.notes) rows.push(["notes", "中文备注", String(context.quote.notes)]);
+      if (context.quote.terms) rows.push(["terms", "公司条款", String(context.quote.terms)]);
     }
     if (context.language !== "zh") {
-      if (context.quote.notesEn) rows.push(["English Notes", String(context.quote.notesEn)]);
-      if (context.quote.termsEn) rows.push(["Company Terms", String(context.quote.termsEn)]);
+      if (context.quote.notesEn) rows.push(["notes", "English Notes", String(context.quote.notesEn)]);
+      if (context.quote.termsEn) rows.push(["terms", "Company Terms", String(context.quote.termsEn)]);
     }
-    return rows.length ? rows : [[this.pick(context, "备注", "Notes"), "-"]];
+    return rows.length ? rows : [["notes", this.pick(context, "备注", "Notes"), "-"]];
   }
 
-  private bankHtml(context: ExportContext) {
+  private bankHtml(context: ExportContext, section?: QuoteOutputSection) {
     if (!this.hasBankInfo(context.profile)) return "";
-    return `<section class="bank"><h3>${escapeHtml(this.pick(context, "银行信息", "Bank Details"))}</h3><dl>${this.bankRows(context)
-      .map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "-")}</dd>`)
+    const allowed = section ? this.sectionFields(section) : [];
+    return `<section class="bank"><h3>${escapeHtml(section ? quoteSectionTitle(section, context.language) : this.pick(context, "银行信息", "Bank Details"))}</h3><dl>${this.bankRows(context)
+      .filter(([key]) => !section || allowed.includes(key))
+      .map(([, label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || "-")}</dd>`)
       .join("")}</dl></section>`;
   }
 
-  private bankRows(context: ExportContext): Array<[string, string]> {
+  private bankRows(context: ExportContext): Array<[string, string, string]> {
     return ([
-      [this.pick(context, "开户行", "Bank"), context.profile.bankName],
-      [this.pick(context, "银行地址", "Bank Address"), context.profile.bankAddress],
-      [this.pick(context, "收款人", "Beneficiary"), context.profile.accountName],
-      [this.pick(context, "账号", "Account No."), context.profile.accountNumber],
-      ["SWIFT", context.profile.swiftCode],
-      [this.pick(context, "收款人地址", "Beneficiary Address"), context.profile.beneficiaryAddress],
-    ] as Array<[string, string]>).filter(([, value]) => value);
+      ["bankName", this.pick(context, "开户行", "Bank"), context.profile.bankName],
+      ["bankAddress", this.pick(context, "银行地址", "Bank Address"), context.profile.bankAddress],
+      ["accountName", this.pick(context, "收款人", "Beneficiary"), context.profile.accountName],
+      ["accountNumber", this.pick(context, "账号", "Account No."), context.profile.accountNumber],
+      ["swiftCode", "SWIFT", context.profile.swiftCode],
+      ["beneficiaryAddress", this.pick(context, "收款人地址", "Beneficiary Address"), context.profile.beneficiaryAddress],
+    ] as Array<[string, string, string]>).filter(([, , value]) => value);
   }
 
-  private contactBlock(context: ExportContext) {
+  private contactBlock(context: ExportContext, section?: QuoteOutputSection) {
+    const allowed = section ? this.sectionFields(section) : [];
     return this.contactRows(context)
-      .map(([label, value]) => `<div><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value || "-")}</div>`)
+      .filter(([key]) => !section || allowed.includes(key))
+      .map(([, label, value]) => `<div><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value || "-")}</div>`)
       .join("");
   }
 
-  private contactRows(context: ExportContext): Array<[string, string]> {
+  private contactRows(context: ExportContext): Array<[string, string, string]> {
     return ([
-      [this.pick(context, "公司", "Company"), this.companyName(context)],
-      [this.pick(context, "地址", "Address"), context.language === "en" ? context.profile.addressEn : context.profile.addressZh || context.profile.addressEn],
-      [this.pick(context, "联系人", "Contact"), [context.profile.contactName, context.profile.contactTitle].filter(Boolean).join(" - ")],
-      [this.pick(context, "电话", "Phone"), context.profile.contactPhone || context.profile.phone],
-      [this.pick(context, "邮箱", "Email"), context.profile.contactEmail || context.profile.email],
-      [this.pick(context, "网站", "Website"), context.profile.website],
-    ] as Array<[string, string]>).filter(([, value]) => value);
+      ["company", this.pick(context, "公司", "Company"), this.companyName(context)],
+      ["address", this.pick(context, "地址", "Address"), context.language === "en" ? context.profile.addressEn : context.profile.addressZh || context.profile.addressEn],
+      ["contactName", this.pick(context, "联系人", "Contact"), [context.profile.contactName, context.profile.contactTitle].filter(Boolean).join(" - ")],
+      ["contactPhone", this.pick(context, "电话", "Phone"), context.profile.contactPhone || context.profile.phone],
+      ["contactEmail", this.pick(context, "邮箱", "Email"), context.profile.contactEmail || context.profile.email],
+      ["website", this.pick(context, "网站", "Website"), context.profile.website],
+    ] as Array<[string, string, string]>).filter(([, , value]) => value);
   }
 
   private hasBankInfo(profile: QuoteOutputProfile) {
@@ -921,10 +1103,10 @@ const thinBorder: Partial<ExcelJS.Borders> = {
   right: { style: "thin", color: { argb: "FFDCE3EE" } },
 };
 
-function styleHeader(row: ExcelJS.Row) {
+function styleHeader(row: ExcelJS.Row, accentColor = "#173967") {
   row.eachCell((cell) => {
     cell.fill = lightFill;
-    cell.font = { bold: true, color: { argb: "FF173967" } };
+    cell.font = { bold: true, color: { argb: colorArgb(accentColor) } };
     cell.border = thinBorder;
     cell.alignment = { vertical: "middle", wrapText: true };
   });
@@ -945,6 +1127,24 @@ function formatMoney(value: unknown) {
 
 function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function colorArgb(value: string) {
+  const normalized = String(value || "#173967")
+    .replace(/^#/, "")
+    .toUpperCase();
+  return `FF${/^[0-9A-F]{6}$/.test(normalized) ? normalized : "173967"}`;
+}
+
+function excelColumn(index: number) {
+  let value = Math.max(1, Math.floor(index));
+  let label = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+  return label;
 }
 
 function formatDate(value: unknown) {

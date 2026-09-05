@@ -14,6 +14,7 @@ import {
   Min,
   ValidateNested,
 } from "class-validator";
+import type { QuoteOutputLayout } from "../quote-output-layout";
 
 export class DuplicateCustomerPreviewDto {
   @IsNumber()
@@ -954,6 +955,14 @@ export class CreateQuoteDto {
   @IsOptional()
   termTemplateId?: number | null;
 
+  @IsNumber()
+  @IsOptional()
+  outputTemplateId?: number | null;
+
+  @IsObject()
+  @IsOptional()
+  outputLayout?: QuoteOutputLayout;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
@@ -1059,12 +1068,62 @@ export class UpdateQuoteDto {
   @IsOptional()
   termTemplateId?: number | null;
 
+  @IsNumber()
+  @IsOptional()
+  outputTemplateId?: number | null;
+
+  @IsObject()
+  @IsOptional()
+  outputLayout?: QuoteOutputLayout;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => QuoteItemDto)
   @IsOptional()
   items?: QuoteItemDto[];
+}
+
+export class SaveQuoteOutputTemplateDto {
+  @IsString()
+  name: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @IsObject()
+  layout: QuoteOutputLayout;
+
+  @IsBoolean()
+  @IsOptional()
+  isDefault?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  active?: boolean;
+}
+
+export class UpdateQuoteOutputTemplateDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @IsObject()
+  @IsOptional()
+  layout?: QuoteOutputLayout;
+
+  @IsBoolean()
+  @IsOptional()
+  isDefault?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  active?: boolean;
 }
 
 export class CreateQuoteTermTemplateDto {

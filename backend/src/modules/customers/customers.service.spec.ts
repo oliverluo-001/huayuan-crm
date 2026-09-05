@@ -1,5 +1,6 @@
 import * as xlsx from 'xlsx';
 import { CustomersService } from './customers.service';
+import { DEFAULT_QUOTE_OUTPUT_LAYOUT } from './quote-output-layout';
 
 function upload(rows: Record<string, unknown>[]) {
   const workbook = xlsx.utils.book_new();
@@ -263,6 +264,62 @@ describe('CustomersService bulk assignment', () => {
       expect.arrayContaining([
         expect.objectContaining({ customerId: 11, subject: '客户负责人已分配' }),
       ]),
+    );
+  });
+});
+
+describe('CustomersService quote layout snapshots', () => {
+  const createService = (quote: Record<string, any>) => {
+    const quoteRepository = {
+      findOne: jest.fn().mockResolvedValue(quote),
+      save: jest.fn(async (value) => value),
+    };
+    const service = new CustomersService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      quoteRepository as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    return { service, quoteRepository };
+  };
+
+  const quote = (updates: Record<string, any> = {}) => ({
+    id: 1,
+    customerId: 2,
+    status: 'draft',
+    currency: 'USD',
+    baseCurrency: 'CNY',
+    exchangeRate: 1,
+    freight: 0,
+    taxRate: 0,
+    additionalCharges: [],
+    outputLayout: DEFAULT_QUOTE_OUTPUT_LAYOUT,
+    outputLockedAt: null,
+    items: [{ productName: 'Flange', quantity: 1, unitPrice: 10, discount: 0, subtotal: 10 }],
+    ...updates,
+  });
+
+  it('locks the layout when a quotation is marked as sent', async () => {
+    const existing = quote();
+    const { service, quoteRepository } = createService(existing);
+
+    await service.updateQuote(1, { status: 'sent' });
+
+    expect(existing.outputLockedAt).toBeInstanceOf(Date);
+    expect(quoteRepository.save).toHaveBeenCalledWith(existing);
+  });
+
+  it('prevents a sent quotation layout from being rewritten', async () => {
+    const { service } = createService(quote({ status: 'sent', outputLockedAt: new Date() }));
+
+    await expect(service.updateQuote(1, { outputLayout: DEFAULT_QUOTE_OUTPUT_LAYOUT })).rejects.toThrow(
+      '已发送或已接受的报价布局已锁定',
     );
   });
 });

@@ -22,6 +22,7 @@ import {
 } from "../src/modules/customers/customers.controller";
 import { CustomersService } from "../src/modules/customers/customers.service";
 import { QuoteOutputService } from "../src/modules/customers/quote-output.service";
+import { QuoteOutputTemplatesService } from "../src/modules/customers/quote-output-templates.service";
 import { CustomerAttachmentsController } from "../src/modules/attachments/customer-attachments.controller";
 import { CustomerAttachmentsService } from "../src/modules/attachments/customer-attachments.service";
 import { ProductsController } from "../src/modules/products/products.controller";
@@ -298,6 +299,7 @@ describe("core CRM workflows (HTTP e2e)", () => {
         { provide: EmailService, useValue: emailService },
         { provide: CustomerAttachmentsService, useValue: attachmentsService },
         { provide: QuoteOutputService, useValue: quoteOutputService },
+        { provide: QuoteOutputTemplatesService, useValue: new QuoteOutputTemplatesService({ findOne: async () => null } as any) },
         { provide: APP_GUARD, useClass: TestAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
       ],

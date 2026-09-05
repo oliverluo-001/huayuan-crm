@@ -14,6 +14,7 @@ import {
   uploadQuoteOutputAsset,
   type QuoteOutputProfile,
 } from "@/api/client";
+import { QuoteTemplateManager } from "./QuoteTemplateManager";
 
 const emptyProfile: QuoteOutputProfile = {
   companyNameZh: "",
@@ -93,6 +94,7 @@ export function QuoteOutputSettings({ isAdmin }: { isAdmin: boolean }) {
   const disabled = !isAdmin || isLoading || isSaving;
 
   return (
+    <div className="space-y-6">
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
@@ -183,6 +185,8 @@ export function QuoteOutputSettings({ isAdmin }: { isAdmin: boolean }) {
         </form>
       </CardContent>
     </Card>
+    {isAdmin && <QuoteTemplateManager />}
+    </div>
   );
 }
 
