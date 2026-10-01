@@ -50,4 +50,15 @@ describe('opportunity executable next steps', () => {
     await service.updateTodo(todos[0].id, { status: 'done' });
     await expect(service.updateTodo(todos[0].id, { status: 'open' })).rejects.toThrow('不可重新打开');
   });
+  it('does not complete a changed action after waiting for the opportunity lock', async () => {
+    const opportunity = await create();
+    const original = { ...todos[0] };
+    (service as any).linkedActionTransaction = true;
+    (service as any).todoRepository.findOne = jest.fn()
+      .mockResolvedValueOnce(original)
+      .mockResolvedValueOnce({ ...original, title: '新的行动' });
+    await expect(service.updateTodo(original.id, { status: 'done' })).rejects.toThrow('行动已被修改');
+    expect(opportunity.nextStepAction).toBe('确认图纸');
+    expect(todos[0].status).toBe('open');
+  });
 });

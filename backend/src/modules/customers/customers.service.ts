@@ -997,6 +997,11 @@ export class CustomersService {
           const fresh = await this.todoRepository.findOne({ where: { id }, lock: { mode: "pessimistic_write" } });
           if (!fresh) throw new NotFoundException("待办不存在");
           if (!fresh.nextActionKey || fresh.status === "done") return fresh;
+          if (fresh.customerId !== todo.customerId || fresh.title !== todo.title || fresh.description !== todo.description ||
+            String(fresh.dueAt || "") !== String(todo.dueAt || "")) {
+            throw new BadRequestException("商机行动已被修改，请刷新并核对新的行动后再完成");
+          }
+          Object.assign(todo, fresh);
         }
         todo.nextActionKey = null;
         if (linkedOpportunity && !["won", "lost"].includes(linkedOpportunity.stage)) {
