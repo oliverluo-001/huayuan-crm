@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "next-themes";
-import { LayoutDashboard, Users, Target, FileText, Package, Mail, Settings, LogOut, Sun, Moon, ChevronDown } from "lucide-react";
+import { LayoutDashboard, Users, Target, FileText, Package, Mail, Settings, LogOut, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, CircleHelp, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { ALL_ROLES, hasRole, type UserRole } from "@/auth/permissions";
 type NavItem = {
   id: string;
   label: string;
-  icon: any;
+  icon: LucideIcon;
   roles: readonly UserRole[];
 };
 
@@ -47,100 +47,91 @@ const pageTitles: Record<string, { title: string; subtitle: string }> = {
 
 export function Shell() {
   const { username, displayName, role, logout } = useAuth();
-  const { theme, setTheme } = useTheme();
-  const [isCollapsed] = useState(false);
+  const { resolvedTheme, setTheme } = useTheme();
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const mobileMenu = useRef<HTMLElement>(null);
+  const wasMobileOpen = useRef(false);
   const location = useLocation();
   const navigate = useNavigate();
   const activePage = location.pathname;
   const visibleMainItems = mainNavItems.filter((item) => hasRole(role, item.roles));
   const visibleSalesItems = salesNavItems.filter((item) => hasRole(role, item.roles));
   const visibleBottomItems = bottomNavItems.filter((item) => hasRole(role, item.roles));
-  const isSalesActive = visibleSalesItems.some((item) => activePage.startsWith("/" + item.id));
-  const [salesOpen, setSalesOpen] = useState(isSalesActive);
   const basePath = "/" + activePage.split("/")[1];
   const pageInfo = pageTitles[basePath] || pageTitles[activePage] || { title: "外贸 CRM", subtitle: "" };
 
-  const NavButton = ({ id, label, icon: Icon }: { id: string; label: string; icon: any }) => {
+  useEffect(() => {
+    if (!mobileOpen) {
+      if (wasMobileOpen.current) menuButton.current?.focus();
+      wasMobileOpen.current = false;
+      return;
+    }
+    wasMobileOpen.current = true;
+    const first = mobileMenu.current?.querySelector<HTMLButtonElement>("button");
+    first?.focus();
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { setMobileOpen(false); menuButton.current?.focus(); }
+      if (event.key !== "Tab") return;
+      const buttons = Array.from(mobileMenu.current?.querySelectorAll<HTMLButtonElement>("button") || []);
+      const firstButton = buttons[0], lastButton = buttons.at(-1);
+      if (event.shiftKey && document.activeElement === firstButton) { event.preventDefault(); lastButton?.focus(); }
+      else if (!event.shiftKey && document.activeElement === lastButton) { event.preventDefault(); firstButton?.focus(); }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [mobileOpen]);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 768px)");
+    const closeOnDesktop = () => { if (media.matches) setMobileOpen(false); };
+    media.addEventListener("change", closeOnDesktop);
+    return () => media.removeEventListener("change", closeOnDesktop);
+  }, []);
+
+  const nav = (compact: boolean) => {
+  const NavButton = ({ id, label, icon: Icon }: NavItem) => {
     const isActive = id === "" ? activePage === "/" : activePage.startsWith("/" + id);
     return (
     <Button
-      variant={isActive ? "secondary" : "ghost"}
+      variant="ghost"
+      aria-label={label}
+      aria-current={isActive ? "page" : undefined}
+      title={compact ? label : undefined}
       className={cn(
-        "w-full justify-start gap-3",
-        isCollapsed && "justify-center px-2"
+        "h-11 w-full justify-start gap-3 rounded-xl text-slate-300 hover:bg-white/10 hover:text-white",
+        isActive && "bg-blue-500/20 text-white ring-1 ring-blue-400/30 hover:bg-blue-500/25",
+        compact && "justify-center px-2"
       )}
-      onClick={() => navigate("/" + id)}
+      onClick={() => { navigate("/" + id); setMobileOpen(false); menuButton.current?.focus(); }}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      {!isCollapsed && <span>{label}</span>}
+      {!compact && <span>{label}</span>}
     </Button>
     );
   };
-
-  return (
-    <div className="flex h-screen bg-background">
-      <aside
-        className={cn(
-          "flex h-screen flex-col border-r bg-card transition-all duration-300",
-          isCollapsed ? "w-16" : "w-64"
-        )}
-      >
-        <div className="flex h-16 items-center gap-3 border-b px-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
-            W
-          </div>
-          {!isCollapsed && (
-            <div className="flex flex-col">
-              <span className="font-semibold">华远外贸 CRM</span>
-              <span className="text-xs text-muted-foreground">客户开发与销售工作台</span>
-            </div>
-          )}
-        </div>
-
-        <nav className="flex-1 space-y-1 p-2">
-          {visibleMainItems.map((item) => (
-            <NavButton key={item.id} {...item} />
-          ))}
-
-          {/* Sales submenu group */}
-          {isCollapsed ? (
-            visibleSalesItems.map((item) => <NavButton key={item.id} {...item} />)
-          ) : (
-            <div>
-              <Button
-                variant="ghost"
-                className="w-full justify-start gap-3 text-muted-foreground text-xs font-medium"
-                onClick={() => setSalesOpen(!salesOpen)}
-              >
-                <span className="flex-1 text-left">销售</span>
-                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", salesOpen && "rotate-180")} />
-              </Button>
-              {salesOpen && (
-                <div className="ml-2 space-y-0.5 border-l pl-2">
-                  {visibleSalesItems.map((item) => (
-                    <NavButton key={item.id} {...item} />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {visibleBottomItems.map((item) => (
-            <NavButton key={item.id} {...item} />
-          ))}
-        </nav>
-
-        <div className="border-t p-4">
+  return <>
+    <div className="flex h-20 shrink-0 items-center gap-3 px-5">
+      <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-500 font-bold text-white shadow-lg shadow-blue-900/30">H</div>
+      {!compact && <div><span className="text-base font-semibold text-white">华远外贸 CRM</span><p className="mt-1 text-[10px] tracking-[0.15em] text-slate-400">HUAYUAN · SALES WORKSPACE</p></div>}
+    </div>
+    <nav aria-label="主导航" className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
+      {[{ label: "客户开发", items: visibleMainItems }, { label: "销售工作", items: visibleSalesItems }, { label: "协作与设置", items: visibleBottomItems }].map((group) => <div key={group.label} className="space-y-1">
+        {!compact && <p className="px-3 pb-2 text-[11px] font-medium tracking-wider text-slate-400">{group.label}</p>}
+        {group.items.map((item) => <Fragment key={item.id}>{NavButton(item)}</Fragment>)}
+      </div>)}
+    </nav>
+        <div className="border-t border-white/10 p-4">
           <div className="flex items-center gap-3">
             <Avatar className="h-9 w-9">
-              <AvatarFallback className="bg-primary text-primary-foreground">
+              <AvatarFallback className="bg-blue-400/20 text-blue-200">
                 {(displayName || username)?.charAt(0).toUpperCase() || "A"}
               </AvatarFallback>
             </Avatar>
-            {!isCollapsed && (
+            {!compact && (
               <div className="flex flex-col min-w-0">
-                <span className="text-sm font-medium truncate">{displayName || username}</span>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-sm font-medium truncate text-white">{displayName || username}</span>
+                <span className="text-xs text-slate-400">
                   {role === "admin" ? "超级管理员" : role === "sales" ? "销售人员" : "只读成员"}
                   {username !== displayName && displayName ? ` · ${username}` : ""}
                 </span>
@@ -148,32 +139,45 @@ export function Shell() {
             )}
           </div>
         </div>
-      </aside>
-
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex h-16 items-center justify-between border-b bg-card px-6">
-          <div>
-            <h1 className="text-xl font-semibold">{pageInfo.title}</h1>
-            <p className="text-sm text-muted-foreground">{pageInfo.subtitle}</p>
+  </>;
+  };
+  return (
+    <div className="crm-workspace flex h-dvh overflow-hidden bg-background">
+      <a href="#workspace-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:rounded-lg focus:bg-card focus:p-3">跳转到工作区</a>
+      <aside aria-label="桌面导航" className={cn("hidden shrink-0 flex-col bg-slate-950 transition-[width] md:flex", isCollapsed ? "w-20" : "w-60")}>{nav(isCollapsed)}</aside>
+      {mobileOpen && <div className="fixed inset-0 z-50 md:hidden">
+        <div className="absolute inset-0 bg-slate-950/50" onClick={() => { setMobileOpen(false); menuButton.current?.focus(); }} />
+        <aside ref={mobileMenu} role="dialog" aria-modal="true" aria-label="移动导航" className="relative flex h-full w-72 max-w-[85vw] flex-col bg-slate-950">
+          <Button variant="ghost" size="icon" aria-label="关闭菜单" className="absolute right-2 top-1 text-slate-300 hover:bg-white/10 hover:text-white" onClick={() => { setMobileOpen(false); menuButton.current?.focus(); }}><X /></Button>
+          {nav(false)}
+        </aside>
+      </div>}
+      <div inert={mobileOpen} className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex min-h-20 shrink-0 items-center justify-between gap-3 border-b bg-card px-4 md:px-7">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button ref={menuButton} variant="ghost" size="icon" className="md:hidden" aria-label="打开菜单" aria-expanded={mobileOpen} onClick={() => setMobileOpen(true)}><Menu /></Button>
+            <Button variant="ghost" size="icon" className="hidden md:inline-flex" aria-label={isCollapsed ? "展开导航" : "收起导航"} onClick={() => setIsCollapsed((value) => !value)}>{isCollapsed ? <PanelLeftOpen /> : <PanelLeftClose />}</Button>
+            <div className="min-w-0"><h1 className="truncate text-lg font-semibold tracking-tight">{pageInfo.title}</h1><p className="mt-1 hidden text-xs text-muted-foreground sm:block">{pageInfo.subtitle}</p></div>
           </div>
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              title={theme === "dark" ? "切换到亮色模式" : "切换到暗色模式"}
+              onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+              aria-label={resolvedTheme === "dark" ? "切换到亮色模式" : "切换到暗色模式"}
             >
               <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
               <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
             </Button>
-            <Button variant="outline" size="sm" onClick={logout}>
+            <Button variant="outline" size="sm" aria-label="退出登录" onClick={logout}>
               <LogOut className="h-4 w-4 mr-2" />
-              退出
+              <span className="hidden sm:inline">退出</span>
             </Button>
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-6">
-          <Outlet />
+        <main id="workspace-content" tabIndex={-1} className="min-w-0 flex-1 overflow-auto p-3 outline-none md:p-6 xl:p-7">
+          <div className="mx-auto w-full max-w-[1600px]"><Outlet /></div>
+          <footer className="mx-auto mt-8 flex max-w-[1600px] items-center gap-2 border-t py-4 text-xs text-muted-foreground"><CircleHelp className="size-3.5" />华远外贸 CRM · 客户开发与销售协作</footer>
         </main>
       </div>
     </div>

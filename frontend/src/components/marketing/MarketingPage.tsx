@@ -53,7 +53,7 @@ export function MarketingPage() {
 
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col gap-4">
-      <TabsList className="w-full">
+      <TabsList className="h-12 w-full border bg-card p-1">
         <TabsTrigger value="templates" className="flex-1">邮件模板</TabsTrigger>
         <TabsTrigger value="tasks" className="flex-1">发信任务</TabsTrigger>
         <TabsTrigger value="logs" className="flex-1">发信记录</TabsTrigger>
@@ -552,10 +552,11 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
       {canManage && <Card>
         <CardHeader>
           <CardTitle>创建发信任务</CardTitle>
+          <p className="text-sm text-muted-foreground">先确认模板与发送计划，再选择联系人。创建定时任务后将自动启用，请核对开始时间。</p>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 rounded-xl border bg-background/50 p-4 md:grid-cols-3">
               <div className="space-y-2">
                 <Label>任务名称 *</Label>
                 <Input
@@ -610,7 +611,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
             {form.taskMode === "scheduled" && (
               <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
                 <div>
-                  <div className="font-medium">定时分批计划</div>
+                  <div className="font-medium text-primary">发送计划 · 定时分批</div>
                   <p className="text-sm text-muted-foreground">创建后自动启用，系统会按指定时间和轮次逐批发送。</p>
                 </div>
                 <div className="grid gap-4 md:grid-cols-4">

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --color-background: hsl(var(--background));
@@ -28,26 +29,26 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --background: 216 33% 97%;
+    --foreground: 222 39% 17%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
+    --primary: 221 75% 48%;
     --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
+    --secondary: 218 48% 95%;
     --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
+    --muted: 216 26% 95%;
+    --muted-foreground: 215 16% 43%;
+    --accent: 218 55% 94%;
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
-    --radius: 0.5rem;
+    --border: 216 24% 89%;
+    --input: 215 24% 83%;
+    --ring: 221 75% 48%;
+    --radius: 0.75rem;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -56,14 +57,14 @@
   }
 
   .dark {
-    --background: 240 10% 3.9%;
+    --background: 222 40% 9%;
     --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
+    --card: 222 32% 13%;
     --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
+    --popover: 222 32% 13%;
     --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
+    --primary: 217 91% 65%;
+    --primary-foreground: 222 40% 9%;
     --secondary: 240 3.7% 15.9%;
     --secondary-foreground: 0 0% 98%;
     --muted: 240 3.7% 15.9%;
@@ -88,7 +89,48 @@
     border-color: var(--color-border);
   }
   body {
+    margin: 0;
+    font-family: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
     background-color: var(--color-background);
     color: var(--color-foreground);
   }
+}
+
+@layer components {
+  .crm-workspace [data-slot="card"], .customer-workspace [data-slot="card"] {
+    box-shadow: 0 3px 16px hsl(222 40% 20% / 0.035);
+  }
+  .crm-workspace [data-slot="table-header"] {
+    background: var(--color-muted);
+  }
+  .crm-workspace [data-slot="table-head"] {
+    color: var(--color-muted-foreground);
+    padding-inline: 1rem;
+  }
+  .crm-workspace [data-slot="table-cell"] {
+    padding: 0.85rem 1rem;
+  }
+  .quote-editor > fieldset > section {
+    border: 1px solid var(--color-border);
+    border-radius: 0.875rem;
+    padding: clamp(0.75rem, 2vw, 1.25rem);
+    background: var(--color-card);
+    scroll-margin-top: 1rem;
+  }
+  .quote-editor > fieldset > section > h3 {
+    color: var(--color-primary);
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .customer-workspace [data-slot="tabs-trigger"] {
+    flex: 0 0 auto;
+  }
+  .customer-workspace [data-slot="tabs-trigger"][data-active] {
+    color: var(--color-primary);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
 }

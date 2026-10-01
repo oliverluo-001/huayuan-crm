@@ -21,9 +21,18 @@ describe("user-scoped session quote drafts", () => {
     session.setItem("theme", "dark");
     writeQuoteDraft(session, "alice", { price: "12" });
     writeQuoteDraft(session, "bob", { price: "22" });
+    writeQuoteDraft(session, "alice", { price: "33" }, "customer-a");
     clearQuoteDrafts(session);
     expect(session.length).toBe(1);
     expect(session.getItem("theme")).toBe("dark");
+  });
+  it("isolates customer workspace drafts from other customers, users and the full editor", () => {
+    const session = storage();
+    writeQuoteDraft(session, "alice", { price: "12" }, "customer-a");
+    expect(readQuoteDraft(session, "alice", validate, "customer-a")?.data.price).toBe("12");
+    expect(readQuoteDraft(session, "alice", validate, "customer-b")).toBeNull();
+    expect(readQuoteDraft(session, "bob", validate, "customer-a")).toBeNull();
+    expect(readQuoteDraft(session, "alice", validate)).toBeNull();
   });
   it("ignores corrupted or incompatible drafts and tolerates unavailable storage", () => {
     const session = storage();
