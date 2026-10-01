@@ -1,7 +1,7 @@
 import "dotenv/config";
 import mysql, { type Connection, type RowDataPacket } from "mysql2/promise";
 import * as bcrypt from "bcrypt";
-import { migrateP03DataIntegrity } from "./p03-data-integrity";
+import { migrateP03DataIntegrity, refreshCustomerSummaries } from "./p03-data-integrity";
 import { DEFAULT_QUOTE_OUTPUT_LAYOUT } from "../modules/customers/quote-output-layout";
 
 const migrationId = "20260730_online_accounts";
@@ -94,6 +94,7 @@ export async function runDatabaseMigrations() {
       }
     }
     await migrateEmailExecution(connection);
+    await migrateEmailRoundProgress(connection);
     await migrateAuditMetadata(connection);
     await migrateCrmContracts(connection);
     await migrateCustomer360Workspace(connection);
@@ -117,6 +118,8 @@ export async function runDatabaseMigrations() {
     await migrateP25QuoteLayoutEditor(connection);
     await migrateEmailDeliveryMonitoring(connection);
     await migrateLeadRegionCountryCleanup(connection);
+    await migrateOpportunityActions(connection);
+    p03Report.customerSummariesRefreshed += await refreshCustomerSummaries(connection, database);
     return { p03Report };
   } finally {
     await connection.end();
@@ -166,6 +169,29 @@ async function migrateAuditMetadata(connection: Connection) {
     "INSERT IGNORE INTO schema_migrations (id) VALUES (?)",
     [id],
   );
+}
+
+export async function migrateOpportunityActions(connection: Connection) {
+  if (!(await tableExists(connection, "todos")) || !(await tableExists(connection, "opportunities"))) return;
+  await addColumnToTable(connection, "todos", "opportunity_id", "INT NULL");
+  await addColumnToTable(connection, "todos", "next_action_key", "VARCHAR(64) NULL");
+  await addColumnToTable(connection, "todos", "resolution", "VARCHAR(20) NULL");
+  await addIndexIfMissing(connection, "todos", "uq_todos_next_action", "next_action_key", true);
+  const [constraints] = await connection.query<RowDataPacket[]>(
+    "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'todos' AND COLUMN_NAME = 'opportunity_id' AND REFERENCED_TABLE_NAME = 'opportunities'",
+    [database],
+  );
+  if (!constraints.length) await connection.query("ALTER TABLE todos ADD CONSTRAINT fk_todos_opportunity FOREIGN KEY (opportunity_id) REFERENCES opportunities(id) ON DELETE SET NULL");
+  // Historical business fields are preserved; only explicitly linked execution tasks are added.
+  await connection.query(`INSERT INTO todos (todo_id, customer_id, opportunity_id, next_action_key, title, description, due_at, status)
+    SELECT CONCAT('next_opp_', o.id), o.customer_id, o.id, CONCAT('opp:', o.id), LEFT(TRIM(o.next_step_action), 255),
+      CONCAT('商机「', o.name, '」下一步行动', CASE WHEN CHAR_LENGTH(o.next_step_action) > 255 THEN CONCAT('\\n', o.next_step_action) ELSE '' END),
+      CASE WHEN o.next_step_due_date IS NULL THEN NULL ELSE TIMESTAMP(o.next_step_due_date, '09:00:00') END, 'open'
+    FROM opportunities o
+    LEFT JOIN todos t ON t.next_action_key = CONCAT('opp:', o.id)
+    WHERE o.stage NOT IN ('won','lost') AND TRIM(COALESCE(o.next_step_action,'')) <> '' AND t.id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM todos history WHERE history.todo_id = CONCAT('next_opp_', o.id))`);
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", ["20261001_opportunity_actions"]);
 }
 
 async function migrateCrmContracts(connection: Connection) {
@@ -658,6 +684,8 @@ export async function migrateP1AcceptanceHardening(connection: Connection) {
   ) {
     return;
   }
+  const [applied] = await connection.query<RowDataPacket[]>("SELECT id FROM schema_migrations WHERE id = ? LIMIT 1", [id]);
+  if (applied.length) return;
 
   await addColumnToTable(
     connection,
@@ -1098,6 +1126,11 @@ export async function normalizeLegacyUserEmails(
   await connection.query(
     "UPDATE users SET email = NULL WHERE TRIM(COALESCE(email, '')) = ''",
   );
+}
+
+export async function migrateEmailRoundProgress(connection: Connection) {
+  await addColumnToTable(connection, "email_tasks", "round_processed_count", "INT NOT NULL DEFAULT 0");
+  await connection.query("INSERT IGNORE INTO schema_migrations (id) VALUES (?)", ["20261001_email_round_progress"]);
 }
 
 async function migrateEmailExecution(connection: Connection) {

@@ -880,6 +880,10 @@ export async function cancelEmailTask(id: string): Promise<void> {
   });
 }
 
+export async function pauseEmailTask(id: string): Promise<void> {
+  await api(`/api/email-tasks/${encodeURIComponent(id)}/pause`, { method: "POST" });
+}
+
 export async function deleteEmailTask(id: string): Promise<void> {
   await api(`/api/email-tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

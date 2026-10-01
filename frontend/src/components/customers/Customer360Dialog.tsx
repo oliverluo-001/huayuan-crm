@@ -48,6 +48,8 @@ import {
 } from "@/api/client";
 import { canManageCrmData } from "@/auth/permissions";
 import { useAuth } from "@/contexts/AuthContext";
+import { quoteReferencePrice } from "@/contracts/quote-price";
+import { CurrencyInput } from "@/components/quotes/CurrencyInput";
 import {
   CUSTOMER_JOURNEY_STAGES,
   OPPORTUNITY_FORECAST_CATEGORIES,
@@ -211,6 +213,7 @@ export function Customer360Dialog({
   const [userDirectory, setUserDirectory] = useState<UserDirectoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const mutationLock = useRef(false);
   const [error, setError] = useState("");
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [editingOpportunityId, setEditingOpportunityId] = useState<
@@ -252,6 +255,8 @@ export function Customer360Dialog({
   const [quoteForm, setQuoteForm] = useState({
     opportunityId: "",
     currency: "USD",
+    baseCurrency: "CNY",
+    exchangeRate: "",
     freight: "0",
     taxRate: "0",
     validUntil: "",
@@ -341,6 +346,8 @@ export function Customer360Dialog({
     action: () => Promise<unknown>,
     successMessage: string,
   ) => {
+    if (mutationLock.current) return false;
+    mutationLock.current = true;
     setIsSaving(true);
     try {
       await action();
@@ -351,6 +358,7 @@ export function Customer360Dialog({
     } catch {
       return false;
     } finally {
+      mutationLock.current = false;
       setIsSaving(false);
     }
   };
@@ -593,7 +601,7 @@ export function Customer360Dialog({
     if (!product) return;
     const variant = kind === "variant" ? product.variants?.find((item) => String(item.variantId || item.id) === variantKey) : undefined;
     const availablePrices = variant?.prices?.length ? variant.prices : product.prices || [];
-    const selectedPrice = availablePrices.find((item) => item.currency === quoteForm.currency) || availablePrices[0];
+    const referencePrice = quoteReferencePrice(quoteForm.currency, availablePrices, product);
     updateQuoteLine(key, {
       productId: product.productId || String(product.id),
       productName: product.name,
@@ -613,13 +621,9 @@ export function Customer360Dialog({
       certificateRequirements: variant?.certificateRequirements || "",
       description: variant?.quoteDescription || product.description || "",
       unit: variant?.unit || product.unit || "pcs",
-      unitPrice: String(selectedPrice?.referencePrice ?? product.price ?? ""),
+      unitPrice: referencePrice,
     });
-    if (selectedPrice?.currency || product.currency)
-      setQuoteForm((current) => ({
-        ...current,
-        currency: selectedPrice?.currency || product.currency || current.currency,
-      }));
+    if (!referencePrice) toast.info(`该产品没有 ${quoteForm.currency} 参考价，请确认并填写单价；报价币种未改变`);
   };
 
   const submitQuote = async (event: React.FormEvent) => {
@@ -634,12 +638,16 @@ export function Customer360Dialog({
     if (
       quoteLines.some(
         (line) =>
-          Number(line.quantity) <= 0 ||
+          !line.unitPrice.trim() || Number(line.quantity) <= 0 ||
           Number(line.unitPrice) < 0 ||
           !Number.isFinite(Number(line.unitPrice)),
       )
     ) {
       toast.error("请检查报价数量和单价");
+      return;
+    }
+    if (!quoteForm.exchangeRate.trim() || !Number.isFinite(Number(quoteForm.exchangeRate)) || Number(quoteForm.exchangeRate) <= 0) {
+      toast.error("请填写已确认的有效汇率");
       return;
     }
     const opportunity = data?.opportunities.find(
@@ -653,6 +661,8 @@ export function Customer360Dialog({
             opportunity?.opportunityId ||
             (opportunity ? String(opportunity.id) : null),
           currency: quoteForm.currency.trim() || "USD",
+          baseCurrency: quoteForm.baseCurrency.trim() || "CNY",
+          exchangeRate: Number(quoteForm.exchangeRate),
           freight: Number(quoteForm.freight || 0),
           taxRate: Number(quoteForm.taxRate || 0),
           validUntil: quoteForm.validUntil || undefined,
@@ -687,6 +697,8 @@ export function Customer360Dialog({
       setQuoteForm({
         opportunityId: "",
         currency: "USD",
+        baseCurrency: "CNY",
+        exchangeRate: "",
         freight: "0",
         taxRate: "0",
         validUntil: "",
@@ -765,7 +777,7 @@ export function Customer360Dialog({
 
   const goTo = (path: string) => {
     onOpenChange(false);
-    navigate(path);
+    navigate(`${path}${path.includes("?") ? "&" : "?"}customerId=${encodeURIComponent(customerId)}`);
   };
 
   return (
@@ -1392,7 +1404,7 @@ export function Customer360Dialog({
                                       ? "重新打开"
                                       : "标记完成"
                                   }
-                                  disabled={isSaving}
+                                  disabled={isSaving || (Boolean(todo.opportunityId) && todo.status === "done")}
                                   onClick={() =>
                                     void mutate(
                                       () =>
@@ -1404,7 +1416,7 @@ export function Customer360Dialog({
                                         }),
                                       todo.status === "done"
                                         ? "待办已重新打开"
-                                        : "待办已完成",
+                                        : todo.nextActionKey ? "行动已完成，请在商机中设置新的下一步和日期" : "待办已完成",
                                     )
                                   }
                                 >
@@ -1419,7 +1431,7 @@ export function Customer360Dialog({
                                   variant="ghost"
                                   className="text-destructive"
                                   title="删除待办"
-                                  disabled={isSaving}
+                                  disabled={isSaving || Boolean(todo.opportunityId) || Boolean(todo.nextActionKey)}
                                   onClick={() =>
                                     confirm("确定删除该待办吗？") &&
                                     void mutate(
@@ -1447,8 +1459,12 @@ export function Customer360Dialog({
                             {todo.dueAt
                               ? `截止 ${formatDate(todo.dueAt)}`
                               : "未设置截止日期"}{" "}
-                            · {todo.status === "done" ? "已完成" : "待处理"}
+                            · {todo.resolution === "cancelled" ? "商机关闭，已取消" : todo.status === "done" ? "已完成" : "待处理"}
                           </p>
+                          {todo.opportunityId && <Button variant="link" size="sm" onClick={() => {
+                            const linked = data.opportunities.find((item) => Number(item.id) === todo.opportunityId);
+                            if (linked) { editOpportunity(linked); setActiveWorkspace("opportunities"); }
+                          }}>查看商机 / 设置下一步</Button>}
                           {todo.description && (
                             <p className="mt-1 text-sm text-muted-foreground">
                               {todo.description}
@@ -1915,16 +1931,18 @@ export function Customer360Dialog({
                               ))}
                             </SelectContent>
                           </Select>
-                          <Input
-                            placeholder="币种"
+                          <CurrencyInput
+                            label="报价币种"
                             value={quoteForm.currency}
-                            onChange={(event) =>
-                              setQuoteForm((current) => ({
-                                ...current,
-                                currency: event.target.value,
-                              }))
-                            }
+                            onCommit={(currency) => {
+                              if (quoteLines.some((line) => line.unitPrice.trim()) && !confirm("改变币种将清空所有行单价及汇率，是否继续？")) return false;
+                              setQuoteLines((current) => current.map((line) => ({ ...line, unitPrice: "" })));
+                              setQuoteForm((current) => ({ ...current, currency, exchangeRate: "" }));
+                              return true;
+                            }}
                           />
+                          <CurrencyInput label="报价基准币种" value={quoteForm.baseCurrency} onCommit={(baseCurrency) => { setQuoteForm((current) => ({ ...current, baseCurrency, exchangeRate: "" })); return true; }} />
+                          <Input aria-label="报价汇率" type="number" min="0.000001" step="0.000001" placeholder={`1 ${quoteForm.currency} = ? ${quoteForm.baseCurrency}`} value={quoteForm.exchangeRate} onChange={(event) => setQuoteForm((current) => ({ ...current, exchangeRate: event.target.value }))} required />
                           <Input
                             type="date"
                             value={quoteForm.validUntil}

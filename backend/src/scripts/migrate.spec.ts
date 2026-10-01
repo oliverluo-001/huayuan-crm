@@ -1,5 +1,6 @@
 import {
   ensureInitialAdmin,
+  migrateEmailRoundProgress,
   migrateCustomerDuplicateManagement,
   migrateEmailDeliveryMonitoring,
   migrateLeadRegionCountryCleanup,
@@ -12,6 +13,18 @@ import {
 } from './migrate';
 
 describe('database migration', () => {
+  it('adds round progress once and preserves data on repeated migrations', async () => {
+    let exists = false;
+    const query = jest.fn(async (sql: string) => {
+      if (sql.includes('information_schema.COLUMNS')) return [exists ? [{ COLUMN_NAME: 'round_processed_count' }] : [], []];
+      if (sql.startsWith('ALTER TABLE')) exists = true;
+      return [[], []];
+    });
+    await migrateEmailRoundProgress({ query } as any);
+    await migrateEmailRoundProgress({ query } as any);
+    expect(query.mock.calls.filter(([sql]) => sql.startsWith('ALTER TABLE'))).toHaveLength(1);
+    expect(query.mock.calls.some(([sql]) => /DELETE|UPDATE email_tasks/.test(sql))).toBe(false);
+  });
   it('allows null user emails before normalizing legacy empty values', async () => {
     const query = jest.fn(async (_sql: string) => [[], []]);
 

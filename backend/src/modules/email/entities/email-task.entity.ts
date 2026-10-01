@@ -86,6 +86,9 @@ export class EmailTask {
   @Column({ name: 'runs_completed', type: 'int', default: 0 })
   runsCompleted: number;
 
+  @Column({ name: 'round_processed_count', type: 'int', default: 0 })
+  roundProcessedCount: number;
+
   @Column({ name: 'successful_send_count', type: 'int', default: 0 })
   successfulSendCount: number;
 

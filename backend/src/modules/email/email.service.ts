@@ -47,12 +47,13 @@ const MAX_BOUNCE_SCAN_LIMIT = 500;
 export class EmailService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EmailService.name);
   private readonly processingTasks = new Set<number>();
+  private readonly processingOwners = new Set<string>();
   private scheduler?: NodeJS.Timeout;
   private schedulerRun?: Promise<void>;
   private bounceScheduler?: NodeJS.Timeout;
   private bounceSchedulerRun?: Promise<void>;
-  private lastSendAt = 0;
-  private sendLock: Promise<void> = Promise.resolve();
+  private readonly lastSendAt = new Map<string, number>();
+  private readonly sendLocks = new Map<string, Promise<void>>();
 
   constructor(
     @InjectRepository(EmailTemplate)
@@ -193,23 +194,19 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     const startAt = createDto.startAt ? new Date(createDto.startAt) : null;
     if (startAt && Number.isNaN(startAt.getTime())) throw new BadRequestException('指定开始时间无效');
     const batchSize = taskMode === 'scheduled' ? Number(createDto.batchSize || 0) : 0;
-    const totalRuns = taskMode === 'scheduled' ? Number(createDto.totalRuns || 0) : 1;
+    // Zero is an explicit all-recipients plan; existing positive limits remain unchanged.
+    const totalRuns = taskMode === 'scheduled' ? (createDto.sendAll === true ? 0 : Number(createDto.totalRuns || 0)) : 1;
     const intervalMinutes = taskMode === 'scheduled' ? Number(createDto.intervalMinutes || 0) : 1;
     if (taskMode === 'scheduled') {
       if (!startAt) throw new BadRequestException('定时任务必须指定开始时间');
       if (!Number.isInteger(batchSize) || batchSize < 1) {
         throw new BadRequestException('每轮邮件数量必须大于 0');
       }
-      if (!Number.isInteger(totalRuns) || totalRuns < 1) {
+      if (!Number.isInteger(totalRuns) || (totalRuns < 1 && createDto.sendAll !== true)) {
         throw new BadRequestException('总轮数必须大于 0');
       }
       if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1) {
         throw new BadRequestException('轮次间隔必须大于 0 分钟');
-      }
-      if (customerIds.length > batchSize * totalRuns) {
-        throw new BadRequestException(
-          `已选 ${customerIds.length} 个收件人，但当前计划最多可发送 ${batchSize * totalRuns} 封，请增加每轮数量或总轮数`,
-        );
       }
     }
 
@@ -235,6 +232,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       status: autoStart ? 'active' : 'pending',
       nextRunAt: autoStart ? startAt : null,
       runsCompleted: 0,
+      roundProcessedCount: 0,
       successfulSendCount: 0,
       failedSendCount: 0,
       skippedSendCount: 0,
@@ -269,7 +267,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   async removeTask(idOrEmailTaskId: string, ownerId?: string) {
     const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
-    if (['sending', 'active'].includes(task.status)) {
+    if (['sending', 'active'].includes(task.status) || this.processingTasks.has(task.id)) {
       throw new BadRequestException('请先取消运行中的邮件任务');
     }
     await this.recipientRepository.delete({ taskId: task.id });
@@ -279,13 +277,20 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   async runTask(idOrEmailTaskId: string, ownerId?: string) {
     const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
+    if (this.processingTasks.has(task.id) && task.status === 'pending') {
+      throw new BadRequestException('正在完成当前邮件并暂停，请稍后恢复');
+    }
     if (['active', 'sending'].includes(task.status)) return this.formatTask(task);
     if (task.status === 'cancelled') throw new BadRequestException('已取消任务不能重新启动');
 
     if (['completed', 'failed'].includes(task.status)) {
-      await this.requeueRetryableRecipients(task);
+      const remaining = await this.recipientRepository.count({ where: { taskId: task.id, status: 'queued' } });
+      if (!remaining) await this.requeueRetryableRecipients(task);
       await this.refreshTaskCounts(task);
-      if (task.taskMode === 'scheduled') task.runsCompleted = 0;
+      if (task.taskMode === 'scheduled') {
+        task.runsCompleted = 0;
+        task.roundProcessedCount = 0;
+      }
     }
 
     const recipientCount = await this.ensureTaskRecipients(task);
@@ -314,6 +319,16 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ==================== Logs ====================
+
+  async pauseTask(idOrEmailTaskId: string, ownerId?: string) {
+    const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
+    if (!['active', 'sending'].includes(task.status)) throw new BadRequestException('只有运行中的任务可以暂停');
+    task.status = 'pending';
+    task.nextRunAt = null;
+    task.lastMessage = '已请求暂停：已提交的邮件无法撤回，未发送名单保留，可恢复继续';
+    await this.taskRepository.save(task);
+    return this.formatTask(task);
+  }
 
   private formatLog(log: EmailLog) {
     return {
@@ -475,9 +490,22 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
   private async processTask(taskId: number) {
     if (this.processingTasks.has(taskId)) return;
     this.processingTasks.add(taskId);
+    let processingOwner: string | undefined;
     try {
       const task = await this.taskRepository.findOne({ where: { id: taskId } });
       if (!task || !['active', 'sending'].includes(task.status)) return;
+      const owner = task.ownerId || '';
+      if (this.processingOwners.has(owner)) return;
+      this.processingOwners.add(owner);
+      processingOwner = owner;
+
+      if (task.taskMode === 'scheduled' && Number(task.totalRuns) > 0 && task.runsCompleted >= Number(task.totalRuns)) {
+        task.status = 'completed';
+        task.nextRunAt = null;
+        task.lastMessage = '本次轮次已结束，剩余名单保留；确认继续后将执行下一组轮次';
+        await this.taskRepository.save(task);
+        return;
+      }
 
       const now = new Date();
       if (task.startAt && task.startAt > now) {
@@ -494,6 +522,9 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       ]);
       const transporter = this.createSmtpTransport(smtp);
       await transporter.verify();
+
+      const beforeSend = await this.taskRepository.findOne({ where: { id: taskId } });
+      if (!beforeSend || !['active', 'sending'].includes(beforeSend.status)) return;
 
       task.status = 'sending';
       task.lastMessage = '正在发送邮件';
@@ -512,7 +543,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       const batchLimit = task.taskMode === 'once'
         ? queued.length
         : batchSize > 0
-          ? batchSize
+          ? Math.max(0, batchSize - Number(task.roundProcessedCount || 0))
           : queued.length;
       let successfulThisRun = 0;
       let processedThisRun = 0;
@@ -522,7 +553,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       for (const recipient of queued) {
         if (processedThisRun >= batchLimit) break;
         const latest = await this.taskRepository.findOne({ where: { id: taskId } });
-        if (!latest || latest.status === 'cancelled') return;
+        if (!latest || latest.status !== 'sending') break;
 
         if (task.ownerId) {
           if (!recipient.customerId) {
@@ -563,7 +594,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        const rateWait = await this.getRateLimitWait(policy);
+        const rateWait = await this.getRateLimitWait(policy, task.ownerId || '');
         if (rateWait > 0) {
           rateLimitedUntil = new Date(Date.now() + rateWait);
           break;
@@ -574,16 +605,37 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         if (sent) successfulThisRun++;
       }
 
-      if (task.taskMode === 'scheduled' && processedThisRun > 0) task.runsCompleted += 1;
+      if (task.taskMode === 'scheduled' && processedThisRun > 0) {
+        task.roundProcessedCount = Number(task.roundProcessedCount || 0) + processedThisRun;
+        if (task.roundProcessedCount >= batchSize) {
+          task.runsCompleted += 1;
+          task.roundProcessedCount = 0;
+        }
+      }
       if (processedThisRun > 0) task.lastRunAt = new Date();
       await this.refreshTaskCounts(task);
 
       const remaining = await this.recipientRepository.count({ where: { taskId, status: 'queued' } });
-      const totalRuns = Math.max(1, Number(task.totalRuns || 1));
-      const reachedRunLimit = task.taskMode === 'scheduled' && task.runsCompleted >= totalRuns;
+      const latest = await this.taskRepository.findOne({ where: { id: taskId } });
+      if (!latest || latest.status !== 'sending') {
+        if (latest) {
+          latest.runsCompleted = task.runsCompleted;
+          latest.roundProcessedCount = task.roundProcessedCount;
+          latest.lastRunAt = task.lastRunAt;
+          await this.refreshTaskCounts(latest);
+          await this.taskRepository.save(latest);
+        }
+        return;
+      }
+      const totalRuns = Number(task.totalRuns ?? 1);
+      const reachedRunLimit = task.taskMode === 'scheduled' && totalRuns > 0 && task.runsCompleted >= totalRuns;
 
       if (reachedRunLimit && remaining > 0) {
-        await this.skipQueuedRecipients(task.id, '已达到计划总轮数，未进入发送批次');
+        task.status = 'completed';
+        task.nextRunAt = null;
+        task.lastMessage = `本次限量计划结束：成功 ${task.successfulSendCount} 封，失败 ${task.failedSendCount} 封，跳过 ${task.skippedSendCount} 封；剩余 ${remaining} 个待继续，点击继续将执行下一组轮次`;
+        await this.taskRepository.save(task);
+        return;
       }
 
       if (remaining === 0 || reachedRunLimit) {
@@ -607,7 +659,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     } catch (error: any) {
       this.logger.error(`邮件任务 ${taskId} 执行失败`, error?.stack || error);
       const task = await this.taskRepository.findOne({ where: { id: taskId } });
-      if (task && task.status !== 'cancelled') {
+      if (task && ['active', 'sending'].includes(task.status)) {
         task.status = 'failed';
         task.errorMessage = this.errorMessage(error);
         task.lastMessage = `任务失败：${task.errorMessage}`;
@@ -616,6 +668,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       }
     } finally {
       this.processingTasks.delete(taskId);
+      if (processingOwner !== undefined) this.processingOwners.delete(processingOwner);
     }
   }
 
@@ -647,13 +700,14 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     const prepared = this.prepareTemplateBody(body, template.images || [], unsubscribeUrl);
 
     for (let attempt = recipient.attempts + 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
+      let smtpAccepted = false;
       recipient.status = 'sending';
       recipient.attempts = attempt;
       recipient.lastError = null;
       await this.recipientRepository.save(recipient);
       try {
         const info = await this.serializedSend(async () => {
-          await this.waitForMinimumDelay(Number(policy.minDelaySeconds || 0));
+          await this.waitForMinimumDelay(Number(policy.minDelaySeconds || 0), task.ownerId || '');
           return transporter.sendMail({
             from: smtp.smtpFrom || smtp.smtpUser,
             to: recipient.email,
@@ -666,7 +720,9 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
               'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
             },
           });
-        });
+        }, task.ownerId || '');
+
+        smtpAccepted = true;
 
         recipient.status = 'sent';
         recipient.sentAt = new Date();
@@ -691,6 +747,15 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
         }
         return true;
       } catch (error: any) {
+        if (smtpAccepted) {
+          // SMTP already accepted this message. A bookkeeping failure must not resend it.
+          this.logger.error(`邮件已提交服务器，但后续记录失败，禁止自动重发：任务 ${task.id} 收件人 ${recipient.id}`, error?.stack);
+          recipient.status = 'sent';
+          recipient.sentAt = recipient.sentAt || new Date();
+          recipient.lastError = '邮件已提交服务器，后续记录异常，请核对发送记录';
+          try { await this.recipientRepository.save(recipient); } catch { /* Leave persisted sending state for manual reconciliation. */ }
+          return true;
+        }
         recipient.lastError = this.errorMessage(error);
         if (attempt < MAX_SEND_ATTEMPTS) {
           recipient.status = 'queued';
@@ -1066,6 +1131,18 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   private async finishTask(task: EmailTask) {
     await this.refreshTaskCounts(task);
+    if (task.taskMode === 'scheduled' && task.roundProcessedCount > 0) {
+      task.runsCompleted += 1;
+      task.roundProcessedCount = 0;
+    }
+    const uncertain = await this.recipientRepository.count({ where: { taskId: task.id, status: 'sending' } });
+    if (uncertain > 0) {
+      task.status = 'failed';
+      task.nextRunAt = null;
+      task.lastMessage = `${uncertain} 封发送结果待人工核对，禁止盲目重发；成功 ${task.successfulSendCount} 封`;
+      await this.taskRepository.save(task);
+      return;
+    }
     task.status = task.successfulSendCount === 0
       && (task.failedSendCount > 0 || task.skippedSendCount > 0)
       ? 'failed'
@@ -1085,7 +1162,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async formatTaskWithSkipReasons(task: EmailTask) {
-    const formatted = this.formatTask(task);
+    const formatted = { ...this.formatTask(task), remainingSendCount: await this.recipientRepository.count({ where: { taskId: task.id, status: 'queued' } }) };
     if (!task.skippedSendCount || String(task.lastMessage || '').includes('跳过原因：')) {
       return formatted;
     }
@@ -1135,14 +1212,14 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async getRateLimitWait(policy: Record<string, any>) {
+  private async getRateLimitWait(policy: Record<string, any>, ownerId = '') {
     const now = Date.now();
     const [hourCount, dayCount] = await Promise.all([
       this.logRepository.count({
-        where: { status: 'sent', sentAt: MoreThanOrEqual(new Date(now - 60 * 60_000)) },
+        where: { ownerId, status: 'sent', sentAt: MoreThanOrEqual(new Date(now - 60 * 60_000)) },
       }),
       this.logRepository.count({
-        where: { status: 'sent', sentAt: MoreThanOrEqual(new Date(now - 24 * 60 * 60_000)) },
+        where: { ownerId, status: 'sent', sentAt: MoreThanOrEqual(new Date(now - 24 * 60 * 60_000)) },
       }),
     ]);
     if (Number(policy.maxPerDay || 0) > 0 && dayCount >= Number(policy.maxPerDay)) return 60 * 60_000;
@@ -1150,21 +1227,23 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     return 0;
   }
 
-  private async waitForMinimumDelay(seconds: number) {
-    const wait = Math.max(0, seconds * 1_000 - (Date.now() - this.lastSendAt));
+  private async waitForMinimumDelay(seconds: number, ownerId = '') {
+    const wait = Math.max(0, seconds * 1_000 - (Date.now() - (this.lastSendAt.get(ownerId) || 0)));
     if (wait > 0) await delay(wait);
-    this.lastSendAt = Date.now();
+    this.lastSendAt.set(ownerId, Date.now());
   }
 
-  private async serializedSend<T>(callback: () => Promise<T>): Promise<T> {
-    const previous = this.sendLock;
+  private async serializedSend<T>(callback: () => Promise<T>, ownerId = ''): Promise<T> {
+    const previous = this.sendLocks.get(ownerId) || Promise.resolve();
     let release!: () => void;
-    this.sendLock = new Promise<void>((resolve) => { release = resolve; });
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    this.sendLocks.set(ownerId, current);
     await previous;
     try {
       return await callback();
     } finally {
       release();
+      if (this.sendLocks.get(ownerId) === current) this.sendLocks.delete(ownerId);
     }
   }
 

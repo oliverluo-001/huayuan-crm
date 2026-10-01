@@ -1336,7 +1336,7 @@ export function SettingsPage() {
               <form onSubmit={handleSaveEmailPolicy} className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="space-y-2">
-                    <Label>每小时上限</Label>
+                    <Label>每个发件账号每小时上限</Label>
                     <Input
                       type="number"
                       value={emailPolicy.maxPerHour}
@@ -1345,7 +1345,7 @@ export function SettingsPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>每日上限</Label>
+                    <Label>每个发件账号每日上限</Label>
                     <Input
                       type="number"
                       value={emailPolicy.maxPerDay}

@@ -2,6 +2,10 @@ import "dotenv/config";
 import { strict as assert } from "node:assert";
 import mysql, { type Connection, type RowDataPacket } from "mysql2/promise";
 import { DataSource } from "typeorm";
+import { CustomersService } from "../modules/customers/customers.service";
+import { Customer, Contact, Activity, Todo, Opportunity, Quote, Sample, Tag, CustomerView, OpportunityStageHistory, QuoteTermTemplate } from "../modules/customers/entities";
+import { EmailLog } from "../modules/email/entities/email-log.entity";
+import { User } from "../modules/auth/entities/user.entity";
 
 type CheckRow = RowDataPacket & Record<string, any>;
 
@@ -35,6 +39,14 @@ async function createCurrentSchema() {
 }
 
 async function seedLegacyFixture(connection: Connection) {
+  const [todoFks] = await connection.query<CheckRow[]>("SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'todos' AND COLUMN_NAME = 'opportunity_id' AND REFERENCED_TABLE_NAME = 'opportunities'", [database]);
+  for (const fk of todoFks) {
+    const name = String(fk.CONSTRAINT_NAME);
+    assert.match(name, /^[a-zA-Z0-9_]+$/);
+    await connection.query(`ALTER TABLE todos DROP FOREIGN KEY \`${name}\``);
+  }
+  await connection.query("ALTER TABLE todos DROP COLUMN opportunity_id, DROP COLUMN next_action_key, DROP COLUMN resolution");
+  await connection.query("ALTER TABLE email_tasks DROP COLUMN round_processed_count");
   await connection.query("DROP TABLE IF EXISTS product_assets");
   await connection.query("DROP TABLE IF EXISTS product_variants");
   await connection.query("DROP TABLE IF EXISTS quote_term_templates");
@@ -192,6 +204,11 @@ async function seedLegacyFixture(connection: Connection) {
 }
 
 async function verifyMigratedData(connection: Connection) {
+  const [roundProgressColumns] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'email_tasks' AND COLUMN_NAME = 'round_processed_count'`,
+    [database],
+  );
+  assert.equal(Number(roundProgressColumns[0].count), 1, "邮件轮次暂停进度字段未迁移");
   const [products] = await connection.query<CheckRow[]>(
     "SELECT price, currency, sku, prices FROM products WHERE product_id = 'PROD-CI-1'",
   );
@@ -238,7 +255,7 @@ async function verifyMigratedData(connection: Connection) {
   assert.ok(samples[0].sent_at, "已寄出样品缺少寄出时间");
 
   const [todos] = await connection.query<CheckRow[]>(
-    "SELECT todo_id, status, completed_at FROM todos ORDER BY todo_id",
+    "SELECT todo_id, status, completed_at FROM todos WHERE todo_id IN ('TODO-CI-1','TODO-CI-2') ORDER BY todo_id",
   );
   assert.deepEqual(
     todos.map((todo) => todo.status),
@@ -262,7 +279,7 @@ async function verifyMigratedData(connection: Connection) {
   );
   assert.equal(
     customers[0].next_todo_title,
-    "发送报价",
+    "联系客户并确认下一步安排",
     "客户下一待办摘要未刷新",
   );
   assert.equal(customers[0].health, "warning", "客户健康状态未刷新");
@@ -441,6 +458,66 @@ async function verifyApplicationStartup() {
   console.log("Backend application startup check passed");
 }
 
+async function verifyOpportunityActions(connection: Connection) {
+  const [indexes] = await connection.query<CheckRow[]>("SELECT NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'todos' AND INDEX_NAME = 'uq_todos_next_action'", [database]);
+  assert.equal(Number(indexes[0]?.NON_UNIQUE), 0, "商机执行待办唯一索引缺失");
+  const [missing] = await connection.query<CheckRow[]>(`SELECT o.id FROM opportunities o LEFT JOIN todos t ON t.next_action_key = CONCAT('opp:', o.id) WHERE o.stage NOT IN ('won','lost') AND TRIM(COALESCE(o.next_step_action,'')) <> '' AND t.id IS NULL`);
+  assert.equal(missing.length, 0, "历史商机下一步未生成执行待办");
+}
+
+async function verifyActionTransactions(connection: Connection) {
+  const source = new DataSource({ type: "mysql", host, port, username: user, password, database, entities: [__dirname + "/../**/*.entity{.ts,.js}"], synchronize: false, timezone: "+08:00", charset: "utf8mb4" });
+  await source.initialize();
+  try {
+    const service = new CustomersService(source.getRepository(Customer), source.getRepository(Contact), source.getRepository(Activity), source.getRepository(Todo), source.getRepository(Opportunity), source.getRepository(Quote), source.getRepository(Sample), source.getRepository(Tag), source.getRepository(CustomerView), source.getRepository(EmailLog), source.getRepository(OpportunityStageHistory), source.getRepository(QuoteTermTemplate), source.getRepository(User), source);
+    const customer = await source.getRepository(Customer).findOne({ where: {}, order: { id: "ASC" } });
+    assert.ok(customer, "缺少 CI 客户数据");
+    const ownSearch = await service.findAll({ q: customer.customerId, ownerId: customer.ownerId, limit: "25" });
+    assert.ok(ownSearch.customers.some((item) => item.id === customer.id), "真实数据库客户编号搜索失败");
+    const hiddenSearch = await service.findAll({ q: customer.company, ownerId: "ci-unrelated-seller", limit: "25" });
+    assert.equal(hiddenSearch.customers.length, 0, "客户公司搜索越过销售权限");
+    const originalCollaborators = customer.collaboratorIds;
+    await source.getRepository(Customer).update(customer.id, { collaboratorIds: ["ci-collaborator"] });
+    const sharedSearch = await service.findAll({ q: String(customer.id), ownerId: "ci-collaborator", limit: "25" });
+    assert.ok(sharedSearch.customers.some((item) => item.id === customer.id), "客户授权协作者搜索失败");
+    await source.getRepository(Customer).update(customer.id, { collaboratorIds: originalCollaborators });
+    const opportunity = await service.createOpportunity({ customerId: customer.id, name: "CI transaction action", ownerId: "ci-seller", nextStepAction: "确认 CI 图纸", nextStepDueDate: "2026-10-20", expectedCloseDate: "2026-11-01" });
+    const taskRepo = source.getRepository(Todo);
+    let task = await taskRepo.findOneByOrFail({ nextActionKey: `opp:${opportunity.id}` });
+    await service.updateOpportunity(opportunity.id, { nextStepAction: "发送 CI 修订报价" });
+    assert.equal(await taskRepo.countBy({ opportunityId: opportunity.id }), 1);
+    await service.updateTodo(task.id, { status: "done" });
+    assert.equal((await source.getRepository(Opportunity).findOneByOrFail({ id: opportunity.id })).nextStepAction, "");
+    const { runDatabaseMigrations } = await import("./migrate");
+    await runDatabaseMigrations();
+    assert.equal((await source.getRepository(Opportunity).findOneByOrFail({ id: opportunity.id })).nextStepAction, "", "重复部署迁移复活了已完成行动");
+    assert.equal(await taskRepo.countBy({ opportunityId: opportunity.id, status: "open" }), 0);
+    await service.updateOpportunity(opportunity.id, { nextStepAction: "确认 CI 采购计划" });
+    assert.equal(await taskRepo.countBy({ opportunityId: opportunity.id }), 2, "完成后的行动历史未保留");
+    task = await taskRepo.findOneByOrFail({ nextActionKey: `opp:${opportunity.id}` });
+    await service.updateOpportunity(opportunity.id, { stage: "lost", lossReason: "CI 项目取消" });
+    assert.equal((await taskRepo.findOneByOrFail({ id: task.id })).resolution, "cancelled");
+    // Failure after opportunity insertion must roll back the opportunity as well as its action.
+    const originalTransaction = source.transaction.bind(source);
+    const failingSource = { transaction: (isolation: any, work: any) => originalTransaction(isolation, async (manager) => {
+      const getRepository = manager.getRepository.bind(manager);
+      manager.getRepository = ((entity: any) => {
+        const repo = getRepository(entity);
+        if (entity === Todo) repo.save = (async () => { throw new Error("CI action persistence failure"); }) as any;
+        return repo;
+      }) as any;
+      return work(manager);
+    }) };
+    const failing = new CustomersService(source.getRepository(Customer), source.getRepository(Contact), source.getRepository(Activity), taskRepo, source.getRepository(Opportunity), source.getRepository(Quote), source.getRepository(Sample), source.getRepository(Tag), source.getRepository(CustomerView), source.getRepository(EmailLog), source.getRepository(OpportunityStageHistory), source.getRepository(QuoteTermTemplate), source.getRepository(User), failingSource as any);
+    await assert.rejects(() => failing.createOpportunity({ customerId: customer.id, name: "CI must rollback", ownerId: "ci-seller", nextStepAction: "不可保存的行动", expectedCloseDate: "2026-11-01" }), /CI action persistence failure/);
+    assert.equal(await source.getRepository(Opportunity).countBy({ name: "CI must rollback" }), 0, "商机与待办未原子回滚");
+    const { migrateOpportunityActions } = await import("./migrate");
+    await migrateOpportunityActions(connection);
+    assert.equal(await taskRepo.countBy({ opportunityId: opportunity.id }), 2, "重复迁移产生了额外执行待办");
+    console.log("Real MySQL opportunity/action transaction check passed");
+  } finally { await source.destroy(); }
+}
+
 async function main() {
   const admin = await mysql.createConnection({ host, port, user, password });
   let fixture: Connection | undefined;
@@ -476,13 +553,16 @@ async function main() {
       "迁移没有规范历史待办状态",
     );
     await verifyMigratedData(fixture);
+    await verifyOpportunityActions(fixture);
 
     const second = await runDatabaseMigrations();
     for (const [name, count] of Object.entries(second.p03Report)) {
       assert.equal(count, 0, `迁移第二次执行仍产生变更: ${name}=${count}`);
     }
     await verifyMigratedData(fixture);
+    await verifyOpportunityActions(fixture);
     await verifyApplicationStartup();
+    await verifyActionTransactions(fixture);
     console.log(`Database migration check passed: ${database}`);
   } finally {
     if (fixture) await fixture.end();

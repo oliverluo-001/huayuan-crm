@@ -50,6 +50,7 @@ export interface UserDirectoryEntry {
 
 // Customer types
 export interface Customer {
+  customerId?: string;
   id: string;
   company: string;
   business?: string;
@@ -267,6 +268,9 @@ export interface Todo {
   id: string;
   customerId: string;
   customerName?: string;
+  opportunityId?: number | null;
+  nextActionKey?: string | null;
+  resolution?: "completed" | "cancelled" | null;
   title: string;
   description?: string;
   status: "open" | "done";
@@ -687,6 +691,7 @@ export interface EmailTask {
   successfulSendCount?: number;
   failedSendCount?: number;
   skippedSendCount?: number;
+  remainingSendCount?: number;
   intervalMinutes?: number;
   totalRuns?: number;
   startAt?: string;
@@ -717,6 +722,7 @@ export interface CreateEmailTaskInput {
   business?: string;
   intervalMinutes?: number;
   totalRuns?: number;
+  sendAll?: boolean;
   startAt?: string;
   autoStart?: boolean;
 }

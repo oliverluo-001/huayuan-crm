@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +17,7 @@ import {
   deleteQuote,
   deleteQuoteTermTemplate,
   getCustomers,
+  getCustomer360,
   getOpportunities,
   getProducts,
   getQuotes,
@@ -33,11 +35,17 @@ import {
   type QuoteTermTemplate,
 } from "@/api/client";
 import { QuoteLayoutEditor } from "@/components/quotes/QuoteLayoutEditor";
-import { cloneQuoteOutputLayout, DEFAULT_QUOTE_OUTPUT_LAYOUT, type QuoteOutputLayout } from "@/contracts/quote-output-layout";
+import { cloneQuoteOutputLayout, DEFAULT_QUOTE_OUTPUT_LAYOUT, QUOTE_SECTION_DEFINITIONS, type QuoteOutputLayout } from "@/contracts/quote-output-layout";
 import { canManageCrmData } from "@/auth/permissions";
 import { QUOTE_STATUS_OPTIONS as QUOTE_STATUSES } from "@/contracts/crm-terminology";
 import { calculateQuoteTotals, roundMoney } from "@/contracts/quote-calculation";
+import { quoteReferencePrice } from "@/contracts/quote-price";
+import { CustomerPicker } from "@/components/customers/CustomerPicker";
+import { CurrencyInput } from "./CurrencyInput";
 import { useAuth } from "@/contexts/AuthContext";
+import { quoteDraftKey, readQuoteDraft, writeQuoteDraft, type DraftEnvelope } from "@/contracts/quote-draft";
+import { parseQuoteTable } from "@/contracts/quote-paste";
+import { quoteCustomerDefaults } from "@/contracts/quote-customer-defaults";
 
 interface QuoteLineForm {
   key: string;
@@ -98,7 +106,6 @@ interface QuoteForm {
 }
 
 const INCOTERMS = ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"];
-const CURRENCIES = ["USD", "EUR", "CNY", "GBP", "JPY", "AUD", "CAD", "SGD", "THB"];
 const OUTPUT_LANGUAGES: Array<{ value: QuoteOutputLanguage; label: string }> = [
   { value: "bilingual", label: "中英双语" },
   { value: "zh", label: "中文" },
@@ -138,10 +145,10 @@ const createForm = (): QuoteForm => ({
   quoteNo: "",
   currency: "USD",
   baseCurrency: "CNY",
-  exchangeRate: "1",
+  exchangeRate: "",
   status: "draft",
   freight: "0",
-  taxRate: "13",
+  taxRate: "0",
   validUntil: "",
   incoterm: "FOB",
   originPort: "",
@@ -158,8 +165,41 @@ const createForm = (): QuoteForm => ({
   outputTemplateId: "",
 });
 
+interface QuoteDraft {
+  form: QuoteForm;
+  lines: QuoteLineForm[];
+  charges: AdditionalChargeForm[];
+  outputLayout: QuoteOutputLayout;
+  editingId: string | null;
+  editingVersion: string | null;
+  pasteText: string;
+  pasteCurrency: string;
+}
+const stringRecord = (value: unknown, example: object): boolean => Boolean(value && typeof value === "object" && Object.keys(example).every((key) => typeof (value as Record<string, unknown>)[key] === "string"));
+function isQuoteDraft(value: unknown): value is QuoteDraft {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as QuoteDraft;
+  return stringRecord(draft.form, createForm()) && QUOTE_STATUSES.some((status) => status.value === draft.form.status)
+    && typeof draft.pasteText === "string" && typeof draft.pasteCurrency === "string"
+    && Array.isArray(draft.lines) && draft.lines.length > 0 && draft.lines.every((line) => stringRecord(line, createLine()))
+    && Array.isArray(draft.charges) && draft.charges.every((charge) => stringRecord(charge, createCharge()))
+    && (draft.editingId === null || typeof draft.editingId === "string")
+    && (draft.editingVersion === null || typeof draft.editingVersion === "string")
+    && draft.outputLayout?.version === 1 && typeof draft.outputLayout.accentColor === "string"
+    && Array.isArray(draft.outputLayout.sections) && draft.outputLayout.sections.every((section) =>
+      section && typeof section.id === "string" && typeof section.type === "string" && typeof section.enabled === "boolean"
+      && Object.hasOwn(QUOTE_SECTION_DEFINITIONS, section.type)
+      && typeof section.titleZh === "string" && typeof section.titleEn === "string"
+      && (section.fields === undefined || (Array.isArray(section.fields) && section.fields.every((field) => typeof field === "string")))
+      && (section.contentZh === undefined || typeof section.contentZh === "string")
+      && (section.contentEn === undefined || typeof section.contentEn === "string"));
+}
+
 export function QuotesPage() {
-  const { role } = useAuth();
+  const [searchParams] = useSearchParams();
+  const contextCustomerId = searchParams.get("customerId");
+  const contextOpportunityId = searchParams.get("opportunityId");
+  const { role, userId } = useAuth();
   const canManage = canManageCrmData(role);
   const isAdmin = role === "admin";
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -171,16 +211,68 @@ export function QuotesPage() {
   const [outputLayout, setOutputLayout] = useState<QuoteOutputLayout>(() => cloneQuoteOutputLayout(DEFAULT_QUOTE_OUTPUT_LAYOUT));
   const [isLoading, setIsLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingVersion, setEditingVersion] = useState<string | null>(null);
   const [form, setForm] = useState<QuoteForm>(createForm);
   const [lines, setLines] = useState<QuoteLineForm[]>([createLine()]);
   const [charges, setCharges] = useState<AdditionalChargeForm[]>([]);
   const [templateName, setTemplateName] = useState("");
   const [outputLanguage, setOutputLanguage] = useState<QuoteOutputLanguage>("bilingual");
+  const [isSaving, setIsSaving] = useState(false);
+  const saving = useRef(false);
+  const draftsEnabled = useRef(true);
+  const defaultsApplied = useRef(false);
+  const customerFieldsEdited = useRef({ currency: false, incoterm: false });
+  const contextApplied = useRef(false);
+  const [pendingDraft, setPendingDraft] = useState<DraftEnvelope<QuoteDraft> | null>(() => {
+    try { return readQuoteDraft(window.sessionStorage, userId, isQuoteDraft); } catch { return null; }
+  });
+  const [draftNotice, setDraftNotice] = useState("");
+  const [loadErrors, setLoadErrors] = useState<string[]>([]);
+  const [pasteText, setPasteText] = useState("");
+  const [pasteCurrency, setPasteCurrency] = useState("");
+  const pasted = useMemo(() => parseQuoteTable(pasteText), [pasteText]);
+  const hasWork = Boolean(editingId || form.customerId || form.quoteNo || form.notes || form.notesEn || pasteText || charges.length || lines.some((line) => line.productName || line.description || line.unitPrice));
+  const draft: QuoteDraft = { form, lines, charges, outputLayout, editingId, editingVersion, pasteText, pasteCurrency };
+  const latestDraft = useRef(draft);
+  latestDraft.current = draft;
+  const mayPersist = useRef(false);
+  mayPersist.current = Boolean(userId && !pendingDraft && hasWork);
+  const draftJson = JSON.stringify(draft);
+  useEffect(() => {
+    if (!userId || pendingDraft || !hasWork || !draftsEnabled.current) return;
+    const persist = () => {
+      if (!draftsEnabled.current) return;
+      try {
+        const ok = writeQuoteDraft(window.sessionStorage, userId, latestDraft.current);
+        setDraftNotice(ok ? "草稿已保存在当前浏览器标签页；退出账号后清除" : "浏览器无法保存草稿，请及时保存报价");
+      } catch { setDraftNotice("浏览器无法保存草稿，请及时保存报价"); }
+    };
+    const timer = window.setTimeout(persist, 500);
+    const beforeUnload = (event: BeforeUnloadEvent) => { persist(); event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => { window.clearTimeout(timer); window.removeEventListener("beforeunload", beforeUnload); };
+  }, [draftJson, hasWork, pendingDraft, userId]);
+  useEffect(() => () => {
+    if (mayPersist.current && draftsEnabled.current) {
+      try { writeQuoteDraft(window.sessionStorage, userId, latestDraft.current); } catch { /* Optional storage. */ }
+    }
+  }, [userId]);
+  useEffect(() => {
+    const clear = () => { draftsEnabled.current = false; setPendingDraft(null); setDraftNotice(""); };
+    window.addEventListener("huayuan:clear-drafts", clear);
+    return () => window.removeEventListener("huayuan:clear-drafts", clear);
+  }, []);
+  const clearDraft = () => {
+    mayPersist.current = false;
+    try { window.sessionStorage.removeItem(quoteDraftKey(userId)); } catch { /* Optional storage. */ }
+    setPendingDraft(null);
+    setDraftNotice("");
+  };
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [quotesData, customersData, productsData, opportunitiesData, templatesData, outputTemplatesData] = await Promise.all([
+      const results = await Promise.allSettled([
         getQuotes(),
         getCustomers(0, 1000, {}),
         getProducts(),
@@ -188,12 +280,19 @@ export function QuotesPage() {
         getQuoteTermTemplates(),
         getQuoteOutputTemplates(),
       ]);
-      setQuotes(quotesData);
-      setCustomers(customersData.customers);
-      setProducts(productsData);
-      setOpportunities(opportunitiesData);
-      setTermTemplates(templatesData);
-      setOutputTemplates(outputTemplatesData);
+      const labels = ["报价列表", "客户列表", "产品库", "商机", "条款模板", "版式模板"];
+      setLoadErrors(results.flatMap((result, index) => result.status === "rejected" ? [labels[index]] : []));
+      const [quoteResult, customerResult, productResult, opportunityResult, templateResult, outputResult] = results;
+      if (quoteResult.status === "fulfilled") setQuotes(quoteResult.value);
+      if (customerResult.status === "fulfilled") setCustomers(customerResult.value.customers);
+      if (productResult.status === "fulfilled") setProducts(productResult.value);
+      if (opportunityResult.status === "fulfilled") setOpportunities(opportunityResult.value);
+      if (templateResult.status === "fulfilled") setTermTemplates(templateResult.value);
+      if (outputResult.status === "fulfilled") setOutputTemplates(outputResult.value);
+      const templatesData = templateResult.status === "fulfilled" ? templateResult.value : [];
+      const outputTemplatesData = outputResult.status === "fulfilled" ? outputResult.value : [];
+      if (defaultsApplied.current) return;
+      defaultsApplied.current = true;
       const defaultTemplate = templatesData.find((template) => template.isDefault);
       if (defaultTemplate) {
         setForm((current) => current.termTemplateId || current.terms || current.termsEn ? current : {
@@ -218,10 +317,30 @@ export function QuotesPage() {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    if (!contextCustomerId || pendingDraft || contextApplied.current || hasWork || isLoading) return;
+    let ignore = false;
+    getCustomer360(contextCustomerId).then((data) => {
+      if (ignore || contextApplied.current) return;
+      contextApplied.current = true;
+      setCustomers((current) => [...current.filter((customer) => customer.id !== data.customer.id), data.customer]);
+      const linked = data.opportunities.find((opportunity) => String(opportunity.id) === contextOpportunityId || opportunity.opportunityId === contextOpportunityId);
+      if (linked) setOpportunities((current) => [...current.filter((opportunity) => opportunity.id !== linked.id), linked]);
+      setForm((current) => quoteCustomerDefaults({ ...current, customerId: String(data.customer.id), opportunityId: linked ? String(linked.id) : "" }, data.customer, customerFieldsEdited.current, false));
+    }).catch(() => { if (!ignore) toast.error("来源客户无法加载，请重新选择客户；不会使用未经授权的数据"); });
+    return () => { ignore = true; };
+  }, [contextCustomerId, contextOpportunityId, pendingDraft, hasWork, isLoading]);
+
   const resetEditor = () => {
+    clearDraft();
+    contextApplied.current = true;
+    customerFieldsEdited.current = { currency: false, incoterm: false };
     const defaultTemplate = termTemplates.find((template) => template.isDefault);
     const defaultOutputTemplate = outputTemplates.find((template) => template.isDefault) || outputTemplates[0];
     setEditingId(null);
+    setEditingVersion(null);
+    setPasteText("");
+    setPasteCurrency("");
     setForm({
       ...createForm(),
       termTemplateId: defaultTemplate ? String(defaultTemplate.id) : "",
@@ -258,7 +377,7 @@ export function QuotesPage() {
       ? product.variants?.find((item) => String(item.variantId || item.id) === variantKey)
       : undefined;
     const availablePrices = variant?.prices?.length ? variant.prices : product.prices || [];
-    const selectedPrice = availablePrices.find((item) => item.currency === form.currency) || availablePrices[0];
+    const referencePrice = quoteReferencePrice(form.currency, availablePrices, product);
     updateLine(key, {
       selectionId,
       productId: product.productId || String(product.id),
@@ -279,11 +398,9 @@ export function QuotesPage() {
       certificateRequirements: variant?.certificateRequirements || "",
       description: variant?.quoteDescription || product.description || "",
       unit: variant?.unit || product.unit || "pcs",
-      unitPrice: String(selectedPrice?.referencePrice ?? product.price ?? ""),
+      unitPrice: referencePrice,
     });
-    if (selectedPrice?.currency && !availablePrices.some((price) => price.currency === form.currency)) {
-      setForm((current) => ({ ...current, currency: selectedPrice.currency }));
-    }
+    if (!referencePrice) toast.info(`该产品没有 ${form.currency} 参考价，请确认并填写单价；报价币种未改变`);
   };
 
   const applyTermTemplate = (value: string) => {
@@ -365,15 +482,19 @@ export function QuotesPage() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (saving.current || pendingDraft) return;
+    if (editingId && (quotes.find((quote) => quote.id === editingId)?.updatedAt || null) !== editingVersion) {
+      toast.error("原报价已更新，请重新加载并核对后再编辑；当前草稿仍保留"); return;
+    }
     if (!form.customerId || !lines.length || lines.some((line) => !line.productName.trim())) {
       toast.error("请选择客户，并为每一行填写产品名称");
       return;
     }
-    if (lines.some((line) => Number(line.quantity) <= 0 || Number(line.unitPrice) < 0 || !Number.isFinite(Number(line.unitPrice)))) {
+    if (lines.some((line) => !line.unitPrice.trim() || Number(line.quantity) <= 0 || Number(line.unitPrice) < 0 || !Number.isFinite(Number(line.unitPrice)))) {
       toast.error("请检查每一行的数量和单价");
       return;
     }
-    if (Number(form.exchangeRate) <= 0) {
+    if (!form.exchangeRate.trim() || !Number.isFinite(Number(form.exchangeRate)) || Number(form.exchangeRate) <= 0) {
       toast.error("汇率必须大于 0");
       return;
     }
@@ -435,6 +556,8 @@ export function QuotesPage() {
         discount: Number(line.discount || 0),
       })),
     };
+    saving.current = true;
+    setIsSaving(true);
     try {
       if (editingId) {
         await updateQuote(editingId, data);
@@ -447,10 +570,18 @@ export function QuotesPage() {
       await fetchData();
     } catch {
       // API client displays the error.
+    } finally {
+      saving.current = false;
+      setIsSaving(false);
     }
   };
 
-  const handleEdit = (quote: Quote) => {
+  const handleEdit = (quote: Quote, asNew = false) => {
+    if (saving.current || pendingDraft) return;
+    if (hasWork && !confirm("切换报价会替换当前未保存内容，确定继续？")) return;
+    clearDraft();
+    contextApplied.current = true;
+    customerFieldsEdited.current = { currency: true, incoterm: true };
     const opportunity = opportunities.find((candidate) =>
       candidate.opportunityId === quote.opportunityId || String(candidate.id) === quote.opportunityId,
     );
@@ -458,14 +589,14 @@ export function QuotesPage() {
     setForm({
       customerId: String(quote.customerId || ""),
       opportunityId: opportunity ? String(opportunity.id) : "",
-      quoteNo: quote.quoteNo || "",
+      quoteNo: asNew ? "" : quote.quoteNo || "",
       currency: quote.currency || "USD",
       baseCurrency: quote.baseCurrency || "CNY",
-      exchangeRate: String(quote.exchangeRate || 1),
-      status: quote.status,
+      exchangeRate: asNew ? "" : String(quote.exchangeRate || 1),
+      status: asNew ? "draft" : quote.status,
       freight: String(quote.freight || 0),
       taxRate: String(quote.taxRate || 0),
-      validUntil: quote.validUntil?.split("T")[0] || "",
+      validUntil: asNew ? "" : quote.validUntil?.split("T")[0] || "",
       incoterm: quote.incoterm || "",
       originPort: quote.originPort || "",
       destinationPort: quote.destinationPort || "",
@@ -509,11 +640,13 @@ export function QuotesPage() {
         description: item.description || "",
         quantity: String(item.quantity ?? 1),
         unit: item.unit || product?.unit || "pcs",
-        unitPrice: String(item.unitPrice ?? ""),
+        unitPrice: asNew ? "" : String(item.unitPrice ?? ""),
         discount: String(item.discount || 0),
       };
     }));
-    setEditingId(quote.id);
+    setEditingId(asNew ? null : quote.id);
+    setEditingVersion(asNew ? null : quote.updatedAt || null);
+    if (asNew) toast.info("已复制为新报价，单价、汇率和有效期需要重新确认；运费及其他商务条款也请核对");
     setOutputLayout(cloneQuoteOutputLayout(quote.outputLayout || DEFAULT_QUOTE_OUTPUT_LAYOUT));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -537,20 +670,44 @@ export function QuotesPage() {
 
   return (
     <div className="space-y-6">
+      {loadErrors.length > 0 && <div role="alert" className="rounded-md border p-3 text-sm">{loadErrors.join("、")}加载失败，已填写的内容会保留。<Button type="button" variant="outline" onClick={() => void fetchData()} disabled={isLoading}>重新加载</Button></div>}
+      {pendingDraft && <div className="rounded-md border p-3 space-y-2 text-sm">
+        <p>发现 {new Date(pendingDraft.savedAt).toLocaleString()} 的未保存报价草稿。恢复前请核对价格和汇率。</p>
+        <Button type="button" disabled={isLoading || loadErrors.includes("报价列表")} onClick={() => {
+          const saved = pendingDraft.data;
+          const currentQuote = saved.editingId ? quotes.find((quote) => quote.id === saved.editingId) : null;
+          if (saved.editingId && (!currentQuote || (currentQuote.updatedAt || null) !== saved.editingVersion)) {
+            toast.error("原报价已更新、删除或不再可访问，请先核对原报价；草稿仍保留"); return;
+          }
+          defaultsApplied.current = true;
+          customerFieldsEdited.current = { currency: true, incoterm: true };
+          setForm(saved.form); setLines(saved.lines); setCharges(saved.charges); setOutputLayout(saved.outputLayout); setEditingId(saved.editingId); setEditingVersion(saved.editingVersion); setPasteText(saved.pasteText); setPasteCurrency(saved.pasteCurrency); setPendingDraft(null);
+        }}>恢复草稿</Button>
+        <Button type="button" variant="outline" onClick={() => {
+          if (!confirm("恢复为新报价，不覆盖原报价；单价、汇率和有效期将清空，确定继续？")) return;
+          const saved = pendingDraft.data;
+          defaultsApplied.current = true;
+          setForm({ ...saved.form, quoteNo: "", status: "draft", exchangeRate: "", validUntil: "" });
+          setLines(saved.lines.map((line) => ({ ...line, unitPrice: "" })));
+          setCharges(saved.charges); setOutputLayout(saved.outputLayout); setEditingId(null); setEditingVersion(null); setPasteText(saved.pasteText); setPasteCurrency(""); setPendingDraft(null);
+        }}>恢复为新报价</Button>
+        <Button type="button" variant="outline" onClick={() => { if (confirm("确定删除此标签页的未保存草稿？")) clearDraft(); }}>放弃草稿</Button>
+      </div>}
       {canManage && <Card>
         <CardHeader>
           <CardTitle>{editingId ? "编辑报价单" : "创建报价单"}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
+            <fieldset disabled={isSaving || Boolean(pendingDraft)} className="space-y-6">
             <section className="space-y-3">
               <h3 className="text-sm font-semibold">基本信息</h3>
               <div className="grid gap-4 md:grid-cols-4">
                 <Field label="客户 *">
-                  <Select value={form.customerId} onValueChange={(value) => value && setForm((current) => ({ ...current, customerId: value, opportunityId: "" }))} required>
-                    <SelectTrigger>{customers.find((customer) => String(customer.id) === form.customerId)?.company || <SelectValue placeholder="选择客户" />}</SelectTrigger>
-                    <SelectContent>{customers.map((customer) => <SelectItem key={customer.id} value={String(customer.id)}>{customer.company}</SelectItem>)}</SelectContent>
-                  </Select>
+                  <CustomerPicker value={form.customerId} customers={customers} onChange={(customer) => {
+                    setCustomers((current) => [...current.filter((item) => item.id !== customer.id), customer]);
+                    setForm((current) => quoteCustomerDefaults({ ...current, customerId: String(customer.id), opportunityId: "" }, customer, customerFieldsEdited.current, lines.some((line) => Boolean(line.unitPrice.trim()))));
+                  }} />
                 </Field>
                 <Field label="关联商机">
                   <Select value={form.opportunityId || "none"} onValueChange={(value) => value && setForm((current) => ({ ...current, opportunityId: value === "none" ? "" : value }))}>
@@ -565,8 +722,14 @@ export function QuotesPage() {
                     <SelectContent>{QUOTE_STATUSES.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
-                <Field label="报价币种"><Input list="quote-currencies" value={form.currency} maxLength={10} onChange={(event) => setForm((current) => ({ ...current, currency: event.target.value.toUpperCase() }))} /><datalist id="quote-currencies">{CURRENCIES.map((currency) => <option key={currency} value={currency} />)}</datalist></Field>
-                <Field label="基准币种"><Input list="quote-currencies" value={form.baseCurrency} maxLength={10} onChange={(event) => setForm((current) => ({ ...current, baseCurrency: event.target.value.toUpperCase() }))} /></Field>
+                <Field label="报价币种"><CurrencyInput label="报价币种" value={form.currency} onCommit={(currency) => {
+                  customerFieldsEdited.current.currency = true;
+                  if (lines.some((line) => line.unitPrice.trim()) && !confirm("改变币种将清空所有行单价及汇率，避免金额被直接改标。是否继续？")) return false;
+                  setLines((current) => current.map((line) => ({ ...line, unitPrice: "" })));
+                  setForm((current) => ({ ...current, currency, exchangeRate: "" }));
+                  return true;
+                }} /></Field>
+                <Field label="基准币种"><CurrencyInput label="基准币种" value={form.baseCurrency} onCommit={(baseCurrency) => { setForm((current) => ({ ...current, baseCurrency, exchangeRate: "" })); return true; }} /></Field>
                 <Field label={`汇率（1 ${form.currency || "报价币种"} = ? ${form.baseCurrency || "基准币种"}）`}><Input type="number" min="0.000001" step="0.000001" value={form.exchangeRate} onChange={(event) => setForm((current) => ({ ...current, exchangeRate: event.target.value }))} /></Field>
                 <Field label="有效期至"><Input type="date" value={form.validUntil} onChange={(event) => setForm((current) => ({ ...current, validUntil: event.target.value }))} /></Field>
               </div>
@@ -577,6 +740,19 @@ export function QuotesPage() {
                 <div><h3 className="text-sm font-semibold">报价产品明细 *</h3><p className="text-xs text-muted-foreground">支持目录产品、规格变体和手工报价行。</p></div>
                 <Button type="button" variant="outline" size="sm" onClick={() => setLines((current) => [...current, createLine()])}><Plus className="mr-1 h-4 w-4" />添加产品行</Button>
               </div>
+              <details className="rounded-md border p-3 space-y-3">
+                <summary className="cursor-pointer text-sm font-medium">从 Excel / 询价表粘贴产品行</summary>
+                <p className="text-sm text-muted-foreground">按“产品名称、数量、单位、单价、描述（可选）”排列，复制表格单元格粘贴。价格不会换算；确认币种后追加，不覆盖已有产品。</p>
+                <Textarea value={pasteText} onChange={(event) => setPasteText(event.target.value)} placeholder={"法兰\t10\tpcs\t12.50\tASME B16.5"} aria-label="粘贴询价产品表格" />
+                {pasteText && pasted.errors.map((error) => <p key={error} role="alert" className="text-sm text-destructive">{error}</p>)}
+                {pasteText && pasted.lines.length > 0 && <div className="max-h-60 overflow-auto"><Table><TableHeader><TableRow><TableHead>产品</TableHead><TableHead>数量</TableHead><TableHead>单位</TableHead><TableHead>单价（{form.currency}）</TableHead><TableHead>描述/规格</TableHead></TableRow></TableHeader><TableBody>{pasted.lines.map((line, index) => <TableRow key={index}><TableCell>{line.productName}</TableCell><TableCell>{line.quantity}</TableCell><TableCell>{line.unit}</TableCell><TableCell>{line.unitPrice}</TableCell><TableCell>{line.description}</TableCell></TableRow>)}</TableBody></Table></div>}
+                <label className="flex gap-2 text-sm"><input type="checkbox" checked={pasteCurrency === form.currency} onChange={(event) => setPasteCurrency(event.target.checked ? form.currency : "")} />确认粘贴单价为 {form.currency}，已核对规格和价格</label>
+                <Button type="button" variant="outline" disabled={!pasteText || pasted.errors.length > 0 || !pasted.lines.length || pasteCurrency !== form.currency} onClick={() => {
+                  setLines((current) => [...current, ...pasted.lines.map((line) => ({ ...createLine(), ...line }))]);
+                  setPasteText(""); setPasteCurrency("");
+                  toast.success(`已追加 ${pasted.lines.length} 行，请核对后保存`);
+                }}>确认追加 {pasted.lines.length} 行</Button>
+              </details>
               {lines.map((line, index) => {
                 const discount = Math.min(100, Math.max(0, Number(line.discount) || 0));
                 const lineAmount = roundMoney((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0) * (1 - discount / 100));
@@ -599,7 +775,7 @@ export function QuotesPage() {
                     <Field label="单位" className="md:col-span-1"><Input value={line.unit} onChange={(event) => updateLine(line.key, { unit: event.target.value })} /></Field>
                     <Field label="单价" className="md:col-span-1"><Input type="number" min="0" step="0.01" value={line.unitPrice} onChange={(event) => updateLine(line.key, { unitPrice: event.target.value })} required /></Field>
                     <Field label="折扣%" className="md:col-span-1"><Input type="number" min="0" max="100" step="0.01" value={line.discount} onChange={(event) => updateLine(line.key, { discount: event.target.value })} /></Field>
-                    <div className="flex items-end justify-end md:col-span-1"><Button type="button" variant="ghost" size="icon" className="text-destructive" title="删除产品行" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((item) => item.key !== line.key))}><Trash2 className="h-4 w-4" /></Button></div>
+                    <div className="flex items-end justify-end md:col-span-1"><Button type="button" variant="outline" size="sm" onClick={() => setLines((current) => [...current, { ...line, key: createKey() }])}>复制行</Button><Button type="button" variant="ghost" size="icon" className="text-destructive" title="删除产品行" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((item) => item.key !== line.key))}><Trash2 className="h-4 w-4" /></Button></div>
                   </div>
                   <div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">行金额（已扣折扣）</span><strong>{form.currency} {lineAmount.toFixed(2)}</strong></div>
                   <details className="rounded-md bg-muted/40 p-3">
@@ -650,14 +826,14 @@ export function QuotesPage() {
                 <AmountRow label="附加费用" value={`${form.currency} ${calculations.additionalFeeTotal.toFixed(2)}`} />
                 <AmountRow label={`税费（${Number(form.taxRate || 0)}%）`} value={`${form.currency} ${calculations.taxAmount.toFixed(2)}`} />
                 <div className="mt-2 flex justify-between border-t pt-3 text-base font-bold"><span>报价总额</span><span>{form.currency} {calculations.total.toFixed(2)}</span></div>
-                <div className="mt-2 flex justify-between text-muted-foreground"><span>参考折算</span><span>{form.baseCurrency} {calculations.convertedTotal.toFixed(2)}</span></div>
+                <div className="mt-2 flex justify-between text-muted-foreground"><span>参考折算</span><span>{Number(form.exchangeRate) > 0 ? `${form.baseCurrency} ${calculations.convertedTotal.toFixed(2)}` : "待确认汇率"}</span></div>
               </div>
             </section>
 
             <section className="space-y-3">
               <h3 className="text-sm font-semibold">贸易、交付与保障条款</h3>
               <div className="grid gap-4 md:grid-cols-3">
-                <Field label="Incoterms"><Input list="incoterms-list" value={form.incoterm} onChange={(event) => setForm((current) => ({ ...current, incoterm: event.target.value.toUpperCase() }))} /><datalist id="incoterms-list">{INCOTERMS.map((term) => <option key={term} value={term} />)}</datalist></Field>
+                <Field label="Incoterms"><Input list="incoterms-list" value={form.incoterm} onChange={(event) => { customerFieldsEdited.current.incoterm = true; setForm((current) => ({ ...current, incoterm: event.target.value.toUpperCase() })); }} /><datalist id="incoterms-list">{INCOTERMS.map((term) => <option key={term} value={term} />)}</datalist></Field>
                 <Field label="起运港"><Input value={form.originPort} onChange={(event) => setForm((current) => ({ ...current, originPort: event.target.value }))} placeholder="Shanghai, China" /></Field>
                 <Field label="目的港"><Input value={form.destinationPort} onChange={(event) => setForm((current) => ({ ...current, destinationPort: event.target.value }))} placeholder="Bangkok, Thailand" /></Field>
                 <Field label="交期"><Textarea rows={2} value={form.deliveryTime} onChange={(event) => setForm((current) => ({ ...current, deliveryTime: event.target.value }))} placeholder="收到定金后 30 天内" /></Field>
@@ -706,7 +882,9 @@ export function QuotesPage() {
               <QuoteLayoutEditor value={outputLayout} onChange={setOutputLayout} disabled={outputLayoutLocked} />
             </section>
 
-            <div className="flex gap-2"><Button type="submit"><Save className="mr-2 h-4 w-4" />{editingId ? "保存报价修改" : "创建报价单"}</Button>{editingId && <Button type="button" variant="outline" onClick={resetEditor}>取消编辑</Button>}</div>
+            <div className="flex gap-2"><Button type="submit" disabled={isSaving}><Save className="mr-2 h-4 w-4" />{isSaving ? "正在保存…" : editingId ? "保存报价修改" : "创建报价单"}</Button>{editingId && <Button type="button" variant="outline" onClick={() => { if (confirm("确定放弃本次未保存的报价编辑？")) resetEditor(); }}>取消编辑</Button>}</div>
+            {draftNotice && <p role="status" className="text-sm text-muted-foreground">{draftNotice}</p>}
+            </fieldset>
           </form>
         </CardContent>
       </Card>}
@@ -733,7 +911,7 @@ export function QuotesPage() {
             {isLoading ? [...Array(5)].map((_, index) => <TableRow key={index}>{[...Array(8)].map((__, cell) => <TableCell key={cell}><Skeleton className="h-4 w-20" /></TableCell>)}</TableRow>)
               : quotes.length === 0 ? <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">暂无报价单</TableCell></TableRow>
                 : quotes.map((quote) => <TableRow key={quote.id}>
-                  <TableCell className="font-mono text-sm">{quote.quoteNo || "-"}</TableCell>
+                  <TableCell className="font-mono text-sm">{quote.quoteNo || "-"}{canManage && <Button variant="outline" size="sm" className="ml-2" disabled={isSaving || Boolean(pendingDraft)} onClick={() => handleEdit(quote, true)}>复制新报价</Button>}</TableCell>
                   <TableCell>{quote.customer?.company || customers.find((item) => String(item.id) === String(quote.customerId))?.company || "-"}</TableCell>
                   <TableCell className="max-w-72 truncate" title={(quote.items || []).map((item) => item.productName).join("、")}>{(quote.items || []).map((item) => item.productName).join("、") || "-"}</TableCell>
                   <TableCell>{quote.incoterm || "-"}</TableCell>

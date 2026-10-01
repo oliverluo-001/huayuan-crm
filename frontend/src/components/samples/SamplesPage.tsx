@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +26,8 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { canManageCrmData } from "@/auth/permissions";
 import { SAMPLE_STATUS_OPTIONS as SAMPLE_STATUSES } from "@/contracts/crm-terminology";
+import { CustomerPicker } from "@/components/customers/CustomerPicker";
+import { useCustomerWorkspaceContext } from "@/components/customers/useCustomerWorkspaceContext";
 
 export function SamplesPage() {
   const { role } = useAuth();
@@ -36,6 +38,9 @@ export function SamplesPage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const saving = useRef(false);
+  const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [form, setForm] = useState({
     customerId: "",
     opportunityId: "",
@@ -49,6 +54,12 @@ export function SamplesPage() {
     notes: "",
     originalProductId: "",
     originalProductName: "",
+  });
+
+  useCustomerWorkspaceContext(!editingId && !form.customerId && !isLoading, (data, opportunity) => {
+    setCustomers((current) => [...current.filter((item) => item.id !== data.customer.id), data.customer]);
+    if (opportunity) setOpportunities((current) => [...current.filter((item) => item.id !== opportunity.id), opportunity]);
+    setForm((current) => ({ ...current, customerId: String(data.customer.id), opportunityId: opportunity ? String(opportunity.id) : "" }));
   });
 
   const resetForm = () => {
@@ -72,16 +83,18 @@ export function SamplesPage() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [samplesData, customersData, productsData, opportunitiesData] = await Promise.all([
+      const results = await Promise.allSettled([
         getSamples(),
         getCustomers(0, 1000, {}),
         getProducts(),
         getOpportunities(),
       ]);
-      setSamples(samplesData);
-      setCustomers(customersData.customers);
-      setProducts(productsData);
-      setOpportunities(opportunitiesData);
+      const [sampleResult, customerResult, productResult, opportunityResult] = results;
+      setLoadErrors(results.flatMap((result, index) => result.status === "rejected" ? [["样品", "客户", "产品", "商机"][index]] : []));
+      if (sampleResult.status === "fulfilled") setSamples(sampleResult.value);
+      if (customerResult.status === "fulfilled") setCustomers(customerResult.value.customers);
+      if (productResult.status === "fulfilled") setProducts(productResult.value);
+      if (opportunityResult.status === "fulfilled") setOpportunities(opportunityResult.value);
     } finally {
       setIsLoading(false);
     }
@@ -93,6 +106,9 @@ export function SamplesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving.current) return;
+    saving.current = true;
+    setIsSaving(true);
     try {
       const product = products.find((item) => String(item.id) === form.productId);
       if ((!product && !form.originalProductName) || !form.customerId) {
@@ -124,6 +140,9 @@ export function SamplesPage() {
       await fetchData();
     } catch {
       // Error handled by API client
+    } finally {
+      saving.current = false;
+      setIsSaving(false);
     }
   };
 
@@ -180,6 +199,7 @@ export function SamplesPage() {
 
   return (
     <div className="space-y-6">
+      {loadErrors.length > 0 && <div role="alert" className="rounded-md border p-3 text-sm">{loadErrors.join("、")}加载失败，已填内容保留。<Button variant="outline" onClick={() => void fetchData()} disabled={isLoading}>重试</Button></div>}
       {/* Form */}
       {canManage && <Card>
         <CardHeader>
@@ -187,25 +207,14 @@ export function SamplesPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <fieldset disabled={isSaving} className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
                 <Label>客户 *</Label>
-                <Select
-                  value={form.customerId}
-                  onValueChange={(v) => { if (v) setForm({ ...form, customerId: v, opportunityId: "" }) }}
-                  required
-                >
-                  <SelectTrigger>
-                    {customers.find((customer) => String(customer.id) === form.customerId)?.company || <SelectValue placeholder="选择客户" />}
-                  </SelectTrigger>
-                  <SelectContent>
-                    {customers.map((customer) => (
-                      <SelectItem key={customer.id} value={String(customer.id)}>
-                        {customer.company}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <CustomerPicker value={form.customerId} customers={customers} onChange={(customer) => {
+                  setCustomers((current) => [...current.filter((item) => item.id !== customer.id), customer]);
+                  setForm((current) => ({ ...current, customerId: String(customer.id), opportunityId: "" }));
+                }} />
               </div>
               <div className="space-y-2">
                 <Label>关联商机</Label>
@@ -320,12 +329,13 @@ export function SamplesPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <Button type="submit">
+              <Button type="submit" disabled={isSaving}>
                 <Plus className="mr-2 h-4 w-4" />
-                {editingId ? "保存样品记录" : "登记样品寄送"}
+                {isSaving ? "正在保存…" : editingId ? "保存样品记录" : "登记样品寄送"}
               </Button>
               {editingId && <Button type="button" variant="outline" onClick={resetForm}>取消编辑</Button>}
             </div>
+            </fieldset>
           </form>
         </CardContent>
       </Card>}

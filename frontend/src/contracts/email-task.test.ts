@@ -6,6 +6,11 @@ import {
 } from "./email-task";
 
 describe("email task creation contract", () => {
+  it("requires an explicit all-recipients choice", () => {
+    const form = { name: "开发", taskMode: "scheduled" as const, templateId: "1", batchSize: "20", intervalMinutes: "60", totalRuns: "1", startAt: "2026-10-02T09:00" };
+    expect(buildCreateEmailTaskInput(form, ["1", "2"]).sendAll).toBe(false);
+    expect(buildCreateEmailTaskInput({ ...form, sendAll: true }, ["1", "2"]).sendAll).toBe(true);
+  });
   it("does not send server-managed delivery counters", () => {
     const input = buildCreateEmailTaskInput({
       name: "  东南亚客户跟进  ",
