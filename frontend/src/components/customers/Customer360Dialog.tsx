@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useCustomerQuoteDraft } from "./useCustomerQuoteDraft";
 import {
   Check,
   Download,
@@ -170,6 +171,15 @@ const createQuoteLine = (): QuoteLineForm => ({
 const dateInputValue = (value?: string | Date) =>
   value ? String(value).split("T")[0] : "";
 
+const createQuickQuoteForm = () => ({ opportunityId: "", currency: "USD", baseCurrency: "CNY", exchangeRate: "", freight: "0", taxRate: "0", validUntil: "", notes: "" });
+type QuickQuoteDraft = { form: ReturnType<typeof createQuickQuoteForm>; lines: QuoteLineForm[] };
+function isQuickQuoteDraft(value: unknown): value is QuickQuoteDraft {
+  if (!value || typeof value !== "object") return false;
+  const draft = value as QuickQuoteDraft;
+  const strings = (record: unknown, shape: object) => Boolean(record && typeof record === "object" && Object.keys(shape).every((key) => typeof (record as Record<string, unknown>)[key] === "string"));
+  return strings(draft.form, createQuickQuoteForm()) && Array.isArray(draft.lines) && draft.lines.length > 0 && draft.lines.length <= 200 && draft.lines.every((line) => strings(line, createQuoteLine()));
+}
+
 const createOpportunityForm = () => ({
   name: "",
   amount: "",
@@ -195,13 +205,18 @@ const createOpportunityForm = () => ({
   description: "",
 });
 
-export function Customer360Dialog({
+export function Customer360Dialog(props: Customer360DialogProps) {
+  const { userId } = useAuth();
+  return <Customer360Workspace key={`${userId}:${props.customerId}`} {...props} />;
+}
+
+function Customer360Workspace({
   customerId,
   open,
   onOpenChange,
   onCustomerChanged,
 }: Customer360DialogProps) {
-  const { role } = useAuth();
+  const { role, userId } = useAuth();
   const canManage = canManageCrmData(role);
   const navigate = useNavigate();
   const attachmentInput = useRef<HTMLInputElement>(null);
@@ -252,19 +267,13 @@ export function Customer360Dialog({
     templateId: "",
     taskName: "",
   });
-  const [quoteForm, setQuoteForm] = useState({
-    opportunityId: "",
-    currency: "USD",
-    baseCurrency: "CNY",
-    exchangeRate: "",
-    freight: "0",
-    taxRate: "0",
-    validUntil: "",
-    notes: "",
-  });
+  const [quoteForm, setQuoteForm] = useState(createQuickQuoteForm);
   const [quoteLines, setQuoteLines] = useState<QuoteLineForm[]>([
     createQuoteLine(),
   ]);
+  const { key: _defaultKey, ...defaultQuoteLine } = createQuoteLine();
+  const hasQuoteWork = JSON.stringify(quoteForm) !== JSON.stringify(createQuickQuoteForm()) || quoteLines.length > 1 || quoteLines.some(({ key: _key, ...line }) => JSON.stringify(line) !== JSON.stringify(defaultQuoteLine));
+  const quickDraft = useCustomerQuoteDraft(userId || "", customerId, { form: quoteForm, lines: quoteLines }, hasQuoteWork, isQuickQuoteDraft);
   const [sampleForm, setSampleForm] = useState({
     opportunityId: "",
     productId: "",
@@ -628,6 +637,7 @@ export function Customer360Dialog({
 
   const submitQuote = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (quickDraft.pending) { toast.error("请先恢复或放弃未保存草稿"); return; }
     if (
       !quoteLines.length ||
       quoteLines.some((line) => !line.productName.trim())
@@ -694,16 +704,8 @@ export function Customer360Dialog({
       "报价单已在当前客户下创建",
     );
     if (succeeded) {
-      setQuoteForm({
-        opportunityId: "",
-        currency: "USD",
-        baseCurrency: "CNY",
-        exchangeRate: "",
-        freight: "0",
-        taxRate: "0",
-        validUntil: "",
-        notes: "",
-      });
+      quickDraft.clear();
+      setQuoteForm(createQuickQuoteForm());
       setQuoteLines([createQuoteLine()]);
     }
   };
@@ -776,18 +778,20 @@ export function Customer360Dialog({
   };
 
   const goTo = (path: string) => {
+    if (!quickDraft.mayLeave()) return;
     onOpenChange(false);
     navigate(`${path}${path.includes("?") ? "&" : "?"}customerId=${encodeURIComponent(customerId)}`);
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[96vh] max-w-[calc(100%-1rem)] p-0 sm:max-w-7xl">
-        <DialogHeader className="border-b px-5 py-4 pr-14">
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (nextOpen || quickDraft.mayLeave()) onOpenChange(nextOpen); }}>
+      <DialogContent className="customer-workspace flex max-h-[94dvh] max-w-[calc(100%-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-7xl">
+        <DialogHeader className="shrink-0 border-b bg-muted/40 px-5 py-5 pr-14">
+          <p className="text-xs font-medium tracking-wide text-primary">客户工作台 / CUSTOMER WORKSPACE</p>
           <DialogTitle>
-            客户 360°
-            {data?.customer.company ? ` · ${data.customer.company}` : ""}
+            {data?.customer.company || "客户 360°"}
           </DialogTitle>
+          {canManage && quickDraft.pending && <Button size="sm" variant="outline" className="w-fit" onClick={() => setActiveWorkspace("quotes")}>该客户有未保存报价草稿 · 点击恢复</Button>}
         </DialogHeader>
         {isLoading ? (
           <div className="space-y-4 p-5">
@@ -811,9 +815,9 @@ export function Customer360Dialog({
             onValueChange={(value) =>
               value && setActiveWorkspace(value as Workspace)
             }
-            className="min-h-0 gap-0"
+            className="min-h-0 gap-0 overflow-hidden"
           >
-            <div className="border-b px-3 py-2">
+            <div className="shrink-0 border-b bg-card px-3 py-2">
               <TabsList
                 variant="line"
                 className="h-auto w-full justify-start overflow-x-auto"
@@ -848,8 +852,8 @@ export function Customer360Dialog({
                 </TabsTrigger>
               </TabsList>
             </div>
-            <ScrollArea className="max-h-[76vh]">
-              <div className="p-5">
+            <ScrollArea className="min-h-0 max-h-[72dvh] overflow-auto">
+              <div className="bg-background/50 p-3 sm:p-5">
                 <TabsContent value="overview">
                   <OverviewWorkspace
                     data={data}
@@ -1899,6 +1903,12 @@ export function Customer360Dialog({
                         className="space-y-4 rounded-xl border bg-muted/20 p-4"
                         onSubmit={submitQuote}
                       >
+                        {quickDraft.pending && <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm"><p>发现本账号在该客户下的未保存报价草稿。恢复前不会覆盖或提交草稿。</p><div className="flex gap-2"><Button type="button" disabled={isSaving} onClick={() => {
+                          const saved = quickDraft.pending!.data;
+                          if (saved.form.opportunityId && !data.opportunities.some((item) => String(item.id) === saved.form.opportunityId)) { toast.error("草稿关联商机已不存在或无权访问，请先核对，草稿仍保留"); return; }
+                          setQuoteForm(saved.form); setQuoteLines(saved.lines); quickDraft.restored();
+                        }}>恢复快速报价草稿</Button><Button type="button" variant="outline" disabled={isSaving} onClick={() => { if (confirm("确定放弃该客户未保存的快速报价草稿？")) quickDraft.clear(); }}>放弃快速报价草稿</Button></div></div>}
+                        <fieldset disabled={isSaving || Boolean(quickDraft.pending)} className="space-y-4">
                         <div className="grid gap-3 md:grid-cols-3">
                           <Select
                             value={quoteForm.opportunityId || "none"}
@@ -2122,6 +2132,8 @@ export function Customer360Dialog({
                             创建报价单
                           </Button>
                         </div>
+                        </fieldset>
+                        {quickDraft.notice && <p role="status" className="text-xs text-muted-foreground">{quickDraft.notice}</p>}
                       </form>
                     )}
                     <RecordList empty="暂无报价记录">

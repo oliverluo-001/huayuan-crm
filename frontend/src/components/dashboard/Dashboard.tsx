@@ -67,10 +67,12 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const funnelMax = Math.max(1, ...funnel.map((item) => item[1]));
 
   return <div className="space-y-5">
-    <div className="flex items-center justify-between">
+    <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/10 via-card to-card p-5 md:p-7">
       <div>
-        <h2 className="text-xl font-semibold">业务概览</h2>
-        <p className="text-sm text-muted-foreground">{data.scope === "owned" ? "本人负责范围" : "全公司范围"}</p>
+        <p className="mb-2 text-xs font-semibold tracking-wide text-primary">销售工作台</p>
+        <h2 className="text-2xl font-semibold tracking-tight">把下一步跟进，变成下一笔机会</h2>
+        <p className="mt-2 text-sm text-muted-foreground">{data.scope === "owned" ? "本人负责范围" : "全公司范围"} · {d.openTodoCount} 项待办，{d.overdueTodoCount} 项逾期</p>
+        <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={() => goTo("customers")}>客户跟进</Button><Button size="sm" variant="outline" onClick={() => goTo("opportunities")}>推进商机</Button><Button size="sm" variant="outline" onClick={() => goTo("marketing")}>查看邮件任务</Button></div>
       </div>
       <Button variant="outline" size="icon" title="刷新仪表盘" onClick={() => void refresh(false)}>
         <RefreshCw className="h-4 w-4" />
@@ -81,7 +83,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       {metrics.map(({ label, value, note, icon: Icon }) => <Card key={label}>
         <CardContent className="flex items-center justify-between p-4">
           <div><p className="text-sm text-muted-foreground">{label}</p><p className="mt-1 text-2xl font-semibold">{value}</p><p className="mt-1 text-xs text-muted-foreground">{note}</p></div>
-          <Icon className="h-7 w-7 text-primary" />
+          <div className="rounded-xl bg-primary/10 p-3"><Icon className="h-5 w-5 text-primary" /></div>
         </CardContent>
       </Card>)}
     </div>

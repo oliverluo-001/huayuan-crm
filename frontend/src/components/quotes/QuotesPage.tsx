@@ -46,6 +46,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { quoteDraftKey, readQuoteDraft, writeQuoteDraft, type DraftEnvelope } from "@/contracts/quote-draft";
 import { parseQuoteTable } from "@/contracts/quote-paste";
 import { quoteCustomerDefaults } from "@/contracts/quote-customer-defaults";
+import { applyBulkSpecs } from "@/contracts/quote-bulk-specs";
+import { QuoteBulkSpecifications } from "./QuoteBulkSpecifications";
 
 interface QuoteLineForm {
   key: string;
@@ -230,6 +232,7 @@ export function QuotesPage() {
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [pasteText, setPasteText] = useState("");
   const [pasteCurrency, setPasteCurrency] = useState("");
+  const [selectedLines, setSelectedLines] = useState<string[]>([]);
   const pasted = useMemo(() => parseQuoteTable(pasteText), [pasteText]);
   const hasWork = Boolean(editingId || form.customerId || form.quoteNo || form.notes || form.notesEn || pasteText || charges.length || lines.some((line) => line.productName || line.description || line.unitPrice));
   const draft: QuoteDraft = { form, lines, charges, outputLayout, editingId, editingVersion, pasteText, pasteCurrency };
@@ -350,6 +353,7 @@ export function QuotesPage() {
     });
     setTemplateName(defaultTemplate?.name || "");
     setLines([createLine()]);
+    setSelectedLines([]);
     setCharges([]);
     setOutputLayout(cloneQuoteOutputLayout(defaultOutputTemplate?.layout || DEFAULT_QUOTE_OUTPUT_LAYOUT));
   };
@@ -698,7 +702,7 @@ export function QuotesPage() {
           <CardTitle>{editingId ? "编辑报价单" : "创建报价单"}</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="quote-editor space-y-6">
             <fieldset disabled={isSaving || Boolean(pendingDraft)} className="space-y-6">
             <section className="space-y-3">
               <h3 className="text-sm font-semibold">基本信息</h3>
@@ -753,10 +757,15 @@ export function QuotesPage() {
                   toast.success(`已追加 ${pasted.lines.length} 行，请核对后保存`);
                 }}>确认追加 {pasted.lines.length} 行</Button>
               </details>
+              <QuoteBulkSpecifications lines={lines} selected={selectedLines} onSelect={setSelectedLines} onApply={(keys, values, overwrite) => {
+                setLines((current) => applyBulkSpecs(current, keys, values, overwrite));
+                toast.success("规格已更新，请核对后保存报价单");
+              }} />
               {lines.map((line, index) => {
                 const discount = Math.min(100, Math.max(0, Number(line.discount) || 0));
                 const lineAmount = roundMoney((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0) * (1 - discount / 100));
-                return <div key={line.key} className="space-y-3 rounded-lg border p-4">
+                return <div key={line.key} className="space-y-3 rounded-xl border bg-background/30 p-4">
+                  <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><input type="checkbox" aria-label={`选择报价行 ${index + 1}`} checked={selectedLines.includes(line.key)} onChange={(event) => setSelectedLines((current) => event.target.checked ? [...current, line.key] : current.filter((key) => key !== line.key))} />第 {index + 1} 行 · 加入批量规格填写</label>
                   <div className="grid gap-3 md:grid-cols-12">
                     <Field label={`产品 ${index + 1}`} className="md:col-span-4">
                       <Select value={line.selectionId} onValueChange={(value) => value && selectProduct(line.key, value)}>
@@ -775,7 +784,7 @@ export function QuotesPage() {
                     <Field label="单位" className="md:col-span-1"><Input value={line.unit} onChange={(event) => updateLine(line.key, { unit: event.target.value })} /></Field>
                     <Field label="单价" className="md:col-span-1"><Input type="number" min="0" step="0.01" value={line.unitPrice} onChange={(event) => updateLine(line.key, { unitPrice: event.target.value })} required /></Field>
                     <Field label="折扣%" className="md:col-span-1"><Input type="number" min="0" max="100" step="0.01" value={line.discount} onChange={(event) => updateLine(line.key, { discount: event.target.value })} /></Field>
-                    <div className="flex items-end justify-end md:col-span-1"><Button type="button" variant="outline" size="sm" onClick={() => setLines((current) => [...current, { ...line, key: createKey() }])}>复制行</Button><Button type="button" variant="ghost" size="icon" className="text-destructive" title="删除产品行" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((item) => item.key !== line.key))}><Trash2 className="h-4 w-4" /></Button></div>
+                    <div className="flex items-center justify-end gap-2 border-t pt-2 md:col-span-12"><Button type="button" variant="outline" size="sm" onClick={() => setLines((current) => [...current, { ...line, key: createKey() }])}>复制行</Button><Button type="button" variant="ghost" size="icon" className="text-destructive" title="删除产品行" disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((item) => item.key !== line.key))}><Trash2 className="h-4 w-4" /></Button></div>
                   </div>
                   <div className="flex items-center justify-between text-sm"><span className="text-muted-foreground">行金额（已扣折扣）</span><strong>{form.currency} {lineAmount.toFixed(2)}</strong></div>
                   <details className="rounded-md bg-muted/40 p-3">
@@ -879,10 +888,10 @@ export function QuotesPage() {
                 </Field>
               </div>
               {outputLayoutLocked && <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">该报价已发送或已接受，版式快照已锁定，避免正式文件被事后改写。需要新格式时请复制创建新报价。</div>}
-              <QuoteLayoutEditor value={outputLayout} onChange={setOutputLayout} disabled={outputLayoutLocked} />
+              <details className="rounded-lg border bg-muted/20 p-3"><summary className="cursor-pointer text-sm font-medium">展开版式编辑与打印预览</summary><div className="mt-4"><QuoteLayoutEditor value={outputLayout} onChange={setOutputLayout} disabled={outputLayoutLocked} /></div></details>
             </section>
 
-            <div className="flex gap-2"><Button type="submit" disabled={isSaving}><Save className="mr-2 h-4 w-4" />{isSaving ? "正在保存…" : editingId ? "保存报价修改" : "创建报价单"}</Button>{editingId && <Button type="button" variant="outline" onClick={() => { if (confirm("确定放弃本次未保存的报价编辑？")) resetEditor(); }}>取消编辑</Button>}</div>
+            <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card/95 p-3 shadow-lg backdrop-blur-sm"><div className="text-sm"><span className="text-muted-foreground">{lines.length} 行产品 · 报价总额 </span><strong className="text-primary">{form.currency} {calculations.total.toFixed(2)}</strong></div><div className="flex gap-2"><Button type="submit" disabled={isSaving}><Save className="mr-2 h-4 w-4" />{isSaving ? "正在保存…" : editingId ? "保存报价修改" : "创建报价单"}</Button>{editingId && <Button type="button" variant="outline" onClick={() => { if (confirm("确定放弃本次未保存的报价编辑？")) resetEditor(); }}>取消编辑</Button>}</div></div>
             {draftNotice && <p role="status" className="text-sm text-muted-foreground">{draftNotice}</p>}
             </fieldset>
           </form>
