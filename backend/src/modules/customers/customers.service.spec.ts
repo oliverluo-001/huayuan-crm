@@ -575,6 +575,9 @@ describe('CustomersService opportunity lifecycle sync', () => {
   };
   const todoRepository = {
     find: jest.fn(async () => []),
+    findOne: jest.fn(async () => null),
+    create: jest.fn((value) => value),
+    save: jest.fn(async (value) => value),
   };
   const service = new CustomersService(
     customerRepository as any,

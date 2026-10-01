@@ -219,7 +219,7 @@ describe('EmailService ownership', () => {
     }));
   });
 
-  it('rejects a scheduled plan whose rounds cannot cover all selected recipients', async () => {
+  it('allows a limited plan with a larger candidate list', async () => {
     await expect(service.createTask({
       name: 'Undersized plan',
       taskMode: 'scheduled',
@@ -229,8 +229,8 @@ describe('EmailService ownership', () => {
       intervalMinutes: 60,
       batchSize: 1,
       totalRuns: 2,
-    }, '7')).rejects.toThrow('当前计划最多可发送 2 封');
-    expect(taskRepository.save).not.toHaveBeenCalled();
+    }, '7')).resolves.toEqual(expect.objectContaining({ totalRuns: 2, customerIds: ['contact:11', 'contact:12', 'contact:13'] }));
+    expect(taskRepository.save).toHaveBeenCalled();
   });
 
   it('rejects manually submitted recipients outside the sales authorization scope', async () => {

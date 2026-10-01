@@ -8,6 +8,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Customer } from './customer.entity';
+import { Opportunity } from './opportunity.entity';
 
 export type TodoStatus = 'open' | 'done';
 
@@ -21,6 +22,20 @@ export class Todo {
 
   @Column({ name: 'customer_id', type: 'int' })
   customerId: number;
+
+  @Column({ name: 'opportunity_id', type: 'int', nullable: true })
+  opportunityId: number | null;
+
+  // Only the current action has a key; completed history keeps its opportunity link.
+  @Column({ name: 'next_action_key', type: 'varchar', length: 64, nullable: true, unique: true })
+  nextActionKey: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  resolution: 'completed' | 'cancelled' | null;
+
+  @ManyToOne(() => Opportunity, { onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'opportunity_id' })
+  opportunity: Opportunity;
 
   @Column({ type: 'varchar', length: 500 })
   title: string;

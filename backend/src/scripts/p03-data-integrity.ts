@@ -470,7 +470,7 @@ async function cleanupCustomerTags(connection: MigrationConnection, database: st
   return { archived, removed };
 }
 
-async function refreshCustomerSummaries(connection: MigrationConnection, database: string) {
+export async function refreshCustomerSummaries(connection: MigrationConnection, database: string) {
   if (!(await tableExists(connection, database, 'customers'))) return 0;
   let refreshed = 0;
 

@@ -11,3 +11,4 @@ coverage/
 !.env.example
 *.tmp
 *.bak
+.test-runs/

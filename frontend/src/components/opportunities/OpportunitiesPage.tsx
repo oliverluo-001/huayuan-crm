@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Clock3,
@@ -9,6 +9,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { CustomerPicker } from "@/components/customers/CustomerPicker";
+import { useCustomerWorkspaceContext } from "@/components/customers/useCustomerWorkspaceContext";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -131,18 +133,27 @@ export function OpportunitiesPage() {
     useState<Opportunity | null>(null);
   const [history, setHistory] = useState<OpportunityStageHistory[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const saving = useRef(false);
+  const [loadErrors, setLoadErrors] = useState<string[]>([]);
+  useCustomerWorkspaceContext(!editingId && !form.customerId && !isLoading, (data) => {
+    setCustomers((current) => [...current.filter((item) => item.id !== data.customer.id), data.customer]);
+    setForm((current) => ({ ...current, customerId: String(data.customer.id), ownerId: current.ownerId || data.customer.ownerId || userId }));
+  });
 
   const fetchOpportunities = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [opportunityData, customerData, userData] = await Promise.all([
+      const results = await Promise.allSettled([
         getOpportunities(),
         getCustomers(0, 1000, {}),
         getUserDirectory(),
       ]);
-      setOpportunities(opportunityData);
-      setCustomers(customerData.customers);
-      setUsers(userData);
+      const [opportunityResult, customerResult, userResult] = results;
+      setLoadErrors(results.flatMap((result, index) => result.status === "rejected" ? [["商机", "客户", "人员目录"][index]] : []));
+      if (opportunityResult.status === "fulfilled") setOpportunities(opportunityResult.value);
+      if (customerResult.status === "fulfilled") setCustomers(customerResult.value.customers);
+      if (userResult.status === "fulfilled") setUsers(userResult.value);
     } finally {
       setIsLoading(false);
     }
@@ -227,6 +238,7 @@ export function OpportunitiesPage() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (saving.current) return;
     if (!form.customerId || !form.name.trim()) {
       toast.error("请选择客户并填写商机名称");
       return;
@@ -250,6 +262,8 @@ export function OpportunitiesPage() {
       toast.error("商机关闭为输单前必须填写输单原因");
       return;
     }
+    saving.current = true;
+    setIsSaving(true);
     try {
       const data = {
         name: form.name.trim(),
@@ -290,6 +304,9 @@ export function OpportunitiesPage() {
       await fetchOpportunities();
     } catch {
       // API 客户端已显示错误。
+    } finally {
+      saving.current = false;
+      setIsSaving(false);
     }
   };
 
@@ -359,6 +376,7 @@ export function OpportunitiesPage() {
 
   return (
     <div className="space-y-5">
+      {loadErrors.length > 0 && <div role="alert" className="rounded-md border p-3 text-sm">{loadErrors.join("、")}加载失败，已填内容保留。<Button variant="outline" onClick={() => void fetchOpportunities()} disabled={isLoading}>重试</Button></div>}
       <div className="grid gap-3 md:grid-cols-4">
         <SummaryCard
           title="活跃商机"
@@ -393,39 +411,21 @@ export function OpportunitiesPage() {
           </CardHeader>
           <CardContent>
             <form className="space-y-5" onSubmit={handleSubmit}>
+              <fieldset disabled={isSaving} className="space-y-5">
               <FormSection title="基本信息">
                 <Field label="客户 *">
-                  <Select
-                    value={form.customerId}
-                    onValueChange={(value) => {
-                      const customer = customers.find(
-                        (item) => String(item.id) === value,
-                      );
+                  <CustomerPicker value={form.customerId} customers={customers} onChange={(customer) => {
+                      setCustomers((current) => [...current.filter((item) => item.id !== customer.id), customer]);
                       setForm((current) => ({
                         ...current,
-                        customerId: value || "",
+                        customerId: String(customer.id),
                         ownerId: current.ownerId || customer?.ownerId || userId,
                         currency:
                           current.currency ||
                           customer?.preferredCurrency ||
                           "USD",
                       }));
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择客户" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customers.map((customer) => (
-                        <SelectItem
-                          key={customer.id}
-                          value={String(customer.id)}
-                        >
-                          {customer.company}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    }} />
                 </Field>
                 <Field label="商机名称 *">
                   <Input
@@ -790,9 +790,9 @@ export function OpportunitiesPage() {
               )}
 
               <div className="flex gap-2">
-                <Button type="submit">
+                <Button type="submit" disabled={isSaving}>
                   <Plus className="mr-2 h-4 w-4" />
-                  {editingId ? "保存修改" : "创建商机"}
+                  {isSaving ? "正在保存…" : editingId ? "保存修改" : "创建商机"}
                 </Button>
                 {editingId && (
                   <Button type="button" variant="outline" onClick={resetForm}>
@@ -800,6 +800,7 @@ export function OpportunitiesPage() {
                   </Button>
                 )}
               </div>
+              </fieldset>
             </form>
           </CardContent>
         </Card>

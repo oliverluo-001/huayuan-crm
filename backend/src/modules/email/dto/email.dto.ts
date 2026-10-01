@@ -84,6 +84,10 @@ export class CreateEmailTaskDto {
   totalRuns?: number;
 
   @IsOptional()
+  @IsBoolean()
+  sendAll?: boolean;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(200)

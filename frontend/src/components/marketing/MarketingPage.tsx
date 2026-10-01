@@ -20,6 +20,7 @@ import {
   createEmailTask,
   runEmailTask,
   cancelEmailTask,
+  pauseEmailTask,
   deleteEmailTask,
   deleteSendLog,
   getSendLogs,
@@ -381,6 +382,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
     intervalMinutes: "1440",
     totalRuns: "1",
     startAt: "",
+    sendAll: false,
   });
   const [selectedRecipientIds, setSelectedRecipientIds] = useState<Set<string>>(new Set());
   const [recipientFilters, setRecipientFilters] = useState({
@@ -411,6 +413,10 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
 
   useEffect(() => {
     fetchData();
+    const timer = window.setInterval(() => {
+      void getEmailTasks().then(setTasks).catch(() => undefined);
+    }, 15000);
+    return () => window.clearInterval(timer);
   }, [fetchData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -434,10 +440,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
       if (!form.startAt) return void toast.error("请指定定时任务的开始时间");
       if (!Number.isInteger(batchSize) || batchSize < 1) return void toast.error("每轮邮件数量必须大于 0");
       if (!Number.isInteger(intervalMinutes) || intervalMinutes < 1) return void toast.error("轮次间隔必须大于 0 分钟");
-      if (!Number.isInteger(totalRuns) || totalRuns < 1) return void toast.error("总轮数必须大于 0");
-      if (selectedRecipientIds.size > batchSize * totalRuns) {
-        return void toast.error(`当前计划最多发送 ${batchSize * totalRuns} 封，少于已选的 ${selectedRecipientIds.size} 个收件人`);
-      }
+      if (!form.sendAll && (!Number.isInteger(totalRuns) || totalRuns < 1)) return void toast.error("总轮数必须大于 0");
     }
 
     setIsCreating(true);
@@ -452,6 +455,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
         intervalMinutes: "1440",
         totalRuns: "1",
         startAt: "",
+        sendAll: false,
       });
       setSelectedRecipientIds(new Set());
       await fetchData();
@@ -463,13 +467,22 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
   };
 
   const handleRun = async (id: string) => {
+    const task = tasks.find((item) => item.id === id);
+    if (task?.status === "completed" && task.remainingSendCount && !confirm(`还有 ${task.remainingSendCount} 个未发送收件人。确认按原批次和轮数继续下一组计划？不会重发成功邮件。`)) return;
     await runEmailTask(id);
     fetchData();
   };
 
   const handleCancel = async (id: string) => {
+    if (!confirm("取消后不能恢复此任务，已提交邮件无法撤回。只想暂时停止，请使用暂停。确认取消？")) return;
     await cancelEmailTask(id);
     fetchData();
+  };
+
+  const handlePause = async (id: string) => {
+    await pauseEmailTask(id);
+    toast.success("已请求暂停，当前已提交邮件无法撤回，未发送名单保留");
+    await fetchData();
   };
 
   const handleDelete = async (id: string) => {
@@ -639,13 +652,15 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                       min="1"
                       max="1000"
                       value={form.totalRuns}
+                      disabled={form.sendAll}
                       onChange={(e) => setForm({ ...form, totalRuns: e.target.value })}
-                      required
+                      required={!form.sendAll}
                     />
                   </div>
                 </div>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.sendAll} onChange={(event) => setForm({ ...form, sendAll: event.target.checked })} />全部发送：自动安排轮次，直到本次名单处理完成</label>
                 <p className="text-sm text-muted-foreground">
-                  计划最多处理 <span className="font-medium text-foreground">{scheduledCapacity}</span> 封；
+                  {form.sendAll ? `自动轮次：去重前约 ${Math.ceil(selectedRecipientIds.size / Math.max(1, Number(form.batchSize)))} 轮` : `本次最多处理 ${scheduledCapacity} 封，超出部分保留为待继续，不会计为跳过`}；
                   已选 <span className="font-medium text-foreground">{selectedRecipientIds.size}</span> 个收件人。
                 </p>
               </div>
@@ -809,7 +824,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                 const modeText = task.taskMode === "scheduled" ? "定时" : "单批";
                 const scheduledInfo = task.taskMode === "once"
                   ? `指定收件人 ${task.customerIds?.length || 0} 人`
-                  : `成功 ${Number(task.successfulSendCount || 0)} 封 | 轮次 ${Number(task.runsCompleted || 0)}/${Number(task.totalRuns || 1)} | 间隔 ${Number(task.intervalMinutes || 0)} 分钟`;
+                  : `成功 ${Number(task.successfulSendCount || 0)} 封 | 轮次 ${Number(task.runsCompleted || 0)}/${task.totalRuns === 0 ? "自动" : Number(task.totalRuns || 1)} | 待继续 ${task.remainingSendCount || 0} 人 | 间隔 ${Number(task.intervalMinutes || 0)} 分钟`;
                 return (
                   <TableRow key={task.id}>
                     <TableCell>
@@ -830,7 +845,7 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                         task.status === "completed" ? "secondary" :
                         task.status === "failed" ? "destructive" : "outline"
                       }>
-                        {statusLabel(EMAIL_TASK_STATUS_LABELS, task.status)}
+                        {task.status === "pending" && task.lastMessage?.includes("暂停") ? "已暂停" : statusLabel(EMAIL_TASK_STATUS_LABELS, task.status)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm">
@@ -848,21 +863,18 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                         {(task.status === "pending" ||
                           task.status === "failed" ||
                           (task.status === "completed" &&
-                            Number(task.failedSendCount || task.skippedSendCount || 0) > 0)) && (
+                            Number(task.failedSendCount || task.skippedSendCount || task.remainingSendCount || 0) > 0)) && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleRun(task.id)}
-                            title={task.status === "pending" ? "运行" : "重新运行未成功的收件人"}
+                            title={task.remainingSendCount ? "继续未发送名单（不会重发成功邮件）" : task.status === "pending" ? "启动或恢复" : "重新运行未成功的收件人"}
                           >
                             <Play className="h-4 w-4" />
                           </Button>
                         )}
-                        {task.status === "active" && (
-                          <Button variant="ghost" size="sm" onClick={() => handleCancel(task.id)} title="取消">
-                            <StopCircle className="h-4 w-4" />
-                          </Button>
-                        )}
+                        {["active", "sending"].includes(task.status) && <Button variant="outline" size="sm" onClick={() => handlePause(task.id)}>暂停</Button>}
+                        {["active", "sending", "pending"].includes(task.status) && <Button variant="ghost" size="sm" onClick={() => handleCancel(task.id)} title="永久取消"><StopCircle className="h-4 w-4" /></Button>}
                         <Button
                           variant="ghost"
                           size="sm"

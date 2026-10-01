@@ -92,6 +92,7 @@ const PUBLIC_IMPORT_EMAIL_DOMAINS = new Set([
 @Injectable()
 export class CustomersService {
   private importQueue: Promise<void> = Promise.resolve();
+  private linkedActionTransaction = false;
 
   constructor(
     @InjectRepository(Customer)
@@ -123,6 +124,39 @@ export class CustomersService {
     private dataSource?: DataSource,
   ) {}
 
+  private async withActionTransaction<T>(work: (service: CustomersService) => Promise<T>): Promise<T> {
+    if (!this.dataSource) throw new Error("商机联动事务未初始化");
+    return this.dataSource.transaction("READ COMMITTED", async (manager) => {
+      const service = new CustomersService(
+        manager.getRepository(Customer), manager.getRepository(Contact), manager.getRepository(Activity),
+        manager.getRepository(Todo), manager.getRepository(Opportunity), manager.getRepository(Quote),
+        manager.getRepository(Sample), manager.getRepository(Tag), manager.getRepository(CustomerView),
+        manager.getRepository(EmailLog), manager.getRepository(OpportunityStageHistory),
+        manager.getRepository(QuoteTermTemplate), manager.getRepository(User),
+      );
+      service.linkedActionTransaction = true;
+      return work(service);
+    });
+  }
+
+  private async syncOpportunityAction(opportunity: Opportunity) {
+    const key = `opp:${opportunity.id}`;
+    const existing = await this.todoRepository.findOne({ where: { nextActionKey: key } });
+    const action = String(opportunity.nextStepAction || "").trim();
+    if (["won", "lost"].includes(opportunity.stage) || !action) {
+      if (existing) await this.todoRepository.save({ ...existing, status: "done", resolution: "cancelled", completedAt: new Date(), nextActionKey: null });
+      return;
+    }
+    const todo = existing || this.todoRepository.create({ todoId: this.generateId("todo"), status: "open" });
+    Object.assign(todo, {
+      customerId: opportunity.customerId, opportunityId: opportunity.id, nextActionKey: key,
+      title: action.slice(0, 255), description: `商机「${opportunity.name}」下一步行动${action.length > 255 ? `\n${action}` : ""}`,
+      dueAt: opportunity.nextStepDueDate ? new Date(`${String(opportunity.nextStepDueDate instanceof Date ? opportunity.nextStepDueDate.toISOString() : opportunity.nextStepDueDate).slice(0, 10)}T09:00:00+08:00`) : null,
+      status: "open", resolution: null, completedAt: null,
+    });
+    await this.todoRepository.save(todo);
+  }
+
   // ==================== Customer CRUD ====================
 
   async findAll(filters: Record<string, any> = {}) {
@@ -136,8 +170,8 @@ export class CustomersService {
         .createQueryBuilder("customer")
         .leftJoinAndSelect("customer.tags", "tag")
         .where(
-          `customer.company LIKE :q OR customer.contact LIKE :q OR customer.email LIKE :q OR customer.phone LIKE :q OR customer.notes LIKE :q`,
-          { q: `%${queryFilters.q}%` },
+          `(customer.company LIKE :q OR customer.customerId LIKE :q OR CAST(customer.id AS CHAR) = :customerNumber OR customer.contact LIKE :q OR customer.email LIKE :q OR customer.phone LIKE :q OR customer.notes LIKE :q)`,
+          { q: `%${queryFilters.q}%`, customerNumber: String(queryFilters.q).trim() },
         )
         .orderBy("customer.createdAt", "DESC");
 
@@ -374,7 +408,8 @@ export class CustomersService {
     return this.customerRepository.save(customer);
   }
 
-  async update(id: number, updateCustomerDto: UpdateCustomerDto) {
+  async update(id: number, updateCustomerDto: UpdateCustomerDto): Promise<Customer> {
+    if (this.dataSource) return this.withActionTransaction((service) => service.update(id, updateCustomerDto));
     const customer = await this.findOne(id);
     const { tags, ...rest } = updateCustomerDto;
     if (rest.collaboratorIds !== undefined) {
@@ -943,15 +978,47 @@ export class CustomersService {
     return saved;
   }
 
-  async updateTodo(id: number, updateTodoDto: UpdateTodoDto) {
+  async updateTodo(id: number, updateTodoDto: UpdateTodoDto): Promise<Todo> {
+    if (this.dataSource) return this.withActionTransaction((service) => service.updateTodo(id, updateTodoDto));
     const todo = await this.todoRepository.findOne({ where: { id } });
     if (!todo) throw new NotFoundException("待办不存在");
+
+    if (todo.opportunityId && updateTodoDto.status === "open" && todo.status === "done") {
+      throw new BadRequestException("商机行动历史不可重新打开，请在商机中设置新的下一步行动");
+    }
+    let linkedOpportunity: Opportunity | null = null;
+    if (todo.nextActionKey && todo.opportunityId) {
+      linkedOpportunity = await this.opportunityRepository.findOne({ where: { id: todo.opportunityId }, ...(this.linkedActionTransaction ? { lock: { mode: "pessimistic_write" as const } } : {}) });
+      if (updateTodoDto.title !== undefined || updateTodoDto.dueAt !== undefined || updateTodoDto.description !== undefined) {
+        throw new BadRequestException("此待办由商机下一步行动管理，请在商机中修改行动和日期");
+      }
+      if (updateTodoDto.status === "done") {
+        if (this.linkedActionTransaction) {
+          const fresh = await this.todoRepository.findOne({ where: { id }, lock: { mode: "pessimistic_write" } });
+          if (!fresh) throw new NotFoundException("待办不存在");
+          if (!fresh.nextActionKey || fresh.status === "done") return fresh;
+          if (fresh.customerId !== todo.customerId || fresh.title !== todo.title || fresh.description !== todo.description ||
+            String(fresh.dueAt || "") !== String(todo.dueAt || "")) {
+            throw new BadRequestException("商机行动已被修改，请刷新并核对新的行动后再完成");
+          }
+          Object.assign(todo, fresh);
+        }
+        todo.nextActionKey = null;
+        if (linkedOpportunity && !["won", "lost"].includes(linkedOpportunity.stage)) {
+          linkedOpportunity.nextStepAction = "";
+          linkedOpportunity.nextStepDueDate = null;
+          await this.opportunityRepository.save(linkedOpportunity);
+        }
+      }
+    }
 
     Object.assign(todo, updateTodoDto);
     if (updateTodoDto.status === "done") {
       todo.completedAt = new Date();
+      todo.resolution = "completed";
     } else if (updateTodoDto.status === "open") {
       todo.completedAt = null as any;
+      todo.resolution = null;
     }
     const saved = await this.todoRepository.save(todo);
     await this.refreshCustomerTodoSummary(saved.customerId);
@@ -961,6 +1028,7 @@ export class CustomersService {
   async deleteTodo(id: number) {
     const todo = await this.todoRepository.findOne({ where: { id } });
     if (!todo) throw new NotFoundException("待办不存在");
+    if (todo.opportunityId || todo.nextActionKey) throw new BadRequestException("关联商机的行动记录需要保留；请完成待办或在商机中修改下一步行动");
     const result = await this.todoRepository.delete(id);
     if (result.affected === 0) throw new NotFoundException("待办不存在");
     await this.refreshCustomerTodoSummary(todo.customerId);
@@ -970,6 +1038,7 @@ export class CustomersService {
   private async refreshCustomerTodoSummary(customerId: number) {
     const customer = await this.customerRepository.findOne({
       where: { id: customerId },
+      ...(this.linkedActionTransaction ? { lock: { mode: "pessimistic_write" as const } } : {}),
     });
     if (!customer) return;
 
@@ -1050,7 +1119,8 @@ export class CustomersService {
   async createOpportunity(
     createOpportunityDto: CreateOpportunityDto,
     actor: OpportunityActor = { userId: "", displayName: "系统" },
-  ) {
+  ): Promise<Opportunity> {
+    if (this.dataSource) return this.withActionTransaction((service) => service.createOpportunity(createOpportunityDto, actor));
     const customer = await this.findOne(createOpportunityDto.customerId);
     const stage = createOpportunityDto.stage || "prospecting";
     this.assertOpportunityCanClose(
@@ -1093,6 +1163,7 @@ export class CustomersService {
       opportunityId: this.generateId("opp"),
     });
     const saved = await this.opportunityRepository.save(opportunity);
+    await this.syncOpportunityAction(saved);
     await this.recordOpportunityStage(saved, null, actor, 0);
     await this.refreshCustomerOpportunityState(saved.customerId, saved);
     return saved;
@@ -1102,9 +1173,11 @@ export class CustomersService {
     id: number,
     updateOpportunityDto: UpdateOpportunityDto,
     actor: OpportunityActor = { userId: "", displayName: "系统" },
-  ) {
+  ): Promise<Opportunity> {
+    if (this.dataSource) return this.withActionTransaction((service) => service.updateOpportunity(id, updateOpportunityDto, actor));
     const opportunity = await this.opportunityRepository.findOne({
       where: { id },
+      ...(this.linkedActionTransaction ? { lock: { mode: "pessimistic_write" as const } } : {}),
     });
     if (!opportunity) throw new NotFoundException("商机不存在");
     const targetCustomer = await this.findOne(
@@ -1198,6 +1271,8 @@ export class CustomersService {
       );
     }
     await this.refreshCustomerOpportunityState(saved.customerId, saved);
+    await this.syncOpportunityAction(saved);
+    await this.refreshCustomerTodoSummary(saved.customerId);
     if (previousCustomerId !== saved.customerId) {
       await this.refreshCustomerOpportunityState(previousCustomerId);
     }
@@ -1216,11 +1291,13 @@ export class CustomersService {
     });
   }
 
-  async deleteOpportunity(id: number) {
+  async deleteOpportunity(id: number): Promise<{ deleted: boolean }> {
+    if (this.dataSource) return this.withActionTransaction((service) => service.deleteOpportunity(id));
     const opportunity = await this.opportunityRepository.findOne({
       where: { id },
     });
     if (!opportunity) throw new NotFoundException("商机不存在");
+    await this.syncOpportunityAction({ ...opportunity, stage: "lost" } as Opportunity);
     const result = await this.opportunityRepository.delete(id);
     if (result.affected === 0) throw new NotFoundException("商机不存在");
     await this.refreshCustomerOpportunityState(opportunity.customerId);
@@ -1289,6 +1366,7 @@ export class CustomersService {
         stageEnteredAt: new Date(),
       });
       const saved = await this.opportunityRepository.save(opportunity);
+      await this.syncOpportunityAction(saved);
       await this.recordOpportunityStage(
         saved,
         null,
@@ -1326,6 +1404,7 @@ export class CustomersService {
       );
       if (previousStage !== targetStage) current.stageEnteredAt = new Date();
       const saved = await this.opportunityRepository.save(current);
+      await this.syncOpportunityAction(saved);
       if (previousStage !== targetStage) {
         await this.recordOpportunityStage(
           saved,

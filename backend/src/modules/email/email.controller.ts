@@ -102,6 +102,13 @@ export class EmailTasksController {
   async cancel(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.emailService.cancelTask(id, ownerScope(user));
   }
+
+  @Post(':id/pause')
+  @Roles('admin', 'sales')
+  @HttpCode(200)
+  pause(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.emailService.pauseTask(id, ownerScope(user));
+  }
 }
 
 @Controller('email-logs')

@@ -9,6 +9,12 @@ import {
   setSetupCallback,
 } from "@/api/client";
 import type { RegisterResult } from "@/types";
+import { clearQuoteDrafts } from "@/contracts/quote-draft";
+
+function clearSessionDrafts() {
+  try { clearQuoteDrafts(window.sessionStorage); } catch { /* Browser storage is optional. */ }
+  window.dispatchEvent(new Event("huayuan:clear-drafts"));
+}
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -42,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setUnauthorizedCallback(() => {
+      clearSessionDrafts();
       setIsAuthenticated(false);
       setUsername("");
       setDisplayName("");
@@ -49,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRole("");
     });
     setSetupCallback(() => {
+      clearSessionDrafts();
       setIsInitialized(false);
       setIsAuthenticated(false);
     });
@@ -90,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await apiLogout();
+    clearSessionDrafts();
     setIsAuthenticated(false);
     setUsername("");
     setDisplayName("");
