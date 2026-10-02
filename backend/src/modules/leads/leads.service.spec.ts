@@ -34,6 +34,7 @@ describe('LeadsService CRM conversion', () => {
 
   const leadRepository = {
     find: jest.fn(),
+    count: jest.fn(async () => 1),
     save: jest.fn(async (value) => value),
   };
   const taskRepository = {

@@ -98,6 +98,9 @@
 }
 
 @layer components {
+  .crm-navigation { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+  .crm-navigation::-webkit-scrollbar { width: 4px; }
+  .crm-navigation::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
   .crm-workspace [data-slot="card"], .customer-workspace [data-slot="card"] {
     box-shadow: 0 3px 16px hsl(222 40% 20% / 0.035);
   }

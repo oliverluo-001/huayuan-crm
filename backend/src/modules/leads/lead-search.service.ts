@@ -214,6 +214,7 @@ const ASSOCIATIONS: Record<string, { aliases: string[]; industries: string[] }> 
 
 @Injectable()
 export class LeadSearchService {
+  private readonly siteCrawlCache = new Map<string, { expiresAt: number; result: Promise<Array<{ url: string; status: number; html: string }>> }>();
   private readonly logger = new Logger(LeadSearchService.name);
   private lastPublicSearchAt = 0;
   private readonly multiSourceCache = new Map<string, { expiresAt: number; catalog: MultiSourceCatalog }>();
@@ -904,17 +905,18 @@ export class LeadSearchService {
     const text = pages.map((page) => this.toText(page.html)).join(' ').slice(0, 100000);
     const company = this.companyName(result.title, result.url);
     const combinedText = `${result.title} ${result.snippet} ${text}`;
-    const matchedProduct = productNames.find((term) => this.contains(combinedText, term)) || '';
-    const matchedIndustry = result.catalogIndustry || industries.find((term) => this.contains(combinedText, term)) || '';
-    const targetSegment = segments.find((term) => this.contains(combinedText, term)) ||
-      this.segmentForCatalogIndustry(result.catalogIndustry || '', segments);
-    const buyerIntent = BUYER_INTENT_PATTERN.test(combinedText);
+    const companyEvidence = result.sourceKey && result.sourceKey !== 'web-search' ? `${result.title} ${text}` : combinedText;
+    const matchedProduct = productNames.find((term) => this.contains(companyEvidence, term)) || '';
+    const matchedIndustry = industries.find((term) => this.contains(text, term)) || '';
+    const targetSegment = segments.find((term) => this.contains(companyEvidence, term)) ||
+      this.segmentForCatalogIndustry(text, segments);
+    const buyerIntent = BUYER_INTENT_PATTERN.test(companyEvidence);
     const lowValuePage = LOW_VALUE_PAGE_PATTERN.test(`${result.title} ${result.snippet}`);
     const sourceHost = this.hostname(result.url);
     const emailDomainMatch = emails.some((email) => this.domainsMatch(sourceHost, email.split('@')[1] || ''));
     const evidence = [
       matchedProduct && `官网或搜索摘要明确提及 ${matchedProduct}`,
-      matchedIndustry && `公开企业目录或官网行业匹配：${matchedIndustry}`,
+      matchedIndustry && `官网行业匹配：${matchedIndustry}`,
       targetSegment && `符合目标买家类型 ${targetSegment}`,
       buyerIntent && '存在采购、经销或工程承包意图词',
       homepage.status >= 200 && homepage.status < 400 && '企业官网可访问',
@@ -923,6 +925,8 @@ export class LeadSearchService {
     ].filter(Boolean) as string[];
     const gaps = [
       !targetSegment && '未明确识别目标买家类型',
+      !matchedProduct && '未找到产品相关证据',
+      !result.catalogCountry && '目标地区尚未核实',
       !emails.length && '未发现公开邮箱',
       !emailDomainMatch && emails.length > 0 && '公开邮箱域名与官网不一致，需复核',
       !homepage.html && '官网内容无法读取或被 robots.txt 禁止',
@@ -968,14 +972,35 @@ export class LeadSearchService {
         evidence,
         gaps,
         fitScore,
+        productEvidence: Boolean(matchedProduct),
+        buyerEvidence: Boolean(targetSegment || buyerIntent),
+        regionVerified: Boolean(result.catalogCountry),
       },
       country: result.catalogCountry || '',
     };
     if (!emails.length) return [{ ...base, email: '' }];
-    return emails.slice(0, 3).map((email) => ({ ...base, email }));
+    return emails.slice(0, 3).map((email) => {
+      const actualPage = pageEmails.find((entry) => entry.emails.includes(email))?.page || sourcePage;
+      return { ...base, email, sourceUrl: actualPage.url, sourceHttpStatus: actualPage.status,
+        sourceType: /contact|enquir|inquir|联系我们|聯絡/i.test(actualPage.url) ? 'Contact Page' : 'Company Website' };
+    });
   }
 
   private async crawlCompanySite(url: string) {
+    const cached = this.siteCrawlCache.get(url);
+    if (cached && cached.expiresAt > Date.now()) return cached.result;
+    this.siteCrawlCache.delete(url);
+    if (this.siteCrawlCache.size >= 40) this.siteCrawlCache.delete(this.siteCrawlCache.keys().next().value);
+    const result = this.crawlCompanySiteUncached(url);
+    this.siteCrawlCache.set(url, { expiresAt: Date.now() + 5 * 60_000, result });
+    try {
+      const pages = await result;
+      if (!pages.some((page) => page.html)) this.siteCrawlCache.delete(url);
+      return pages;
+    } catch (error) { this.siteCrawlCache.delete(url); throw error; }
+  }
+
+  private async crawlCompanySiteUncached(url: string) {
     const homepage = await this.fetchPage(url);
     if (!homepage.html) return [{ ...homepage, url }];
     const pageUrls = this.extractInternalLinks(homepage.html, url, PRIORITY_PAGE_PATTERN);
