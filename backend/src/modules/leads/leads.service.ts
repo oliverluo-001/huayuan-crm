@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like, In, Brackets } from 'typeorm';
-import { resolveMx } from 'node:dns/promises';
+import { Resolver } from 'node:dns/promises';
 import { Lead, LeadTask } from './entities';
 import {
   CreateLeadDto,
@@ -42,6 +42,7 @@ const QUERY_TEMPLATES = [
 
 @Injectable()
 export class LeadsService implements OnModuleInit {
+  private readonly dns = new Resolver({ timeout: 2500, tries: 1 });
   private readonly logger = new Logger(LeadsService.name);
   private readonly activeTaskIds = new Set<number>();
 
@@ -724,14 +725,29 @@ export class LeadsService implements OnModuleInit {
     const seenEmails = new Set<string>();
     const seenCompanies = new Set<string>();
 
+    // Resolve domains with bounded concurrency once per cleaning pass. A slow
+    // or transient DNS response must not serialize hundreds of lead records.
+    const validations = new Map<string, Awaited<ReturnType<LeadsService['validateLeadEmail']>>>();
+    const mxChecks = new Map<string, ReturnType<Resolver['resolveMx']>>();
+    const emails = [...new Set(leads.filter((lead) => lead.status !== 'converted').map((lead) => String(lead.email || '').trim().toLowerCase()))];
+    let emailIndex = 0;
+    await Promise.all(Array.from({ length: Math.min(6, emails.length) }, async () => {
+      while (emailIndex < emails.length) {
+        const email = emails[emailIndex++];
+        validations.set(email, await this.validateLeadEmail(email, mxChecks));
+      }
+    }));
+
     for (const lead of leads) {
+      if (lead.status === 'converted' || lead.crmCustomerId) continue;
       if (lead.status === 'duplicate') {
         duplicateCount++;
         continue;
       }
       const email = String(lead.email || '').trim().toLowerCase();
       const companyKey = `${this.normalizeCompany(lead.company)}|${String(lead.country || '').toLowerCase()}`;
-      const duplicate = (email && seenEmails.has(email)) ||
+      // Distinct public contacts at the same company are useful, not duplicates.
+      const duplicate = email ? seenEmails.has(email) :
         (this.normalizeCompany(lead.company) && seenCompanies.has(companyKey));
       if (email) seenEmails.add(email);
       if (this.normalizeCompany(lead.company)) seenCompanies.add(companyKey);
@@ -747,7 +763,7 @@ export class LeadsService implements OnModuleInit {
         continue;
       }
 
-      const validation = await this.validateLeadEmail(email);
+      const validation = validations.get(email) || await this.validateLeadEmail(email, mxChecks);
       const sourceReachable = lead.sourceHttpStatus >= 200 && lead.sourceHttpStatus < 400;
       const sourceHost = this.hostname(lead.sourceUrl || lead.website);
       const emailDomain = email.split('@')[1] || '';
@@ -755,29 +771,30 @@ export class LeadsService implements OnModuleInit {
         (sourceHost === emailDomain || sourceHost.endsWith(`.${emailDomain}`) || emailDomain.endsWith(`.${sourceHost}`)));
       const freeEmail = /^(gmail|yahoo|hotmail|outlook|live|icloud|qq|163|126)\./i.test(emailDomain);
       const preferredEmail = /^(sales|info|export|enquiry|inquiries|contact|procurement|purchasing|rfq|quotes)@/i.test(email);
-      const catalogIndustry = String(lead.rawData?.catalogIndustry || '');
-
-      let score = 0;
-      if (lead.matchedProductKeyword) score += 25;
-      if (catalogIndustry) score += 15;
-      if (lead.targetSegment || lead.buyerType) score += 20;
-      if (sourceReachable) score += 20;
-      if (domainMatch) score += 15;
-      if (['Company Website', 'Contact Page'].includes(lead.sourceType)) score += 10;
-      if (preferredEmail) score += 10;
+      const hasProductEvidence = Boolean(lead.matchedProductKeyword);
+      const hasBuyerEvidence = Boolean(lead.targetSegment || lead.buyerType);
+      const targets = (task.targetRegions?.length ? task.targetRegions : [task.targetRegion || 'Global']).filter((region) => region !== 'Global');
+      const country = this.normalizeCountry(lead.country || '');
+      const regionMatches = !targets.length || Boolean(country && targets.some((region) =>
+        this.normalizeCountry(region) === country || region.toLowerCase() === this.largeRegionFor(country).toLowerCase()));
+      lead.regionStatus = !country ? 'unknown' : regionMatches ? 'matched' : 'mismatch';
+      let score = Number.isFinite(Number(lead.rawData?.fitScore)) ? Number(lead.rawData.fitScore) :
+        (hasProductEvidence ? 35 : 0) + (hasBuyerEvidence ? 25 : 0) + (sourceReachable ? 10 : 0) + (domainMatch ? 15 : 0) + (preferredEmail ? 5 : 0);
       if (freeEmail) score -= 20;
       if (lead.sourceType === 'Directory / Marketplace') score -= 20;
       if (!sourceReachable) score -= 30;
       if (validation.hardBounce) score -= 50;
       if (validation.blocked) score -= 100;
+      if (!hasProductEvidence || !hasBuyerEvidence) score = Math.min(score, 59);
+      if (!regionMatches) score = Math.min(score, 59);
       lead.leadScore = Math.max(0, Math.min(100, score));
       lead.email = email;
-      lead.emailStatus = validation.valid ? 'verified' : validation.hardBounce || validation.blocked ? 'invalid' : 'unknown';
+      lead.emailStatus = validation.valid ? 'domain_valid' : validation.hardBounce || validation.blocked ? 'invalid' : 'unknown';
       lead.emailSourceDomainMatch = domainMatch;
       lead.confidence = lead.leadScore >= 80 ? 'High' : lead.leadScore >= 50 ? 'Medium' : 'Low';
       lead.cleaningNotes = this.appendNote(
         lead.cleaningNotes,
-        [validation.note, domainMatch ? '邮箱域名与官网匹配' : email ? '邮箱域名与来源需复核' : '未发现公开邮箱', !sourceReachable ? '来源页面当前不可访问' : '']
+        [validation.note, !hasProductEvidence ? '产品相关证据不足' : '', !hasBuyerEvidence ? '买家身份需复核' : '', !country ? '目标地区尚未核实' : !regionMatches ? '企业国家不在目标地区范围内' : '', domainMatch ? '邮箱域名与官网匹配' : email ? '邮箱域名与来源需复核' : '未发现公开邮箱', !sourceReachable ? '来源页面当前不可访问' : '']
           .filter(Boolean).join('；'),
       );
 
@@ -790,7 +807,7 @@ export class LeadsService implements OnModuleInit {
         lead.leadTier = 'remove';
         remove++;
       } else if (validation.valid && sourceReachable && lead.confidence === 'High' &&
-        (domainMatch || ['Company Website', 'Contact Page'].includes(lead.sourceType)) && !freeEmail) {
+        hasProductEvidence && hasBuyerEvidence && domainMatch && !freeEmail && regionMatches) {
         lead.recommendedAction = 'Ready to Email';
         lead.leadTier = 'high';
         readyToEmail++;
@@ -831,6 +848,7 @@ export class LeadsService implements OnModuleInit {
 
   async importToCustomers(taskId: number, dto: ImportCustomersDto, ownerId = '') {
     const task = await this.findOneTask(taskId, ownerId || undefined);
+    if (dto.importAll) await this.cleanLeads(taskId, ownerId || undefined);
     let leads: Lead[];
 
     if (dto.importAll) {
@@ -846,13 +864,13 @@ export class LeadsService implements OnModuleInit {
     }
 
     // Filter only importable leads
-    const importable = leads.filter(
-      (l) => l.company && !l.crmCustomerId && l.recommendedAction !== 'Remove' && l.recommendedAction !== 'Hard Bounce',
-    );
+    const importable = leads.filter((l) => l.company && !l.crmCustomerId && l.status !== 'duplicate' &&
+      l.recommendedAction !== 'Remove' && l.recommendedAction !== 'Hard Bounce' &&
+      (!dto.importAll || l.recommendedAction === 'Ready to Email'));
 
     let created = 0;
     let merged = 0;
-    let skipped = 0;
+    let skipped = leads.length - importable.length;
     for (const lead of importable) {
       try {
         const result = await this.customersService.upsertLeadCustomer({
@@ -884,7 +902,7 @@ export class LeadsService implements OnModuleInit {
     }
 
     await this.leadTaskRepository.update(task.id, {
-      importedCustomerCount: (task.importedCustomerCount || 0) + importable.length,
+      importedCustomerCount: await this.leadRepository.count({ where: { taskId: task.taskId, status: 'converted' } }),
     });
 
     return {
@@ -939,11 +957,10 @@ export class LeadsService implements OnModuleInit {
       const email = candidate.email.trim().toLowerCase();
       const existing = await this.leadRepository.findOne({
         where: email
-          ? [{ taskId: task.taskId, email }, { taskId: task.taskId, sourceUrl: candidate.sourceUrl }]
-          : { taskId: task.taskId, sourceUrl: candidate.sourceUrl },
+          ? { taskId: task.taskId, email }
+          : { taskId: task.taskId, sourceUrl: candidate.sourceUrl, email: '' },
       });
       if (existing) continue;
-      const region = (task.targetRegions || []).find((item) => item !== 'Global') || task.targetRegion || '';
       const lead = this.leadRepository.create({
         taskId: task.taskId,
         ownerId: task.ownerId,
@@ -952,10 +969,10 @@ export class LeadsService implements OnModuleInit {
         email,
         phone: candidate.phone,
         website: candidate.website,
-        region,
+        region: candidate.country ? this.largeRegionFor(candidate.country) : '',
         // The selected search region is a targeting condition, not proof of the company's country.
         country: candidate.country || '',
-        largeRegion: this.largeRegionFor(candidate.country || region),
+        largeRegion: candidate.country ? this.largeRegionFor(candidate.country) : '',
         business: candidate.business,
         targetSegment: candidate.targetSegment,
         buyerType: candidate.targetSegment,
@@ -983,8 +1000,14 @@ export class LeadsService implements OnModuleInit {
     return { added, withEmail, qualified };
   }
 
+  private normalizeCountry(value: string) {
+    const normalized = value.trim().toLowerCase();
+    const aliases: Record<string, string> = { usa: 'united states', us: 'united states', 'united states of america': 'united states', uk: 'united kingdom', uae: 'united arab emirates' };
+    return aliases[normalized] || normalized;
+  }
+
   private largeRegionFor(countryOrRegion: string) {
-    const value = countryOrRegion.toLowerCase();
+    const value = this.normalizeCountry(countryOrRegion);
     const groups: Array<[string, string[]]> = [
       ['Middle East', ['uae', 'united arab emirates', 'saudi arabia', 'qatar', 'oman', 'bahrain', 'kuwait', 'iraq', 'jordan', 'turkey', 'israel']],
       ['Southeast Asia', ['singapore', 'malaysia', 'indonesia', 'thailand', 'vietnam', 'philippines', 'cambodia', 'myanmar', 'laos', 'brunei']],
@@ -999,7 +1022,7 @@ export class LeadsService implements OnModuleInit {
     return groups.find(([, countries]) => countries.includes(value))?.[0] || countryOrRegion;
   }
 
-  private async validateLeadEmail(email: string) {
+  private async validateLeadEmail(email: string, mxChecks = new Map<string, ReturnType<Resolver['resolveMx']>>()) {
     if (!email) return { valid: false, hardBounce: false, blocked: false, note: '未发现公开邮箱' };
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return { valid: false, hardBounce: false, blocked: true, note: '邮箱格式无效' };
@@ -1009,9 +1032,11 @@ export class LeadsService implements OnModuleInit {
       return { valid: false, hardBounce: false, blocked: true, note: '禁止发送的系统邮箱' };
     }
     try {
-      const records = await resolveMx(email.split('@')[1]);
-      if (!records.length) return { valid: false, hardBounce: true, blocked: false, note: '邮箱域名没有 MX 记录' };
-      return { valid: true, hardBounce: false, blocked: false, note: '邮箱格式及 MX 记录有效' };
+      const domain = email.split('@')[1];
+      if (!mxChecks.has(domain)) mxChecks.set(domain, this.dns.resolveMx(domain));
+      const records = await mxChecks.get(domain)!;
+      if (!records.length || records.every((record) => !record.exchange || record.exchange === '.')) return { valid: false, hardBounce: true, blocked: false, note: '域名未配置接收邮件的 MX 记录' };
+      return { valid: true, hardBounce: false, blocked: false, note: '邮箱格式及收信域名检查通过；具体邮箱是否存在仍待投递确认' };
     } catch (error: any) {
       const hardBounce = ['ENOTFOUND', 'ENODATA', 'NXDOMAIN'].includes(String(error?.code || '').toUpperCase());
       return {

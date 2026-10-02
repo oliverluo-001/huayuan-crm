@@ -110,6 +110,14 @@ export function CustomerTable(_props: CustomerTableProps) {
 
   // Filters
   const [filters, setFilters] = useState(emptyCustomerFilters);
+  const [appliedFilters, setAppliedFilters] = useState(emptyCustomerFilters);
+  const requestSequence = useRef(0);
+  const [loadError, setLoadError] = useState("");
+  const applyFilters = (next: ReturnType<typeof emptyCustomerFilters>) => {
+    requestSequence.current++;
+    setFilters(next); setAppliedFilters({ ...next }); setPage(1);
+    setSelectedIds(new Set()); setCustomers([]); setTotal(0); setLoadError(""); setIsLoading(true);
+  };
 
   // Dialogs
   const [createOpen, setCreateOpen] = useState(false);
@@ -158,7 +166,7 @@ export function CustomerTable(_props: CustomerTableProps) {
       const resetFilters = emptyCustomerFilters();
       setCustomerPreset("all");
       setPage(1);
-      setFilters(resetFilters);
+      applyFilters(resetFilters);
       setSelectedIds(new Set());
       await fetchCustomers(1, resetFilters);
     } finally {
@@ -167,11 +175,15 @@ export function CustomerTable(_props: CustomerTableProps) {
     }
   };
 
-  const fetchCustomers = useCallback(async (targetPage = page, targetFilters = filters) => {
+  const fetchCustomers = useCallback(async (targetPage = page, targetFilters = appliedFilters) => {
+    const sequence = ++requestSequence.current;
     setIsLoading(true);
+    setLoadError("");
     try {
       const offset = (targetPage - 1) * CUSTOMER_PAGE_SIZE;
       const result = await getCustomers(offset, CUSTOMER_PAGE_SIZE, targetFilters);
+      if (sequence !== requestSequence.current) return;
+      if (result.total > 0 && offset >= result.total && targetPage > 1) { setPage(1); return; }
       setCustomers(result.customers);
       setTotal(result.total);
 
@@ -180,16 +192,23 @@ export function CustomerTable(_props: CustomerTableProps) {
         getCustomerViews(),
         getUserDirectory(),
       ]);
+      if (sequence !== requestSequence.current) return;
       if (availableTags.status === "fulfilled") setTags(availableTags.value);
       if (views.status === "fulfilled") setSavedViews(views.value);
       if (directory.status === "fulfilled") setUserDirectory(directory.value);
+    } catch (error) {
+      if (sequence === requestSequence.current) {
+        setCustomers([]); setTotal(0);
+        setLoadError(error instanceof Error ? error.message : "客户加载失败，请重试");
+      }
     } finally {
-      setIsLoading(false);
+      if (sequence === requestSequence.current) setIsLoading(false);
     }
-  }, [page, filters]);
+  }, [page, appliedFilters]);
 
   useEffect(() => {
-    fetchCustomers();
+    void fetchCustomers();
+    return () => { requestSequence.current++; };
   }, [fetchCustomers]);
 
   const handleSelectAll = (checked: boolean) => {
@@ -251,7 +270,9 @@ export function CustomerTable(_props: CustomerTableProps) {
   const handleSelectAllMatching = async () => {
     setIsSelectingAll(true);
     try {
-      const ids = await getCustomerIds(filters);
+      const sequence = requestSequence.current;
+      const ids = await getCustomerIds(appliedFilters);
+      if (sequence !== requestSequence.current) return;
       setSelectedIds(new Set(ids));
       toast.success(`已选择当前筛选结果中的 ${ids.length} 个客户`);
     } finally {
@@ -286,7 +307,7 @@ export function CustomerTable(_props: CustomerTableProps) {
   const handleApplyView = (viewId: string) => {
     const view = savedViews.find((v) => v.id === viewId);
     if (!view) return;
-    setFilters({ ...emptyCustomerFilters(), ...view.filters as any });
+    applyFilters({ ...emptyCustomerFilters(), ...view.filters as any });
     setPage(1);
   };
 
@@ -366,22 +387,24 @@ export function CustomerTable(_props: CustomerTableProps) {
     const baseFilters = emptyCustomerFilters();
     switch (preset) {
       case "mine":
-        setFilters({ ...baseFilters, ownerId: "me" });
+        applyFilters({ ...baseFilters, ownerId: "me" });
         break;
       case "followup":
-        setFilters({ ...baseFilters, health: "warning" });
+        applyFilters({ ...baseFilters, health: "followup" });
         break;
       case "email_invalid":
-        setFilters({ ...baseFilters, emailStatus: "invalid" });
+        applyFilters({ ...baseFilters, emailStatus: "invalid" });
         break;
       default:
-        setFilters({ ...baseFilters });
+        applyFilters({ ...baseFilters });
     }
     setPage(1);
   };
 
   return (
     <div className="space-y-4">
+      {loadError && <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm"><span>{loadError}</span><Button variant="outline" onClick={() => void fetchCustomers()}>重新加载客户</Button></div>}
+      {JSON.stringify(filters) !== JSON.stringify(appliedFilters) && <p role="status" className="text-sm text-primary">筛选条件已修改，点击“应用筛选”更新结果；当前列表和全选仍按已应用条件。</p>}
       {/* View presets */}
       <div className="flex items-center gap-1 bg-muted/40 rounded-lg p-0.5 w-fit" role="tablist" aria-label="客户视图">
         {[
@@ -413,7 +436,7 @@ export function CustomerTable(_props: CustomerTableProps) {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              setPage(1);
+              applyFilters(filters);
             }}
           >
             <div className="flex flex-wrap gap-4 mb-4">
@@ -431,13 +454,13 @@ export function CustomerTable(_props: CustomerTableProps) {
               </div>
               <div className="space-y-2">
                 <Label>标签</Label>
-                <Select value={filters.tag} onValueChange={(v) => setFilters({ ...filters, tag: v ?? "" })}>
+                <Select value={filters.tag || "(all)"} onValueChange={(v) => setFilters({ ...filters, tag: v === "(all)" ? "" : v ?? "" })}>
                   <SelectTrigger>
                     <SelectValue placeholder="全部标签" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="(all)">全部标签</SelectItem>
-                    <SelectItem value="">未标签</SelectItem>
+                    <SelectItem value="(untagged)">未设置标签</SelectItem>
                     {tags.map((tag) => (
                       <SelectItem key={tag} value={tag}>
                         {tag}
@@ -510,6 +533,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                     <SelectItem value="">全部状态</SelectItem>
                     <SelectItem value="critical">待办逾期</SelectItem>
                     <SelectItem value="warning">需跟进</SelectItem>
+                    <SelectItem value="followup">需跟进或逾期</SelectItem>
                     <SelectItem value="good">正常</SelectItem>
                   </SelectContent>
                 </Select>
@@ -517,9 +541,11 @@ export function CustomerTable(_props: CustomerTableProps) {
             <div className="flex items-center gap-2">
               <Button type="submit">应用筛选</Button>
               <Button
+                type="button"
                 variant="outline"
                 onClick={() => {
-                  setFilters(emptyCustomerFilters());
+                  applyFilters(emptyCustomerFilters());
+                  setCustomerPreset("all");
                   setPage(1);
                 }}
               >
@@ -704,7 +730,7 @@ export function CustomerTable(_props: CustomerTableProps) {
       <CustomerDuplicatesDialog
         open={duplicatesOpen}
         onOpenChange={setDuplicatesOpen}
-        onMerged={() => fetchCustomers(1, filters)}
+        onMerged={() => fetchCustomers(1, appliedFilters)}
         users={userDirectory}
       />
 

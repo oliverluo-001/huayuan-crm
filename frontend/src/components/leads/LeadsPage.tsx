@@ -163,6 +163,8 @@ export function LeadsPage() {
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const convertingRef = useRef(false);
 
   // Refs
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -484,13 +486,17 @@ export function LeadsPage() {
   };
 
   const handleImportToCustomers = async (importAll: boolean) => {
-    if (!activeTaskId) return;
+    if (!activeTaskId || convertingRef.current) return;
+    if (!importAll && leads.some((lead) => selectedLeadIds.has(lead.id) && lead.recommendedAction !== "Ready to Email") && !confirm("所选线索包含待核验记录。请先核对产品、买家身份、地区及邮箱来源；确认仍要转入客户？")) return;
+    convertingRef.current = true; setConverting(true);
+    try {
     const body = importAll ? { importAll: true } : { ids: [...selectedLeadIds] };
     const result = await importB2BLeadsToCustomers(activeTaskId, body);
     setSelectedLeadIds(new Set());
-    toast(`已导入 ${result.imported} 条客户${result.merged ? `，合并 ${result.merged}` : ""}。`);
+    toast(`新增 ${result.imported} 家客户，归入已有客户 ${result.merged} 条，保留待核验或跳过 ${result.skipped || 0} 条。`);
     await fetchTasks();
     await fetchLeadsForTask(activeTaskId);
+    } finally { convertingRef.current = false; setConverting(false); }
   };
 
   const handleSelectAll = (checked: boolean) => {
@@ -820,6 +826,7 @@ export function LeadsPage() {
                     <TableCell>
                       <strong>{lead.email || "-"}</strong>
                       <div className="meta">{lead.emailSourceDomainMatch ? "邮箱域名与官网一致" : "域名待核验"}</div>
+                      <div className="meta">格式和收信域名通过不代表邮箱一定存在</div>
                     </TableCell>
                     <TableCell>
                       {lead.country || "-"}
@@ -1194,7 +1201,7 @@ export function LeadsPage() {
             <Button
               id="importSelectedB2BLeadsBtn"
               onClick={() => handleImportToCustomers(false)}
-              disabled={selectedLeadIds.size === 0}
+              disabled={converting || selectedLeadIds.size === 0}
             >
               {selectedLeadIds.size ? `导入选中客户（${selectedLeadIds.size}）` : "导入选中客户"}
             </Button>
@@ -1202,9 +1209,9 @@ export function LeadsPage() {
               id="importAllB2BLeadsBtn"
               variant="outline"
               onClick={() => handleImportToCustomers(true)}
-              disabled={!activeTask || leads.filter(isLeadImportable).length === 0}
+              disabled={converting || !activeTask}
             >
-              导入全部可用
+              {converting ? "正在转入客户…" : "转入本任务全部高匹配线索"}
             </Button>
           </div>}
         </div>

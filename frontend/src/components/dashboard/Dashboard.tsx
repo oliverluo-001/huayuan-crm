@@ -67,13 +67,12 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const funnelMax = Math.max(1, ...funnel.map((item) => item[1]));
 
   return <div className="space-y-5">
-    <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/10 via-card to-card p-5 md:p-7">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3">
       <div>
-        <p className="mb-2 text-xs font-semibold tracking-wide text-primary">销售工作台</p>
-        <h2 className="text-2xl font-semibold tracking-tight">把下一步跟进，变成下一笔机会</h2>
-        <p className="mt-2 text-sm text-muted-foreground">{data.scope === "owned" ? "本人负责范围" : "全公司范围"} · {d.openTodoCount} 项待办，{d.overdueTodoCount} 项逾期</p>
-        <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" onClick={() => goTo("customers")}>客户跟进</Button><Button size="sm" variant="outline" onClick={() => goTo("opportunities")}>推进商机</Button><Button size="sm" variant="outline" onClick={() => goTo("marketing")}>查看邮件任务</Button></div>
+        <h2 className="text-base font-semibold">今日工作</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{data.scope === "owned" ? "本人负责范围" : "全公司范围"} · {d.openTodoCount} 项待办，{d.overdueTodoCount} 项逾期</p>
       </div>
+      <div className="flex flex-wrap gap-2"><Button size="sm" onClick={() => goTo("customers")}>客户跟进</Button><Button size="sm" variant="outline" onClick={() => goTo("opportunities")}>推进商机</Button><Button size="sm" variant="outline" onClick={() => goTo("marketing")}>邮件任务</Button></div>
       <Button variant="outline" size="icon" title="刷新仪表盘" onClick={() => void refresh(false)}>
         <RefreshCw className="h-4 w-4" />
       </Button>

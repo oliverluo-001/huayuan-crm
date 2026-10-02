@@ -15,6 +15,7 @@ describe('LeadSearchService', () => {
     settings.getSearchProfiles.mockResolvedValue([]);
     (service as any).multiSourceCache.clear();
     (service as any).robotsCache.clear();
+    (service as any).siteCrawlCache.clear();
     (service as any).commonCrawlIndexCache = null;
   });
 
@@ -302,5 +303,29 @@ describe('LeadSearchService', () => {
     expect(requestUrl.searchParams.getAll('filter')).toEqual(expect.arrayContaining([
       'status:200', 'mime:text/html',
     ]));
+  });
+
+  it('does not promote directory category text into company product and buyer evidence', async () => {
+    jest.spyOn(service as any, 'crawlCompanySite').mockResolvedValue([{ url: 'https://unrelated.example', status: 200, html: 'Welcome to our accounting office. info@unrelated.example' }]);
+    const candidates = await (service as any).enrich({ title: 'Accountants', url: 'https://unrelated.example', snippet: 'flange distributor', sourceKey: 'industry-directory', catalogIndustry: 'flange distributor oil gas' }, ['flange'], ['distributor'], ['Oil & Gas']);
+    expect(candidates[0].matchedProductKeyword).toBe('');
+    expect(candidates[0].targetSegment).toBe('');
+    expect(candidates[0].fitScore).toBeLessThan(45);
+  });
+
+  it('reuses a recent crawl across queries and concurrent callers', async () => {
+    const crawl = jest.spyOn(service as any, 'crawlCompanySiteUncached').mockResolvedValue([{ url: 'https://cached.example', status: 200, html: 'flange sales@cached.example' }]);
+    await Promise.all([(service as any).crawlCompanySite('https://cached.example'), (service as any).crawlCompanySite('https://cached.example')]);
+    await (service as any).crawlCompanySite('https://cached.example');
+    expect(crawl).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the exact evidence page for each public email', async () => {
+    jest.spyOn(service as any, 'crawlCompanySite').mockResolvedValue([
+      { url: 'https://buyer.example', status: 200, html: 'flange distributor sales@buyer.example' },
+      { url: 'https://buyer.example/contact', status: 200, html: 'procurement@buyer.example' },
+    ]);
+    const candidates = await (service as any).enrich({ title: 'Buyer', url: 'https://buyer.example', snippet: '' }, ['flange'], ['distributor'], []);
+    expect(candidates.find((candidate: any) => candidate.email === 'procurement@buyer.example').sourceUrl).toBe('https://buyer.example/contact');
   });
 });

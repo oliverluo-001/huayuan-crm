@@ -161,91 +161,31 @@ export class CustomersService {
 
   async findAll(filters: Record<string, any> = {}) {
     const { offset, limit, ...queryFilters } = filters;
-    const skip = offset ? parseInt(offset, 10) : 0;
-    const take = limit ? parseInt(limit, 10) : 0;
-    const where: FindOptionsWhere<Customer> = {};
-
-    if (queryFilters.q) {
-      const qb = this.customerRepository
-        .createQueryBuilder("customer")
-        .leftJoinAndSelect("customer.tags", "tag")
-        .where(
-          `(customer.company LIKE :q OR customer.customerId LIKE :q OR CAST(customer.id AS CHAR) = :customerNumber OR customer.contact LIKE :q OR customer.email LIKE :q OR customer.phone LIKE :q OR customer.notes LIKE :q)`,
-          { q: `%${queryFilters.q}%`, customerNumber: String(queryFilters.q).trim() },
-        )
-        .orderBy("customer.createdAt", "DESC");
-
-      if (queryFilters.ownerId)
-        this.applyCustomerAccess(qb, queryFilters.ownerId);
-
-      if (take > 0) qb.skip(skip).take(take);
-      const [customers, total] = await qb.getManyAndCount();
-      return { customers, total };
+    const skip = Math.max(0, Number.parseInt(offset, 10) || 0);
+    const take = Math.max(0, Number.parseInt(limit, 10) || 0);
+    const q = String(queryFilters.q || '').trim();
+    const qb = this.customerRepository.createQueryBuilder('customer')
+      .leftJoinAndSelect('customer.tags', 'tag')
+      .where(q
+        ? '(customer.company LIKE :q OR customer.customerId LIKE :q OR CAST(customer.id AS CHAR) = :customerNumber OR customer.contact LIKE :q OR customer.email LIKE :q OR customer.phone LIKE :q OR customer.business LIKE :q OR customer.notes LIKE :q)'
+        : '1 = 1', { q: `%${q}%`, customerNumber: q })
+      .orderBy('customer.createdAt', 'DESC').addOrderBy('customer.id', 'DESC');
+    if (queryFilters.ownerId) this.applyCustomerAccess(qb, queryFilters.ownerId);
+    if (queryFilters.region) qb.andWhere('customer.region LIKE :region', { region: `%${queryFilters.region}%` });
+    for (const field of ['tier', 'journeyStage', 'emailStatus']) {
+      if (queryFilters[field]) qb.andWhere(`customer.${field} = :${field}`, { [field]: queryFilters[field] });
     }
-
-    if (queryFilters.region) {
-      where.region = Like(`%${queryFilters.region}%`);
+    if (queryFilters.health === 'followup') {
+      qb.andWhere('customer.health IN (:...followupHealth)', { followupHealth: ['warning', 'critical'] });
+    } else if (queryFilters.health) qb.andWhere('customer.health = :health', { health: queryFilters.health });
+    if (queryFilters.tag === '(untagged)') qb.andWhere('tag.id IS NULL');
+    else if (queryFilters.tag && queryFilters.tag !== '(all)') {
+      // Separate join keeps all tags in the returned customer, not only the matching tag.
+      qb.innerJoin('customer.tags', 'filterTag', 'filterTag.name = :tagName', { tagName: queryFilters.tag });
     }
-    if (queryFilters.tier) {
-      where.tier = queryFilters.tier as any;
-    }
-    if (queryFilters.journeyStage) {
-      where.journeyStage = queryFilters.journeyStage as any;
-    }
-    if (queryFilters.emailStatus) {
-      where.emailStatus = queryFilters.emailStatus as any;
-    }
-    if (queryFilters.health) {
-      where.health = queryFilters.health as any;
-    }
-    if (queryFilters.tag) {
-      return this.findByTag(queryFilters.tag, skip, take, queryFilters.ownerId);
-    }
-
-    if (queryFilters.ownerId) {
-      const qb = this.customerRepository
-        .createQueryBuilder("customer")
-        .leftJoinAndSelect("customer.tags", "tag")
-        .orderBy("customer.createdAt", "DESC");
-      this.applyCustomerAccess(qb, queryFilters.ownerId);
-      if (queryFilters.region)
-        qb.andWhere("customer.region LIKE :region", {
-          region: `%${queryFilters.region}%`,
-        });
-      if (queryFilters.tier)
-        qb.andWhere("customer.tier = :tier", { tier: queryFilters.tier });
-      if (queryFilters.journeyStage)
-        qb.andWhere("customer.journeyStage = :journeyStage", {
-          journeyStage: queryFilters.journeyStage,
-        });
-      if (queryFilters.emailStatus)
-        qb.andWhere("customer.emailStatus = :emailStatus", {
-          emailStatus: queryFilters.emailStatus,
-        });
-      if (queryFilters.health)
-        qb.andWhere("customer.health = :health", {
-          health: queryFilters.health,
-        });
-      if (take > 0) qb.skip(skip).take(take);
-      const [customers, total] = await qb.getManyAndCount();
-      return { customers, total };
-    }
-
-    if (take > 0) {
-      const [customers, total] = await this.customerRepository.findAndCount({
-        where,
-        order: { createdAt: "DESC" },
-        skip,
-        take,
-      });
-      return { customers, total };
-    }
-
-    const customers = await this.customerRepository.find({
-      where,
-      order: { createdAt: "DESC" },
-    });
-    return { customers, total: customers.length };
+    if (take > 0) qb.skip(skip).take(take);
+    const [customers, total] = await qb.getManyAndCount();
+    return { customers, total };
   }
 
   async findOne(id: number) {
@@ -503,7 +443,7 @@ export class CustomersService {
   }
 
   async findAllIds(filters: Record<string, any> = {}) {
-    const result = await this.findAll(filters);
+    const result = await this.findAll({ ...filters, offset: 0, limit: 0 });
     const customers = (result as any).customers || result;
     return (Array.isArray(customers) ? customers : []).map((c: any) => c.id);
   }
@@ -2155,10 +2095,20 @@ export class CustomersService {
   }
 
   async upsertLeadCustomer(data: Partial<Customer>, ownerId = "") {
+    const previous = this.importQueue;
+    let release!: () => void;
+    this.importQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await (this.dataSource ? this.withActionTransaction((service) => service.performLeadUpsert(data, ownerId)) : this.performLeadUpsert(data, ownerId));
+    } finally { release(); }
+  }
+
+  private async performLeadUpsert(data: Partial<Customer>, ownerId: string) {
     const email = this.normalizeEmail(data.email || "");
-    const existing = email
-      ? await this.customerRepository.findOne({ where: { email } })
-      : null;
+    const [customers, contacts] = await Promise.all([this.customerRepository.find(), this.contactRepository.find()]);
+    const match = this.findImportDuplicate(data, this.buildImportDuplicateIndexes(customers, contacts));
+    const existing = match?.customer;
     const profile = this.mergeImportedCustomer({
       company: String(data.company || ""),
       contact: String(data.contact || ""),
@@ -2182,10 +2132,11 @@ export class CustomersService {
     if (existing) {
       if (ownerId && !this.hasCustomerAccess(existing, ownerId)) {
         throw new BadRequestException(
-          "该邮箱已存在于其他负责人客户中，请联系管理员调整归属",
+          "该企业或联系人已存在于其他负责人客户中，请联系管理员核对归属",
         );
       }
       Object.assign(existing, this.mergeImportedCustomer(profile, existing));
+      await this.saveLeadContact(existing, data, contacts);
       return {
         customer: await this.customerRepository.save(existing),
         created: false,
@@ -2197,10 +2148,17 @@ export class CustomersService {
       journeyStage: "new",
       customerId: this.generateId("cus"),
     });
-    return {
-      customer: await this.customerRepository.save(customer),
-      created: true,
-    };
+    const saved = await this.customerRepository.save(customer);
+    await this.saveLeadContact(saved, data, contacts);
+    return { customer: saved, created: true };
+  }
+
+  private async saveLeadContact(customer: Customer, data: Partial<Customer>, contacts: Contact[]) {
+    const email = this.normalizeEmail(data.email || '');
+    if (!email || contacts.some((contact) => contact.customerId === customer.id && this.normalizeEmail(contact.email) === email)) return;
+    const contact = this.contactRepository.create({ customerId: customer.id, contactId: this.generateId('contact'),
+      name: data.contact || email.split('@')[0], email, phone: data.phone || '', isPrimary: false });
+    await this.contactRepository.save(contact);
   }
 
   private async parseExcelFile(file: UploadedFile): Promise<any[]> {

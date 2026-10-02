@@ -99,7 +99,7 @@ export function Shell() {
       aria-current={isActive ? "page" : undefined}
       title={compact ? label : undefined}
       className={cn(
-        "h-11 w-full justify-start gap-3 rounded-xl text-slate-300 hover:bg-white/10 hover:text-white",
+        "h-9 w-full justify-start gap-3 rounded-lg text-slate-300 hover:bg-white/10 hover:text-white",
         isActive && "bg-blue-500/20 text-white ring-1 ring-blue-400/30 hover:bg-blue-500/25",
         compact && "justify-center px-2"
       )}
@@ -113,9 +113,9 @@ export function Shell() {
   return <>
     <div className="flex h-20 shrink-0 items-center gap-3 px-5">
       <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-500 font-bold text-white shadow-lg shadow-blue-900/30">H</div>
-      {!compact && <div><span className="text-base font-semibold text-white">华远外贸 CRM</span><p className="mt-1 text-[10px] tracking-[0.15em] text-slate-400">HUAYUAN · SALES WORKSPACE</p></div>}
+      {!compact && <div className="min-w-0"><span className="whitespace-nowrap text-base font-semibold text-white">华远外贸 CRM</span><p className="mt-1 text-[10px] tracking-wider text-slate-400">HUAYUAN · SALES</p></div>}
     </div>
-    <nav aria-label="主导航" className="flex-1 space-y-5 overflow-y-auto px-3 py-3">
+    <nav aria-label="主导航" className="crm-navigation min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2">
       {[{ label: "客户开发", items: visibleMainItems }, { label: "销售工作", items: visibleSalesItems }, { label: "协作与设置", items: visibleBottomItems }].map((group) => <div key={group.label} className="space-y-1">
         {!compact && <p className="px-3 pb-2 text-[11px] font-medium tracking-wider text-slate-400">{group.label}</p>}
         {group.items.map((item) => <Fragment key={item.id}>{NavButton(item)}</Fragment>)}
@@ -133,8 +133,8 @@ export function Shell() {
                 <span className="text-sm font-medium truncate text-white">{displayName || username}</span>
                 <span className="text-xs text-slate-400">
                   {role === "admin" ? "超级管理员" : role === "sales" ? "销售人员" : "只读成员"}
-                  {username !== displayName && displayName ? ` · ${username}` : ""}
                 </span>
+                {username !== displayName && displayName && <span className="truncate text-[11px] text-slate-400" title={username || ""}>{username}</span>}
               </div>
             )}
           </div>
