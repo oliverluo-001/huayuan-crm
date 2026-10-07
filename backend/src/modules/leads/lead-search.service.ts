@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { SettingsService } from '../settings/settings.service';
+import { uniqueMarkets } from './lead-markets';
 
 export interface SearchCandidate {
   company: string;
@@ -338,17 +339,21 @@ export class LeadSearchService {
   }
 
   private async searchWikidataCatalog(regions: string[], industries: string[]): Promise<SearchResult[]> {
-    const countryQids = [...new Set(regions.flatMap((region) => REGION_COUNTRY_QIDS[region] || []))];
+    const markets = uniqueMarkets(regions).filter((market) => market !== 'Global');
+    const countryQids = [...new Set(markets.flatMap((region) => REGION_COUNTRY_QIDS[region] || []))];
+    const countryNames = markets.filter((market) => !REGION_COUNTRY_QIDS[market]);
     const industryQids = [...new Set(industries.flatMap((industry) =>
       INDUSTRY_QIDS.filter((entry) => entry.pattern.test(industry)).flatMap((entry) => entry.qids),
     ))];
-    const countryClause = countryQids.length
-      ? `VALUES ?country { ${countryQids.map((qid) => `wd:${qid}`).join(' ')} }`
-      : '';
+    const countryClauses = [
+      countryQids.length ? `{ VALUES ?country { ${countryQids.map((qid) => `wd:${qid}`).join(' ')} } }` : '',
+      countryNames.length ? `{ VALUES ?countryName { ${countryNames.map((name) => `${JSON.stringify(name)}@en`).join(' ')} } ?country rdfs:label ?countryName. }` : '',
+    ].filter(Boolean);
+    const countryClause = countryClauses.length ? `{ ${countryClauses.join(' UNION ')} }` : '';
     const industryClause = industryQids.length
       ? `VALUES ?industry { ${industryQids.map((qid) => `wd:${qid}`).join(' ')} }`
       : '';
-    const countryPattern = countryQids.length ? '(wdt:P17|wdt:P159/wdt:P17) ?country;' : '';
+    const countryPattern = markets.length ? '(wdt:P17|wdt:P159/wdt:P17) ?country;' : '';
     const industryPattern = industryQids.length
       ? '?company wdt:P452 ?companyIndustry. ?companyIndustry wdt:P279* ?industry.'
       : '';
@@ -357,6 +362,7 @@ export class LeadSearchService {
         ${countryClause}
         ${industryClause}
         ?company ${countryPattern} wdt:P856 ?website.
+        ${markets.length ? '' : 'OPTIONAL { ?company (wdt:P17|wdt:P159/wdt:P17) ?country. }'}
         ${industryPattern}
         SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
       }

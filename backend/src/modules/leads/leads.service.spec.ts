@@ -102,6 +102,8 @@ describe('LeadsService CRM conversion', () => {
     const runtimeTask: any = {
       id: 9,
       taskId: 'task_quality',
+      targetRegions: ['Global'],
+      agentState: { targetCountries: ['UAE'] },
       productName: 'flange',
       productAliases: [],
       targetSegments: ['distributor'],
@@ -161,6 +163,7 @@ describe('LeadsService CRM conversion', () => {
     await (runtimeService as any).processTaskAsync(runtimeTask);
 
     expect(search.discover).toHaveBeenCalledTimes(2);
+    expect(search.discover.mock.calls[0][3]).toEqual(expect.objectContaining({ regions: ['United Arab Emirates'] }));
     expect(runtimeTask.automationCursor).toBe(2);
     expect(runtimeTask.status).toBe('completed');
     expect(runtimeTask.automationProgress.stopReason).toBe('qualified_target_reached');
