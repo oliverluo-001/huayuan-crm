@@ -14,18 +14,20 @@ describe('LeadsService CRM conversion', () => {
     taskId: 'task_1',
     company: 'Acme PVF',
     contactName: 'Buyer',
-    email: 'sales@acme.example',
+    email: 'sales@acme.buyer-fixture.com',
     phone: '+1 555 0000',
-    website: 'https://acme.example',
+    website: 'https://acme.buyer-fixture.com',
     region: 'USA',
     country: 'USA',
     business: 'PVF distributor',
     targetSegment: 'distributor',
     buyerType: 'distributor',
-    sourceUrl: 'https://acme.example/contact',
+    sourceUrl: 'https://acme.buyer-fixture.com/contact',
     sourceName: 'Search API + public website',
     cleaningNotes: 'public evidence',
     recommendedAction: 'Ready to Email',
+    matchedProductKeyword: 'flange',
+    rawData: { fitScore: 95 },
     crmCustomerId: '',
     convertedCustomerId: '',
     leadStatus: 'new',
@@ -45,11 +47,15 @@ describe('LeadsService CRM conversion', () => {
   const service = new LeadsService(
     leadRepository as any,
     taskRepository as any,
-    {} as any,
+    { inspectContactSource: jest.fn(async () => ({ status: 200, emails: ['sales@acme.buyer-fixture.com'] })) } as any,
     customers as any,
+    { isSuppressed: jest.fn(async () => false) } as any,
   );
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(service as any, 'validateLeadEmail').mockResolvedValue({ valid: true, hardBounce: false, blocked: false, note: 'DNS valid' });
+  });
 
   it('generates buyer-intent queries across aliases, segments and downstream industries', () => {
     const queries = service.generateSearchQueries('flange', {
@@ -76,7 +82,7 @@ describe('LeadsService CRM conversion', () => {
     expect(customers.upsertLeadCustomer).toHaveBeenCalledWith(
       expect.objectContaining({
         company: 'Acme PVF',
-        email: 'sales@acme.example',
+        email: 'sales@acme.buyer-fixture.com',
         product: 'forged flanges',
       }),
       '7',
@@ -121,8 +127,8 @@ describe('LeadsService CRM conversion', () => {
     const candidate = (email: string) => ({
       company: email ? 'Verified Buyer' : 'Buyer Without Email',
       email,
-      website: email ? 'https://verified.example' : 'https://buyer.example',
-      sourceUrl: email ? 'https://verified.example/contact' : 'https://buyer.example',
+      website: email ? 'https://verified.buyer-fixture.com' : 'https://buyer.buyer-fixture.com',
+      sourceUrl: email ? 'https://verified.buyer-fixture.com/contact' : 'https://buyer.buyer-fixture.com',
       sourceType: 'Company Website',
       sourceName: 'Search API + public website',
       sourceHttpStatus: 200,
@@ -139,13 +145,14 @@ describe('LeadsService CRM conversion', () => {
     const search = {
       discover: jest.fn()
         .mockResolvedValueOnce({ candidates: [candidate('')], searched: 20, crawled: 1 })
-        .mockResolvedValueOnce({ candidates: [candidate('sales@verified.example')], searched: 20, crawled: 1 }),
+        .mockResolvedValueOnce({ candidates: [candidate('sales@verified.buyer-fixture.com')], searched: 20, crawled: 1 }),
     };
     const runtimeService = new LeadsService(
       runtimeLeadRepository as any,
       runtimeTaskRepository as any,
       search as any,
       customers as any,
+      { isSuppressed: jest.fn(async () => false) } as any,
     );
     jest.spyOn(runtimeService, 'cleanLeads').mockResolvedValue({
       summary: { readyToEmail: 1 },
@@ -179,6 +186,7 @@ describe('LeadsService CRM conversion', () => {
       runtimeTaskRepository as any,
       {} as any,
       customers as any,
+      { isSuppressed: jest.fn(async () => false) } as any,
     );
     const processSpy = jest.spyOn(runtimeService as any, 'processTaskAsync').mockResolvedValue(undefined);
 

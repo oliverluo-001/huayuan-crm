@@ -328,4 +328,12 @@ describe('LeadSearchService', () => {
     const candidates = await (service as any).enrich({ title: 'Buyer', url: 'https://buyer.example', snippet: '' }, ['flange'], ['distributor'], []);
     expect(candidates.find((candidate: any) => candidate.email === 'procurement@buyer.example').sourceUrl).toBe('https://buyer.example/contact');
   });
+  it('checks published emails on the source without inventing address patterns', async () => {
+    const page = jest.spyOn(service as any, 'fetchPage').mockResolvedValue({ status: 200, html: '<a href="mailto:sales@buyer.com">Contact us</a> purchasing [at] buyer [dot] com' });
+    const result = await service.inspectContactSource('https://buyer.com/contact');
+    expect(result.emails).toContain('sales@buyer.com');
+    expect(result.emails).not.toContain('info@buyer.com');
+    page.mockResolvedValueOnce({ status: 403, html: 'sales@buyer.com' });
+    expect((await service.inspectContactSource('https://buyer.com/contact')).emails).toEqual([]);
+  });
 });

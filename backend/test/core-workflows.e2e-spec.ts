@@ -248,6 +248,7 @@ describe("core CRM workflows (HTTP e2e)", () => {
       leadTaskRepository as any,
       { associateProduct: jest.fn() } as any,
       customersService,
+      { isSuppressed: jest.fn(async () => false) } as any,
     );
     jest
       .spyOn(leadsService as any, "processTaskAsync")

@@ -1076,6 +1076,11 @@ export class LeadSearchService {
     });
   }
 
+  async inspectContactSource(url: string) {
+    const page = await this.fetchPage(url);
+    return { status: page.status, emails: page.status === 200 ? this.extractEmails(page.html) : [] };
+  }
+
   private async fetchPage(url: string) {
     try {
       let currentUrl = url;

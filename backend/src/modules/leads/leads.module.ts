@@ -5,9 +5,10 @@ import { LeadsService, LeadsController, LeadTasksController, LeadAssociationsCon
 import { LeadSearchService } from './lead-search.service';
 import { SettingsModule } from '../settings/settings.module';
 import { CustomersModule } from '../customers/customers.module';
+import { SuppressionModule } from '../suppression/suppression.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Lead, LeadTask]), SettingsModule, CustomersModule],
+  imports: [TypeOrmModule.forFeature([Lead, LeadTask]), SettingsModule, CustomersModule, SuppressionModule],
   controllers: [LeadsController, LeadTasksController, LeadAssociationsController],
   providers: [LeadsService, LeadSearchService],
   exports: [LeadsService],
