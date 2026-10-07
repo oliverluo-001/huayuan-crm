@@ -831,7 +831,7 @@ export interface B2BLead {
   purchaseScore?: number;
   leadScore?: number;
   leadTier?: "high" | "medium" | "review" | "remove";
-  emailStatus?: "verified" | "invalid" | "unknown";
+  emailStatus?: "verified" | "domain_valid" | "suppressed" | "invalid" | "unknown";
   emailConfidence?: number;
   regionStatus?: "confirmed" | "likely" | "unknown";
   source?: string;
@@ -844,9 +844,11 @@ export interface B2BLead {
   recommendedAction?: string;
   crmCustomerId?: string;
   cleaningNotes?: string;
+  reviewReason?: string;
   emailSourceDomainMatch?: boolean;
   matchedProductKeyword?: string;
   rawData?: {
+    contactQuality?: { version: number; published: boolean; suppressed: boolean; email: string; sourceUrl: string; sourceStatus: number; checkedAt: string; reasons: string[] };
     evidence?: string[];
     gaps?: string[];
     fitScore?: number;

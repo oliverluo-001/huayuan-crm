@@ -18,6 +18,7 @@ import {
 } from './dto';
 import { LeadSearchService, SearchCandidate } from './lead-search.service';
 import { CustomersService } from '../customers/customers.service';
+import { SuppressionService } from '../suppression/suppression.service';
 
 // ─── Constants ───────────────────────────────────────────────────────────
 
@@ -45,6 +46,17 @@ export class LeadsService implements OnModuleInit {
   private readonly dns = new Resolver({ timeout: 2500, tries: 1 });
   private readonly logger = new Logger(LeadsService.name);
   private readonly activeTaskIds = new Set<number>();
+  private readonly qualityQueues = new Map<number, Promise<void>>();
+
+  private async withQualityQueue<T>(taskId: number, work: () => Promise<T>): Promise<T> {
+    const previous = this.qualityQueues.get(taskId);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    this.qualityQueues.set(taskId, pending);
+    await previous;
+    try { return await work(); }
+    finally { release(); if (this.qualityQueues.get(taskId) === pending) this.qualityQueues.delete(taskId); }
+  }
 
   constructor(
     @InjectRepository(Lead)
@@ -53,6 +65,7 @@ export class LeadsService implements OnModuleInit {
     private leadTaskRepository: Repository<LeadTask>,
     private leadSearchService: LeadSearchService,
     private customersService: CustomersService,
+    private suppressionService: SuppressionService,
   ) {}
 
   async onModuleInit() {
@@ -229,18 +242,14 @@ export class LeadsService implements OnModuleInit {
       where: { leadId: In(convertDto.ids), ...(ownerId ? { ownerId } : {}) },
     });
 
-    const converted: any[] = [];
-    for (const lead of leads) {
-      if (lead.leadStatus === 'converted') continue;
-      lead.leadStatus = 'converted';
-      await this.leadRepository.save(lead);
-      converted.push({
-        leadId: lead.leadId,
-        company: lead.company,
-        email: lead.email,
-      });
+    const pending = leads.filter((lead) => lead.leadStatus !== 'converted' && !lead.crmCustomerId);
+    for (const taskId of new Set(pending.map((lead) => lead.taskId).filter(Boolean))) {
+      const task = await this.leadTaskRepository.findOne({ where: { taskId } });
+      if (!task) continue;
+      await this.importToCustomers(task.id, { ids: pending.filter((lead) => lead.taskId === taskId).map((lead) => lead.leadId) }, ownerId || '');
     }
-
+    const updated = pending.length ? await this.leadRepository.find({ where: { leadId: In(pending.map((lead) => lead.leadId)), ...(ownerId ? { ownerId } : {}) } }) : [];
+    const converted = updated.filter((lead) => lead.crmCustomerId).map((lead) => ({ leadId: lead.leadId, company: lead.company, email: lead.email }));
     return { converted, count: converted.length };
   }
 
@@ -271,6 +280,7 @@ export class LeadsService implements OnModuleInit {
       ownerId,
       name: createTaskDto.productName || createTaskDto.name || '获客任务',
       taskId: this.generateId('task'),
+      agentState: { targetCountries: createTaskDto.targetCountries || [] },
       status: 'draft',
     });
     return this.leadTaskRepository.save(task);
@@ -621,15 +631,35 @@ export class LeadsService implements OnModuleInit {
     if (filters.largeRegion) where.largeRegion = filters.largeRegion;
     if (filters.country) where.country = filters.country;
     if (filters.targetSegment) where.targetSegment = filters.targetSegment;
-    if (filters.recommendedAction) where.recommendedAction = filters.recommendedAction;
+    if (filters.recommendedAction) {
+      where.recommendedAction = ['Needs Review', 'Remove'].includes(filters.recommendedAction)
+        ? In([filters.recommendedAction, 'Ready to Email']) : filters.recommendedAction;
+    }
     if (filters.confidence) where.confidence = filters.confidence;
     if (filters.leadTier) where.leadTier = filters.leadTier;
 
-    const leads = await this.leadRepository.find({
+    const records = await this.leadRepository.find({
       where,
       order: { createdAt: 'DESC' },
       take: 500,
     });
+
+    // Old scores and expired evidence are not sufficient to advertise a usable
+    // contact. Revalidation is explicit, never a network crawl on every poll.
+    const blocked = new Set<string>();
+    const checked = [...new Set(records.filter((lead) => lead.recommendedAction === 'Ready to Email').map((lead) => lead.email).filter(Boolean))];
+    let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(6, checked.length) }, async () => {
+      while (cursor < checked.length) {
+        const email = checked[cursor++];
+        if (await this.suppressionService.isSuppressed(email)) blocked.add(email);
+      }
+    }));
+    const leads = records.map((lead) => blocked.has(lead.email)
+      ? { ...lead, recommendedAction: 'Remove', emailStatus: 'suppressed', reviewReason: '该邮箱已退订、硬退信或被禁止联系' }
+      : lead.recommendedAction === 'Ready to Email' && !this.hasFreshContactEvidence(lead)
+      ? { ...lead, recommendedAction: 'Needs Review', reviewReason: '联系方式证据已过期或尚未核验，请执行验证与评分' } : lead)
+      .filter((lead) => !filters.recommendedAction || lead.recommendedAction === filters.recommendedAction);
 
     // Compute summary
     const total = leads.length;
@@ -687,7 +717,7 @@ export class LeadsService implements OnModuleInit {
           sourceType: data.sourceType || 'manual',
           sourceUrl: data.sourceUrl || data.source || '',
           confidence: data.confidence || 'Medium',
-          recommendedAction: data.recommendedAction || 'Needs Review',
+          recommendedAction: 'Needs Review',
           leadStatus: 'new',
           status: 'candidate',
           rawData: data,
@@ -710,7 +740,11 @@ export class LeadsService implements OnModuleInit {
     return { imported };
   }
 
-  async cleanLeads(taskId: number, ownerId?: string) {
+  async cleanLeads(taskId: number, ownerId?: string, forceSourceCheck = false) {
+    return this.withQualityQueue(taskId, () => this.performCleanLeads(taskId, ownerId, forceSourceCheck));
+  }
+
+  private async performCleanLeads(taskId: number, ownerId?: string, forceSourceCheck = false) {
     const task = await this.findOneTask(taskId, ownerId);
     const leads = await this.leadRepository.find({
       where: { taskId: task.taskId },
@@ -735,6 +769,35 @@ export class LeadsService implements OnModuleInit {
       while (emailIndex < emails.length) {
         const email = emails[emailIndex++];
         validations.set(email, await this.validateLeadEmail(email, mxChecks));
+      }
+    }));
+
+    const sourceChecks = new Map<string, ReturnType<LeadSearchService['inspectContactSource']>>();
+    const contactChecks = new Map<number, { published: boolean; status: number; suppressed: boolean; checkedAt: string }>();
+    let leadIndex = 0;
+    await Promise.all(Array.from({ length: Math.min(6, leads.length) }, async () => {
+      while (leadIndex < leads.length) {
+        const lead = leads[leadIndex++];
+        if (lead.status === 'converted' || lead.crmCustomerId || lead.status === 'duplicate') continue;
+        const email = String(lead.email || '').trim().toLowerCase();
+        // Always consult live suppression records. A lookup failure aborts the
+        // operation rather than accidentally qualifying prohibited recipients.
+        const suppressed = email ? await this.suppressionService.isSuppressed(email) : false;
+        const previous = lead.rawData?.contactQuality;
+        let published = false;
+        let status = 0;
+        let checkedAt = new Date().toISOString();
+        if (!suppressed && validations.get(email)?.valid && lead.sourceUrl) {
+          if (!forceSourceCheck && this.hasFreshContactEvidence(lead)) {
+            published = true; status = previous.sourceStatus; checkedAt = previous.checkedAt;
+          } else {
+            if (!sourceChecks.has(lead.sourceUrl)) sourceChecks.set(lead.sourceUrl, this.leadSearchService.inspectContactSource(lead.sourceUrl));
+            const source = await sourceChecks.get(lead.sourceUrl)!;
+            status = source.status;
+            published = source.emails.includes(email);
+          }
+        }
+        contactChecks.set(lead.id, { published, status, suppressed, checkedAt });
       }
     }));
 
@@ -764,7 +827,9 @@ export class LeadsService implements OnModuleInit {
       }
 
       const validation = validations.get(email) || await this.validateLeadEmail(email, mxChecks);
-      const sourceReachable = lead.sourceHttpStatus >= 200 && lead.sourceHttpStatus < 400;
+      const contactCheck = contactChecks.get(lead.id)!;
+      lead.sourceHttpStatus = contactCheck.status;
+      const sourceReachable = contactCheck.status === 200;
       const sourceHost = this.hostname(lead.sourceUrl || lead.website);
       const emailDomain = email.split('@')[1] || '';
       const domainMatch = Boolean(emailDomain && sourceHost &&
@@ -773,7 +838,8 @@ export class LeadsService implements OnModuleInit {
       const preferredEmail = /^(sales|info|export|enquiry|inquiries|contact|procurement|purchasing|rfq|quotes)@/i.test(email);
       const hasProductEvidence = Boolean(lead.matchedProductKeyword);
       const hasBuyerEvidence = Boolean(lead.targetSegment || lead.buyerType);
-      const targets = (task.targetRegions?.length ? task.targetRegions : [task.targetRegion || 'Global']).filter((region) => region !== 'Global');
+      const countries: string[] = Array.isArray(task.agentState?.targetCountries) ? task.agentState.targetCountries : [];
+      const targets = (countries.length ? countries : task.targetRegions?.length ? task.targetRegions : [task.targetRegion || 'Global']).filter((region) => region !== 'Global');
       const country = this.normalizeCountry(lead.country || '');
       const regionMatches = !targets.length || Boolean(country && targets.some((region) =>
         this.normalizeCountry(region) === country || region.toLowerCase() === this.largeRegionFor(country).toLowerCase()));
@@ -789,7 +855,7 @@ export class LeadsService implements OnModuleInit {
       if (!regionMatches) score = Math.min(score, 59);
       lead.leadScore = Math.max(0, Math.min(100, score));
       lead.email = email;
-      lead.emailStatus = validation.valid ? 'domain_valid' : validation.hardBounce || validation.blocked ? 'invalid' : 'unknown';
+      lead.emailStatus = contactCheck.suppressed ? 'suppressed' : validation.valid ? 'domain_valid' : validation.hardBounce || validation.blocked ? 'invalid' : 'unknown';
       lead.emailSourceDomainMatch = domainMatch;
       lead.confidence = lead.leadScore >= 80 ? 'High' : lead.leadScore >= 50 ? 'Medium' : 'Low';
       lead.cleaningNotes = this.appendNote(
@@ -798,7 +864,12 @@ export class LeadsService implements OnModuleInit {
           .filter(Boolean).join('；'),
       );
 
-      if (validation.hardBounce) {
+      const reasons = [contactCheck.suppressed ? '该邮箱已退订、硬退信或被禁止联系' : '', !email ? '未发现邮箱，不能作为邮件获客线索' : !validation.valid ? validation.note : '', !contactCheck.published && !contactCheck.suppressed ? '来源网页未能复核到该邮箱，禁止转入或作为合格邮件线索' : '', !hasProductEvidence ? '产品相关证据不足' : '', !hasBuyerEvidence ? '买家身份待核验' : '', !regionMatches ? '目标国家或地区未匹配' : '', !domainMatch ? '邮箱与来源域名不一致' : '', freeEmail ? '免费邮箱需进一步确认企业归属' : '', lead.confidence !== 'High' ? '业务匹配评分不足' : ''].filter(Boolean);
+      lead.reviewReason = reasons.join('；');
+      lead.rawData = { ...lead.rawData, contactQuality: { version: 2, email, sourceUrl: lead.sourceUrl, sourceStatus: contactCheck.status, published: contactCheck.published, checkedAt: contactCheck.checkedAt, suppressed: contactCheck.suppressed, reasons } };
+      if (contactCheck.suppressed) {
+        lead.recommendedAction = 'Remove'; lead.leadTier = 'remove'; remove++;
+      } else if (validation.hardBounce) {
         lead.recommendedAction = 'Hard Bounce';
         lead.leadTier = 'remove';
         hardBounce++;
@@ -807,7 +878,7 @@ export class LeadsService implements OnModuleInit {
         lead.leadTier = 'remove';
         remove++;
       } else if (validation.valid && sourceReachable && lead.confidence === 'High' &&
-        hasProductEvidence && hasBuyerEvidence && domainMatch && !freeEmail && regionMatches) {
+        hasProductEvidence && hasBuyerEvidence && domainMatch && !freeEmail && regionMatches && contactCheck.published) {
         lead.recommendedAction = 'Ready to Email';
         lead.leadTier = 'high';
         readyToEmail++;
@@ -847,8 +918,12 @@ export class LeadsService implements OnModuleInit {
   }
 
   async importToCustomers(taskId: number, dto: ImportCustomersDto, ownerId = '') {
+    return this.withQualityQueue(taskId, () => this.performImportToCustomers(taskId, dto, ownerId));
+  }
+
+  private async performImportToCustomers(taskId: number, dto: ImportCustomersDto, ownerId = '') {
     const task = await this.findOneTask(taskId, ownerId || undefined);
-    if (dto.importAll) await this.cleanLeads(taskId, ownerId || undefined);
+    await this.performCleanLeads(taskId, ownerId || undefined, true);
     let leads: Lead[];
 
     if (dto.importAll) {
@@ -866,7 +941,7 @@ export class LeadsService implements OnModuleInit {
     // Filter only importable leads
     const importable = leads.filter((l) => l.company && !l.crmCustomerId && l.status !== 'duplicate' &&
       l.recommendedAction !== 'Remove' && l.recommendedAction !== 'Hard Bounce' &&
-      (!dto.importAll || l.recommendedAction === 'Ready to Email'));
+      l.recommendedAction === 'Ready to Email' && this.hasFreshContactEvidence(l));
 
     let created = 0;
     let merged = 0;
@@ -916,7 +991,7 @@ export class LeadsService implements OnModuleInit {
     const task = await this.findOneTask(taskId, ownerId);
     const where: any = { taskId: task.taskId };
 
-    if (type === 'ready') where.recommendedAction = 'Ready to Email';
+    if (type === 'ready') { await this.cleanLeads(taskId, ownerId); where.recommendedAction = 'Ready to Email'; }
     else if (type === 'review') where.recommendedAction = 'Needs Review';
     else if (type === 'removed') where.recommendedAction = 'Remove';
     else if (type === 'duplicates') {
@@ -1000,6 +1075,13 @@ export class LeadsService implements OnModuleInit {
     return { added, withEmail, qualified };
   }
 
+  private hasFreshContactEvidence(lead: Lead) {
+    const quality = lead.rawData?.contactQuality;
+    const age = Date.now() - Date.parse(quality?.checkedAt || '');
+    return quality?.version === 2 && quality.published === true && quality.suppressed === false && quality.sourceStatus === 200 &&
+      quality.email === String(lead.email || '').trim().toLowerCase() && quality.sourceUrl === lead.sourceUrl && age >= 0 && age < 6 * 60 * 60_000;
+  }
+
   private normalizeCountry(value: string) {
     const normalized = value.trim().toLowerCase();
     const aliases: Record<string, string> = { usa: 'united states', us: 'united states', 'united states of america': 'united states', uk: 'united kingdom', uae: 'united arab emirates' };
@@ -1028,17 +1110,22 @@ export class LeadsService implements OnModuleInit {
       return { valid: false, hardBounce: false, blocked: true, note: '邮箱格式无效' };
     }
     const prefix = email.split('@')[0];
-    if (['no-reply', 'noreply', 'donotreply', 'abuse', 'postmaster', 'hostmaster'].includes(prefix)) {
+    const domain = email.split('@')[1];
+    if (/(^|\.)(example\.(com|org|net)|example|invalid|test|localhost)$/.test(domain) || /^(example|test|yourname|youremail|email|username)$/.test(prefix) || email.includes('..') || email.length > 254) {
+      return { valid: false, hardBounce: false, blocked: true, note: '示例、占位或格式异常邮箱，不可作为联系方式' };
+    }
+    if (/^(no[._-]?reply|donotreply|do[._-]not[._-]reply|abuse|postmaster|hostmaster|mailer[._-]daemon|bounce)([+._-].*)?$/.test(prefix)) {
       return { valid: false, hardBounce: false, blocked: true, note: '禁止发送的系统邮箱' };
     }
     try {
       const domain = email.split('@')[1];
       if (!mxChecks.has(domain)) mxChecks.set(domain, this.dns.resolveMx(domain));
       const records = await mxChecks.get(domain)!;
-      if (!records.length || records.every((record) => !record.exchange || record.exchange === '.')) return { valid: false, hardBounce: true, blocked: false, note: '域名未配置接收邮件的 MX 记录' };
+      if (!records.length) return { valid: false, hardBounce: false, blocked: false, note: '未查到 MX 记录，收信能力待核验' };
+      if (records.every((record) => !record.exchange || record.exchange === '.')) return { valid: false, hardBounce: true, blocked: false, note: '域名明确声明不接收邮件（Null MX）' };
       return { valid: true, hardBounce: false, blocked: false, note: '邮箱格式及收信域名检查通过；具体邮箱是否存在仍待投递确认' };
     } catch (error: any) {
-      const hardBounce = ['ENOTFOUND', 'ENODATA', 'NXDOMAIN'].includes(String(error?.code || '').toUpperCase());
+      const hardBounce = ['ENOTFOUND', 'NXDOMAIN'].includes(String(error?.code || '').toUpperCase());
       return {
         valid: false,
         hardBounce,

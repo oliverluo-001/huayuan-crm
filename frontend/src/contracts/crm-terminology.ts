@@ -60,7 +60,7 @@ export const LEAD_BUYER_TYPE_OPTIONS = [
 ] as const;
 
 export const LEAD_ACTION_LABELS: Readonly<Record<string, string>> = {
-  "Ready to Email": "可直接联系",
+  "Ready to Email": "通过联系前检查",
   "Needs Review": "待人工核验",
   Remove: "建议剔除",
   "Hard Bounce": "无效邮箱",

@@ -17,6 +17,7 @@ import {
   statusLabel,
 } from "@/contracts/crm-terminology";
 import "./LeadsPage.css";
+import { isLeadImportable } from "@/contracts/lead-quality";
 import {
   getB2BLeadTasks,
   createB2BLeadTask,
@@ -68,14 +69,6 @@ function automationStageText(task: B2BLeadTask): string {
     return AUTOMATION_STAGE_LABELS[progress.stage];
   }
   return statusLabel(B2B_TASK_STATUS_LABELS, task.status, "待启动");
-}
-
-function isLeadImportable(lead: B2BLead): boolean {
-  if (!lead.company) return false;
-  if (!lead.website && !lead.sourceUrl && !lead.source) return false;
-  if (lead.crmCustomerId) return false;
-  if (lead.recommendedAction === "Remove" || lead.recommendedAction === "Hard Bounce") return false;
-  return true;
 }
 
 function gradeForConfidence(confidence?: number | string): string {
@@ -151,7 +144,7 @@ export function LeadsPage() {
   const [filterRegion, setFilterRegion] = useState("");
   const [filterCountry, setFilterCountry] = useState("");
   const [filterSegment, setFilterSegment] = useState("");
-  const [filterRecommendedAction, setFilterRecommendedAction] = useState("");
+  const [filterRecommendedAction, setFilterRecommendedAction] = useState("Ready to Email");
   const [filterConfidence, setFilterConfidence] = useState("");
 
   // Query editor
@@ -451,7 +444,7 @@ export function LeadsPage() {
     setCleaning(true);
     try {
       const result = await cleanB2BLeads(activeTaskId);
-      toast(`清洗完成：Ready ${result.summary.readyToEmail} 条，Review ${result.summary.needsReview} 条`);
+      toast(`核验完成：通过联系前检查 ${result.summary.readyToEmail} 条，待核验 ${result.summary.needsReview} 条`);
       await fetchLeadsForTask(activeTaskId);
     } catch {
       // handled
@@ -487,7 +480,9 @@ export function LeadsPage() {
 
   const handleImportToCustomers = async (importAll: boolean) => {
     if (!activeTaskId || convertingRef.current) return;
-    if (!importAll && leads.some((lead) => selectedLeadIds.has(lead.id) && lead.recommendedAction !== "Ready to Email") && !confirm("所选线索包含待核验记录。请先核对产品、买家身份、地区及邮箱来源；确认仍要转入客户？")) return;
+    if (!importAll && leads.some((lead) => selectedLeadIds.has(lead.id) && !isLeadImportable(lead))) {
+      toast.error("选择中包含未通过质量检查或核验已过期的线索，请先重新验证。"); return;
+    }
     convertingRef.current = true; setConverting(true);
     try {
     const body = importAll ? { importAll: true } : { ids: [...selectedLeadIds] };
@@ -674,7 +669,7 @@ export function LeadsPage() {
           </span>
         </div>
         <span>
-          {(activeTask.targetRegions || []).map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join("、")} · 可直接联系目标 {activeTask.targetCount} 条 · 原始 {activeTask.rawLeadCount || 0} · 已验证可联系 {Number(progress.verifiedLeads ?? activeTask.cleanedLeadCount ?? 0)} · 重复 {activeTask.duplicateCount || 0} · 已转客户 {activeTask.importedCustomerCount || 0}
+          {(activeTask.targetRegions || []).map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join("、")} · 合格线索目标 {activeTask.targetCount} 条 · 原始 {activeTask.rawLeadCount || 0} · 上次核验通过 {Number(progress.verifiedLeads ?? activeTask.cleanedLeadCount ?? 0)} · 重复 {activeTask.duplicateCount || 0} · 已转客户 {activeTask.importedCustomerCount || 0}
         </span>
         {(activeTask.buyerIndustries || []).length > 0 && (
           <div className="lead-task-profile">
@@ -723,7 +718,7 @@ export function LeadsPage() {
     const metrics = [
       ["总线索", summary.total || 0],
       ["已去重", summary.duplicatesRemoved || 0],
-      ["可直接联系", summary.readyToEmail || 0],
+      ["通过联系前检查", summary.readyToEmail || 0],
       ["待人工核验", summary.needsReview || 0],
       ["建议剔除", (summary.remove || 0) + (summary.hardBounce || 0)],
     ];
@@ -826,7 +821,8 @@ export function LeadsPage() {
                     <TableCell>
                       <strong>{lead.email || "-"}</strong>
                       <div className="meta">{lead.emailSourceDomainMatch ? "邮箱域名与官网一致" : "域名待核验"}</div>
-                      <div className="meta">格式和收信域名通过不代表邮箱一定存在</div>
+                      <div className="meta">{lead.rawData?.contactQuality?.published ? "来源页已核对该邮箱" : "未通过来源页复核"} · 实际投递仍待确认</div>
+                      {lead.rawData?.contactQuality?.checkedAt && <div className="meta">核验时间：{new Date(lead.rawData.contactQuality.checkedAt).toLocaleString()}</div>}
                     </TableCell>
                     <TableCell>
                       {lead.country || "-"}
@@ -856,7 +852,7 @@ export function LeadsPage() {
                       {lead.crmCustomerId ? (
                         <span className="status-pill success">已入客户库</span>
                       ) : (
-                        <div className="cleaning-notes">{lead.cleaningNotes || "待处理"}</div>
+                        <div className="cleaning-notes">{lead.reviewReason || (isLeadImportable(lead) ? "来源、域名及业务匹配检查通过；实际投递待确认" : lead.cleaningNotes || "待处理")}</div>
                       )}
                     </TableCell>
                   </TableRow>
@@ -1016,7 +1012,7 @@ export function LeadsPage() {
                 />
               </div>
               <div className="form-field">
-                <label>可直接联系线索目标</label>
+                <label>合格邮件线索目标</label>
                 <Input
                   name="targetCount"
                   type="number"
@@ -1025,7 +1021,7 @@ export function LeadsPage() {
                   value={targetCount}
                   onChange={(e) => setTargetCount(e.target.value)}
                 />
-                <small>系统会继续搜索，直到达到已验证的可联系线索数量，或全部策略执行完毕。</small>
+                <small>按通过业务匹配和联系方式检查的数量计算目标，待核验和无效线索不凑数；实际投递能力仍待确认。</small>
               </div>
               <div className="form-field">
                 <label>搜索语言</label>
@@ -1193,7 +1189,7 @@ export function LeadsPage() {
             <h2>搜索结果</h2>
             <p id="leadPoolInfo" className="meta">
               {activeTask
-                ? `当前显示 ${leads.length} 条结果；选择可用企业后可直接进入客户管理。`
+                ? `当前显示 ${leads.length} 条结果；默认仅展示通过业务匹配、来源邮箱复核和域名检查的线索。`
                 : "完成产品联想并启动任务后，结果会显示在这里。"}
             </p>
           </div>
@@ -1217,6 +1213,8 @@ export function LeadsPage() {
         </div>
 
         {renderLeadSummaryCards()}
+        <p className="meta" role="note">质量门槛：官网公开邮箱、域名收信检查、无已知退信/退订禁发记录、产品及买家身份匹配、目标国家匹配。无联系方式和待核验记录不会进入合格结果，也不能转入客户。历史或超过 6 小时的核验需重新执行验证与评分；上述检查不等于实际投递成功。</p>
+        {canManage && <Button variant="outline" disabled={cleaning || converting || !activeTask} onClick={handleCleanLeads}>{cleaning ? "正在核验联系方式…" : "重新验证本任务联系方式"}</Button>}
 
         {leadsLoading ? (
           <Skeleton className="h-48 w-full" />
@@ -1240,7 +1238,7 @@ export function LeadsPage() {
                 disabled={!activeTask}
               >
                 {type === "all" ? "全部线索" :
-                 type === "ready" ? "可直接联系" :
+                 type === "ready" ? "通过联系前检查" :
                  type === "review" ? "待人工核验" :
                  type === "removed" ? "建议剔除" : "重复线索"} CSV
               </Button>

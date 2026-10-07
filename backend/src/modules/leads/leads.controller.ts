@@ -184,7 +184,7 @@ export class LeadTasksController {
   @Post(':id/clean')
   @Roles('admin', 'sales')
   cleanLeads(@Param('id') id: string, @CurrentUser() user: RequestUser) {
-    return this.leadsService.cleanLeads(+id, ownerScope(user));
+    return this.leadsService.cleanLeads(+id, ownerScope(user), true);
   }
 
   @Post(':id/import-customers')
