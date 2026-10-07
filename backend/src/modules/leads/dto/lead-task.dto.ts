@@ -3,6 +3,9 @@ import { LeadTaskStatus } from '../entities';
 
 export class CreateLeadTaskDto {
   @IsOptional()
+  @IsEnum(['global', 'regions', 'countries'])
+  marketMode?: 'global' | 'regions' | 'countries';
+  @IsOptional()
   @IsString()
   @MaxLength(255)
   name?: string;

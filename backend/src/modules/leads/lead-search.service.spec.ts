@@ -8,6 +8,15 @@ describe('LeadSearchService', () => {
   };
   const service = new LeadSearchService(settings as any);
 
+  it('keeps a specific-country constraint in directory discovery rather than searching globally', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true, text: async () => JSON.stringify({ results: { bindings: [] } }) } as any);
+    await (service as any).searchWikidataCatalog(['UAE', 'Germany'], []);
+    const query = new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('query')!;
+    expect(query).toContain('"United Arab Emirates"@en');
+    expect(query).toContain('"Germany"@en');
+    expect(query).toContain('(wdt:P17|wdt:P159/wdt:P17) ?country;');
+  });
+
   beforeEach(() => {
     jest.restoreAllMocks();
     jest.clearAllMocks();

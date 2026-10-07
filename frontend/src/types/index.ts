@@ -779,6 +779,7 @@ export interface LeadAssociation {
 }
 
 export interface B2BLeadTask {
+  agentState?: { marketMode?: 'global' | 'regions' | 'countries'; targetCountries?: string[] };
   id: string;
   productName?: string;
   region?: string;

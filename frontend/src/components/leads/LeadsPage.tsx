@@ -18,6 +18,7 @@ import {
 } from "@/contracts/crm-terminology";
 import "./LeadsPage.css";
 import { isLeadImportable } from "@/contracts/lead-quality";
+import { effectiveMarkets, marketPayload, type MarketMode } from "@/contracts/lead-market";
 import {
   getB2BLeadTasks,
   createB2BLeadTask,
@@ -124,11 +125,11 @@ export function LeadsPage() {
   const [associationDraft, setAssociationDraft] = useState<LeadAssociation | null>(null);
 
   // Market selection state
-  const [selectedRegions, setSelectedRegions] = useState<string[]>(["Global"]);
+  const [marketMode, setMarketMode] = useState<MarketMode>("global");
+  const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [targetCount, setTargetCount] = useState("100");
   const [targetCountries, setTargetCountries] = useState("");
-  const [language, setLanguage] = useState("en");
 
   // Task state
   const [tasks, setTasks] = useState<B2BLeadTask[]>([]);
@@ -328,7 +329,7 @@ export function LeadsPage() {
       const withoutGlobal = prev.filter((r) => r !== "Global");
       if (withoutGlobal.includes(region)) {
         const next = withoutGlobal.filter((r) => r !== region);
-        return next.length === 0 ? ["Global"] : next;
+        return next;
       }
       return [...withoutGlobal, region];
     });
@@ -349,22 +350,22 @@ export function LeadsPage() {
       toast.error("请至少选择一种买家类型");
       return;
     }
+    const market = marketPayload(marketMode, selectedRegions, targetCountries);
+    if (marketMode === 'countries' && !market.targetCountries.length) { toast.error('请填写至少一个目标国家'); return; }
+    if (marketMode === 'regions' && !market.targetRegions.length) { toast.error('请至少选择一个目标大区'); return; }
     setCreatingTask(true);
     try {
       const body: Record<string, any> = {
         productName: associationDraft.productName,
         targetCount: parseInt(targetCount) || 100,
-        searchLanguage: language,
-        targetRegions: selectedRegions,
+        searchLanguage: 'en',
+        ...market,
         targetSegments: selectedSegments,
         productAliases: associationDraft.aliases || [],
         buyerIndustries: associationDraft.industries || [],
         buyerCompanyTypes: associationDraft.companyTypes || [],
         associationSource: associationDraft.source || "fallback",
       };
-      if (targetCountries.trim()) {
-        body.targetCountries = targetCountries.split(/[,;\n，；]+/).map((s) => s.trim()).filter(Boolean);
-      }
       const result = await createB2BLeadTask(body);
       const taskId = result.task.id;
       setActiveTaskId(taskId);
@@ -615,9 +616,9 @@ export function LeadsPage() {
 
   const renderRegionOptions = () => (
     <fieldset className="full">
-      <legend>目标大区域</legend>
+      <legend>选择大区（可多选）</legend>
       <div className="lead-option-grid">
-        {LEAD_REGION_OPTIONS.map((region) => (
+        {LEAD_REGION_OPTIONS.filter((region) => region.value !== 'Global').map((region) => (
           <label key={region.value} className="lead-choice-chip">
             <input
               type="checkbox"
@@ -669,7 +670,7 @@ export function LeadsPage() {
           </span>
         </div>
         <span>
-          {(activeTask.targetRegions || []).map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join("、")} · 合格线索目标 {activeTask.targetCount} 条 · 原始 {activeTask.rawLeadCount || 0} · 上次核验通过 {Number(progress.verifiedLeads ?? activeTask.cleanedLeadCount ?? 0)} · 重复 {activeTask.duplicateCount || 0} · 已转客户 {activeTask.importedCustomerCount || 0}
+          {effectiveMarkets(activeTask).map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join("、")} · 合格线索目标 {activeTask.targetCount} 条 · 原始 {activeTask.rawLeadCount || 0} · 上次核验通过 {Number(progress.verifiedLeads ?? activeTask.cleanedLeadCount ?? 0)} · 重复 {activeTask.duplicateCount || 0} · 已转客户 {activeTask.importedCustomerCount || 0}
         </span>
         {(activeTask.buyerIndustries || []).length > 0 && (
           <div className="lead-task-profile">
@@ -1002,15 +1003,26 @@ export function LeadsPage() {
                 <label>当前产品</label>
                 <Input name="productName" readOnly value={association?.canonicalName || association?.productName || ""} />
               </div>
-              <div className="form-field">
-                <label>指定国家（可选）</label>
+              <fieldset className="full">
+                <legend>搜索范围</legend>
+                <div className="lead-option-grid">
+                  {([['global', '全球'], ['regions', '按大区'], ['countries', '按国家']] as const).map(([value, label]) => <label key={value} className="lead-choice-chip"><input type="radio" name="marketMode" value={value} checked={marketMode === value} onChange={() => setMarketMode(value)} /><span>{label}</span></label>)}
+                </div>
+                <small>三种范围互斥；切换模式后，只使用当前模式的条件。不会自动扩大到全球。</small>
+              </fieldset>
+              {marketMode === 'countries' && <div className="form-field full">
+                <label htmlFor="lead-target-countries">目标国家（必填）</label>
                 <Input
+                  id="lead-target-countries"
                   name="targetCountries"
-                  placeholder="如：UAE, Germany, USA"
+                  placeholder="如：阿联酋、德国、美国（用逗号分隔）；也支持 UAE, Germany, USA"
                   value={targetCountries}
                   onChange={(e) => setTargetCountries(e.target.value)}
                 />
-              </div>
+                <small>最多 20 个国家；支持常用中文名和缩写，其他国家请使用英文全称。</small>
+              </div>}
+              {marketMode === 'regions' && renderRegionOptions()}
+              <p className="full" role="status">最终搜索范围：{marketMode === 'global' ? '全球' : marketMode === 'countries' ? marketPayload(marketMode, selectedRegions, targetCountries).targetCountries.join('、') || '请填写国家' : selectedRegions.map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join('、') || '请选择大区'}。企业发现、重新生成查询及质量核验均使用此范围。</p>
               <div className="form-field">
                 <label>合格邮件线索目标</label>
                 <Input
@@ -1023,17 +1035,7 @@ export function LeadsPage() {
                 />
                 <small>按通过业务匹配和联系方式检查的数量计算目标，待核验和无效线索不凑数；实际投递能力仍待确认。</small>
               </div>
-              <div className="form-field">
-                <label>搜索语言</label>
-                <select
-                  name="searchLanguage"
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                >
-                  <option value="en">英语</option>
-                </select>
-              </div>
-              {renderRegionOptions()}
+              <p className="full meta">检索方式：优先使用英文产品词；按市场轮流查询，先寻找企业与联系页面，再补充采购及行业场景。同义词用于扩展，不重复占用查询预算。</p>
               {renderSegmentOptions()}
               <Button type="submit" className="full" disabled={creatingTask}>
                 {creatingTask ? "正在创建并启动…" : "确认并开始自动搜索"}

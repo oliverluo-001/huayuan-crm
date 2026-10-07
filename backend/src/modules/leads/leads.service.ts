@@ -19,6 +19,7 @@ import {
 import { LeadSearchService, SearchCandidate } from './lead-search.service';
 import { CustomersService } from '../customers/customers.service';
 import { SuppressionService } from '../suppression/suppression.service';
+import { MARKET_REGIONS, normalizeMarket, taskMarkets, uniqueMarkets } from './lead-markets';
 
 // ─── Constants ───────────────────────────────────────────────────────────
 
@@ -142,29 +143,35 @@ export class LeadsService implements OnModuleInit {
     },
   ): string[] {
     const { regions = ['Global'], segments = ['importer'], aliases = [], industries = [] } = options;
-    const queries: string[] = [];
-    const allNames = [...new Set([productName, ...aliases].map((item) => item.trim()).filter(Boolean))];
-    const markets = regions.length ? regions : ['Global'];
+    const queries = new Set<string>();
+    const allNames = [...new Set([productName, ...aliases].map((item) => item.replace(/["\r\n]/g, ' ').trim()).filter(Boolean))];
+    const markets = uniqueMarkets(regions.length ? regions : ['Global']);
     const buyerSegments = segments.length ? segments : ['importer', 'distributor', 'stockist'];
     const exclusions = '-wikipedia -news -jobs -careers -training -pdf -youtube -facebook';
 
-    for (const name of allNames.slice(0, 5)) {
-      for (const segment of buyerSegments.slice(0, 6)) {
-        for (const region of markets.slice(0, 5)) {
+    // Rotate intent, buyer type, product alias and market, rather than filling
+    // the query budget with the first alias/first few countries.
+    const names = [...allNames.filter((name) => /[a-z]/i.test(name)), ...allNames.filter((name) => !/[a-z]/i.test(name))].slice(0, 5);
+    const intents = ['("contact us" OR enquiry OR sales)', '(procurement OR purchasing OR RFQ)'];
+    const groups: string[][] = [];
+    for (let i = 0; i < buyerSegments.length; i += 4) groups.push(buyerSegments.slice(i, i + 4));
+    for (let round = 0; round < names.length * intents.length; round++) {
+      for (const group of groups) {
+        for (const region of markets) {
           const market = region === 'Global' ? '' : ` "${region}"`;
-          queries.push(`"${name}" "${segment}"${market} (procurement OR purchasing OR RFQ) ${exclusions}`.trim());
-          queries.push(`"${name}" "${segment}"${market} ("contact us" OR enquiry OR sales) ${exclusions}`.trim());
-          queries.push(`"${name}"${market} (importer OR distributor OR stockist OR EPC) ${exclusions}`.trim());
+          const buyers = group.length === 1 ? `"${group[0]}"` : `(${group.map((segment) => `"${segment}"`).join(' OR ')})`;
+          queries.add(`"${names[round % names.length]}" ${buyers}${market} ${intents[Math.floor(round / names.length)]} ${exclusions}`);
         }
       }
     }
-    for (const industry of industries.slice(0, 6)) {
-      for (const region of markets.slice(0, 3)) {
-        const market = region === 'Global' ? '' : ` "${region}"`;
-        queries.push(`"${productName}" "${industry}" (supplier OR contractor OR distributor)${market} ${exclusions}`.trim());
-      }
+    // Reserve a separate small budget for industry-based discovery.
+    const primary = [...queries].slice(0, industries.length ? 96 : 120);
+    const expansion: string[] = [];
+    for (const industry of industries.slice(0, 6)) for (const region of markets) {
+      const market = region === 'Global' ? '' : ` "${region}"`;
+      expansion.push(`"${names[0]}" "${industry}" (${buyerSegments.map((segment) => `"${segment}"`).join(' OR ')})${market} ${exclusions}`);
     }
-    return [...new Set(queries)].slice(0, 120);
+    return [...new Set([...primary, ...expansion.slice(0, 24)])].slice(0, 120);
   }
 
   // ==================== Leads ====================
@@ -275,12 +282,21 @@ export class LeadsService implements OnModuleInit {
   }
 
   async createTask(createTaskDto: CreateLeadTaskDto, ownerId = '') {
+    const countries = uniqueMarkets(createTaskDto.targetCountries);
+    const regions = uniqueMarkets(createTaskDto.targetRegions?.length ? createTaskDto.targetRegions : [createTaskDto.targetRegion || 'Global']);
+    const marketMode = createTaskDto.marketMode || (countries.length ? 'countries' : regions.includes('Global') ? 'global' : 'regions');
+    if (marketMode === 'countries' && (!countries.length || countries.length > 20 || countries.some((country) => country === 'Global' || MARKET_REGIONS.includes(country) || !/^[a-zA-Z][a-zA-Z .'-]{1,79}$/.test(country)))) {
+      throw new BadRequestException('请填写 1–20 个国家名称；支持常用中文名及缩写，其他国家请用英文全称，不能填写大区');
+    }
+    if (marketMode === 'regions' && (!regions.length || regions.some((region) => !MARKET_REGIONS.includes(region)))) throw new BadRequestException('请至少选择一个有效大区，不要同时选择全球');
     const task = this.leadTaskRepository.create({
       ...createTaskDto,
       ownerId,
       name: createTaskDto.productName || createTaskDto.name || '获客任务',
       taskId: this.generateId('task'),
-      agentState: { targetCountries: createTaskDto.targetCountries || [] },
+      targetRegions: marketMode === 'regions' ? regions : marketMode === 'global' ? ['Global'] : [],
+      targetRegion: marketMode === 'global' ? 'Global' : '',
+      agentState: { marketMode, targetCountries: marketMode === 'countries' ? countries : [] },
       status: 'draft',
     });
     return this.leadTaskRepository.save(task);
@@ -313,7 +329,7 @@ export class LeadsService implements OnModuleInit {
     const queries = task.searchQueries?.length
       ? task.searchQueries
       : this.generateSearchQueries(task.productName || task.name, {
-          regions: task.targetRegions,
+          regions: taskMarkets(task),
           segments: task.targetSegments,
           aliases: task.productAliases,
           industries: task.buyerIndustries,
@@ -357,22 +373,29 @@ export class LeadsService implements OnModuleInit {
 
   async generateQueries(id: number, dto: GenerateQueriesDto, ownerId?: string) {
     const task = await this.findOneTask(id, ownerId);
+    if ((dto.regenerate || dto.queries?.length) && (task.status === 'running' || this.activeTaskIds.has(task.id))) throw new BadRequestException('请先停止任务，待停止完成后再调整搜索策略');
+    const resetProgress = () => {
+      task.automationCursor = 0;
+      task.automationProgress = {};
+      task.agentState = { ...task.agentState, sourceBatch: 0, catalogBatch: 0, multiSourceCrawlerMode: false, catalogCrawlerMode: false };
+    };
 
     if (dto.regenerate) {
       const queries = this.generateSearchQueries(task.productName || task.name, {
-        regions: task.targetRegions,
+        regions: taskMarkets(task),
         segments: task.targetSegments,
         aliases: task.productAliases,
         industries: task.buyerIndustries,
       });
       task.searchQueries = queries;
-      task.automationCursor = 0;
+      resetProgress();
       await this.leadTaskRepository.save(task);
       return { task, queries };
     }
 
     if (dto.queries && dto.queries.length > 0) {
       task.searchQueries = dto.queries;
+      resetProgress();
       await this.leadTaskRepository.save(task);
       return { task, queries: dto.queries };
     }
@@ -433,7 +456,7 @@ export class LeadsService implements OnModuleInit {
           productNames,
           current.targetSegments || current.buyerCompanyTypes || [],
           {
-            regions: current.targetRegions || (current.targetRegion ? [current.targetRegion] : []),
+            regions: taskMarkets(current),
             industries: current.buyerIndustries || [],
             preferMultiSourceCrawler: multiSourceCrawlerMode,
             sourceBatch,
@@ -838,8 +861,7 @@ export class LeadsService implements OnModuleInit {
       const preferredEmail = /^(sales|info|export|enquiry|inquiries|contact|procurement|purchasing|rfq|quotes)@/i.test(email);
       const hasProductEvidence = Boolean(lead.matchedProductKeyword);
       const hasBuyerEvidence = Boolean(lead.targetSegment || lead.buyerType);
-      const countries: string[] = Array.isArray(task.agentState?.targetCountries) ? task.agentState.targetCountries : [];
-      const targets = (countries.length ? countries : task.targetRegions?.length ? task.targetRegions : [task.targetRegion || 'Global']).filter((region) => region !== 'Global');
+      const targets = taskMarkets(task).filter((region) => region !== 'Global');
       const country = this.normalizeCountry(lead.country || '');
       const regionMatches = !targets.length || Boolean(country && targets.some((region) =>
         this.normalizeCountry(region) === country || region.toLowerCase() === this.largeRegionFor(country).toLowerCase()));
@@ -1083,7 +1105,7 @@ export class LeadsService implements OnModuleInit {
   }
 
   private normalizeCountry(value: string) {
-    const normalized = value.trim().toLowerCase();
+    const normalized = normalizeMarket(value).toLowerCase();
     const aliases: Record<string, string> = { usa: 'united states', us: 'united states', 'united states of america': 'united states', uk: 'united kingdom', uae: 'united arab emirates' };
     return aliases[normalized] || normalized;
   }

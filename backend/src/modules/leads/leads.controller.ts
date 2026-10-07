@@ -25,6 +25,7 @@ import {
 } from './dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { taskMarkets } from './lead-markets';
 
 interface RequestUser { sub: number; role: 'admin' | 'sales' | 'viewer' }
 const ownerScope = (user: RequestUser) => user.role === 'sales' ? String(user.sub) : undefined;
@@ -118,9 +119,7 @@ export class LeadTasksController {
       queries = createTaskDto.searchQueries;
     } else {
       queries = this.leadsService.generateSearchQueries(createTaskDto.productName || createTaskDto.name || '获客任务', {
-        regions: createTaskDto.targetCountries?.length
-          ? createTaskDto.targetCountries
-          : createTaskDto.targetRegions,
+        regions: taskMarkets(result),
         segments: createTaskDto.targetSegments,
         aliases: createTaskDto.productAliases,
         industries: createTaskDto.buyerIndustries,
