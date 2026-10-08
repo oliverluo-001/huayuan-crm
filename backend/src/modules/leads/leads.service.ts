@@ -143,35 +143,24 @@ export class LeadsService implements OnModuleInit {
     },
   ): string[] {
     const { regions = ['Global'], segments = ['importer'], aliases = [], industries = [] } = options;
-    const queries = new Set<string>();
     const allNames = [...new Set([productName, ...aliases].map((item) => item.replace(/["\r\n]/g, ' ').trim()).filter(Boolean))];
     const markets = uniqueMarkets(regions.length ? regions : ['Global']);
-    const buyerSegments = segments.length ? segments : ['importer', 'distributor', 'stockist'];
-    const exclusions = '-wikipedia -news -jobs -careers -training -pdf -youtube -facebook';
-
-    // Rotate intent, buyer type, product alias and market, rather than filling
-    // the query budget with the first alias/first few countries.
-    const names = [...allNames.filter((name) => /[a-z]/i.test(name)), ...allNames.filter((name) => !/[a-z]/i.test(name))].slice(0, 5);
-    const intents = ['("contact us" OR enquiry OR sales)', '(procurement OR purchasing OR RFQ)'];
-    const groups: string[][] = [];
-    for (let i = 0; i < buyerSegments.length; i += 4) groups.push(buyerSegments.slice(i, i + 4));
-    for (let round = 0; round < names.length * intents.length; round++) {
-      for (const group of groups) {
-        for (const region of markets) {
-          const market = region === 'Global' ? '' : ` "${region}"`;
-          const buyers = group.length === 1 ? `"${group[0]}"` : `(${group.map((segment) => `"${segment}"`).join(' OR ')})`;
-          queries.add(`"${names[round % names.length]}" ${buyers}${market} ${intents[Math.floor(round / names.length)]} ${exclusions}`);
-        }
-      }
-    }
-    // Reserve a separate small budget for industry-based discovery.
-    const primary = [...queries].slice(0, industries.length ? 96 : 120);
-    const expansion: string[] = [];
-    for (const industry of industries.slice(0, 6)) for (const region of markets) {
-      const market = region === 'Global' ? '' : ` "${region}"`;
-      expansion.push(`"${names[0]}" "${industry}" (${buyerSegments.map((segment) => `"${segment}"`).join(' OR ')})${market} ${exclusions}`);
-    }
-    return [...new Set([...primary, ...expansion.slice(0, 24)])].slice(0, 120);
+    const buyerSegments = [...new Set(segments.length ? segments : ['importer', 'distributor', 'stockist'])];
+    const buyerGroups: string[][] = [];
+    for (let i = 0; i < buyerSegments.length; i += 4) buyerGroups.push(buyerSegments.slice(i, i + 4));
+    const names = [...allNames.filter((name) => /[a-z]/i.test(name)), ...allNames.filter((name) => !/[a-z]/i.test(name))].slice(0, 3);
+    const queries: string[] = [];
+    const add = (name: string, buyerGroup: string[], market: string, extra = '') => {
+      const buyer = buyerGroup.length === 1 ? `"${buyerGroup[0]}"` : `(${buyerGroup.map((item) => `"${item}"`).join(' OR ')})`;
+      const terms = [`"${name}"`, buyer, market === 'Global' ? '' : `"${market}"`, extra, '-jobs -training -pdf'].filter(Boolean);
+      queries.push(terms.join(' '));
+    };
+    // Short, distinct searches work on both public HTML engines and paid APIs.
+    // Cover every selected market first, then expand aliases and industries.
+    for (const market of markets) for (const group of buyerGroups) add(names[0], group, market);
+    for (const name of names.slice(1)) for (const market of markets) for (const group of buyerGroups.slice(0, 2)) add(name, group, market);
+    for (const industry of industries.slice(0, 3)) for (const market of markets) add(names[0], buyerGroups[0], market, `"${industry}"`);
+    return [...new Set(queries)].slice(0, Math.max(48, Math.min(120, markets.length * buyerGroups.length)));
   }
 
   // ==================== Leads ====================
@@ -498,7 +487,10 @@ export class LeadsService implements OnModuleInit {
 
         const target = Math.max(1, current.targetCount || 100);
         const validationStep = Math.max(1, Math.ceil(target * 0.1));
-        if (prequalifiedTotal >= target && prequalifiedTotal - lastValidatedPrequalified >= validationStep) {
+        // Show verified, actionable results during the run rather than waiting
+        // for a large target that may take hours to reach.
+        const newCandidates = prequalifiedTotal - lastValidatedPrequalified;
+        if (newCandidates > 0 && (lastValidatedPrequalified === 0 || newCandidates >= Math.min(5, validationStep))) {
           const validation = await this.cleanLeads(task.id);
           lastValidatedPrequalified = prequalifiedTotal;
           verifiedTargetReached = Number(validation.summary.readyToEmail || 0) >= target;
@@ -575,7 +567,7 @@ export class LeadsService implements OnModuleInit {
     const processedQueries = Number(finalTask.automationCursor || 0);
     verifiedTargetReached ||= verifiedLeads >= target;
     const queriesExhausted = processedQueries >= totalQueries;
-    const completed = verifiedTargetReached || (leadCount > 0 && !queriesExhausted);
+    const completed = verifiedTargetReached || verifiedLeads > 0;
     await this.leadTaskRepository.update(task.id, {
       status: completed ? 'completed' : 'exhausted',
       automationStage: 'completed',

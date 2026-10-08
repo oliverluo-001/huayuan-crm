@@ -65,7 +65,7 @@ describe('LeadsService CRM conversion', () => {
       industries: ['Oil & Gas'],
     });
     expect(queries.some((query) => query.includes('"forged flanges"') && query.includes('"distributor"'))).toBe(true);
-    expect(queries.some((query) => query.includes('procurement OR purchasing OR RFQ'))).toBe(true);
+    expect(queries.every((query) => query.includes('-jobs -training -pdf'))).toBe(true);
     expect(queries.some((query) => query.includes('"Oil & Gas"'))).toBe(true);
   });
 

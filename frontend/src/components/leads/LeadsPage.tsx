@@ -182,8 +182,8 @@ export function LeadsPage() {
     }
   }, [activeTaskId]);
 
-  const fetchLeadsForTask = useCallback(async (taskId: string) => {
-    setLeadsLoading(true);
+  const fetchLeadsForTask = useCallback(async (taskId: string, silent = false) => {
+    if (!silent) setLeadsLoading(true);
     try {
       const filters: Record<string, string> = {};
       if (filterRegion) filters.largeRegion = filterRegion;
@@ -204,7 +204,7 @@ export function LeadsPage() {
     } catch {
       // handled
     } finally {
-      setLeadsLoading(false);
+      if (!silent) setLeadsLoading(false);
     }
   }, [filterRegion, filterCountry, filterSegment, filterRecommendedAction, filterConfidence]);
 
@@ -242,10 +242,11 @@ export function LeadsPage() {
             activeTaskId &&
             (
               previousActive?.status !== refreshedActive?.status ||
-              Number(previousActive?.rawLeadCount || 0) !== Number(refreshedActive?.rawLeadCount || 0)
+              Number(previousActive?.rawLeadCount || 0) !== Number(refreshedActive?.rawLeadCount || 0) ||
+              Number(previousActive?.cleanedLeadCount || 0) !== Number(refreshedActive?.cleanedLeadCount || 0)
             )
           ) {
-            fetchLeadsForTask(activeTaskId);
+            fetchLeadsForTask(activeTaskId, true);
           }
           schedulePoll();
         } catch {
@@ -669,9 +670,13 @@ export function LeadsPage() {
             {statusLabel(B2B_TASK_STATUS_LABELS, activeTask.status)}
           </span>
         </div>
-        <span>
-          {effectiveMarkets(activeTask).map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join("、")} · 合格线索目标 {activeTask.targetCount} 条 · 原始 {activeTask.rawLeadCount || 0} · 上次核验通过 {Number(progress.verifiedLeads ?? activeTask.cleanedLeadCount ?? 0)} · 重复 {activeTask.duplicateCount || 0} · 已转客户 {activeTask.importedCustomerCount || 0}
-        </span>
+        <span>{effectiveMarkets(activeTask).map((region) => optionLabel(LEAD_REGION_OPTIONS, region, region)).join("、")} · 已转客户 {activeTask.importedCustomerCount || 0}</span>
+        <div className="lead-outcome-strip" aria-live="polite">
+          <span><strong>{Number(progress.verifiedLeads ?? activeTask.cleanedLeadCount ?? 0)}</strong> 已核验可联系</span>
+          <span><strong>{activeTask.targetCount || 0}</strong> 目标</span>
+          <span><strong>{activeTask.rawLeadCount || 0}</strong> 已发现待筛查</span>
+          <span><strong>{activeTask.duplicateCount || 0}</strong> 重复</span>
+        </div>
         {(activeTask.buyerIndustries || []).length > 0 && (
           <div className="lead-task-profile">
             <span>下游行业</span>
@@ -689,14 +694,10 @@ export function LeadsPage() {
             <span>查询 {Math.min(queryIndex, queryTotal)}/{queryTotal}</span>
             <span>搜索结果 {Number(progress.searchedResults || 0)}</span>
             <span>官网访问 {Number(progress.websitesCrawled || 0)}</span>
-            <span>公开邮箱 {Number(progress.publicEmailsFound || activeTask.rawLeadCount || 0)}</span>
+            <span>公开邮箱 {Number(progress.publicEmailsFound || 0)}</span>
             <span>高匹配候选 {Number(progress.qualifiedCandidates || 0)}</span>
           </div>
-          {progress.currentQuery && (
-            <div className="lead-current-query" title={progress.currentQuery}>
-              当前：{progress.currentQuery}
-            </div>
-          )}
+          {progress.currentQuery && <details className="lead-current-query"><summary>查看当前搜索词</summary><code>{progress.currentQuery}</code></details>}
           {(progress.sourceNames || []).length > 0 && (
             <div className="lead-current-query" title={(progress.sourceNames || []).join("、")}>
               本批来源：{(progress.sourceNames || []).join("、")}
@@ -710,6 +711,10 @@ export function LeadsPage() {
             ? ` · 已跳过不可用来源：${(progress.sourceErrors || []).join("；")}`
             : ""}
         </small>
+        {activeTask.status === "running" && Number(progress.verifiedLeads ?? activeTask.cleanedLeadCount ?? 0) === 0 && (
+          <small>已发现不等于可联系。系统会分批核验官网公开邮箱、域名及目标买家身份；符合条件的结果会在任务运行中陆续出现。</small>
+        )}
+        {activeTask.status === "exhausted" && <small>本轮搜索已结束，但没有通过联系前检查的结果。可调整产品别名、买家类型或市场后重新生成策略。</small>}
       </div>
     );
   };

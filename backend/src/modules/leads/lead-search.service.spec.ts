@@ -26,6 +26,7 @@ describe('LeadSearchService', () => {
     (service as any).robotsCache.clear();
     (service as any).siteCrawlCache.clear();
     (service as any).commonCrawlIndexCache = null;
+    (service as any).lastPublicSearchAt = 0;
   });
 
   it('expands a flange product into buyer industries without AI', async () => {
@@ -73,6 +74,8 @@ describe('LeadSearchService', () => {
   });
 
   it('drops low-value training and editorial pages before crawling them', async () => {
+    jest.spyOn(service as any, 'searchMultiSourceCompanyCatalog').mockResolvedValue({ results: [], sources: [], errors: [] });
+    jest.spyOn(service as any, 'throttlePublicSearch').mockResolvedValue(undefined);
     settings.getSearchProfiles.mockResolvedValue([{ id: 'serper-1', name: 'Serper', apiKeySet: true }]);
     settings.getSearchProfileCredentials.mockResolvedValue({
       id: 'serper-1', provider: 'serper', apiUrl: 'https://google.serper.dev/search', apiKey: 'test-key',
@@ -115,6 +118,23 @@ describe('LeadSearchService', () => {
       sourceName: 'DuckDuckGo 公开搜索 + 企业官网',
     });
     expect(fetchMock.mock.calls[0][0]).toContain('html.duckduckgo.com/html/');
+  });
+
+  it('switches to company catalogs when search returns no relevant companies', async () => {
+    jest.spyOn(service as any, 'search').mockResolvedValue([{
+      title: 'Flange training course', url: 'https://training.example/course', snippet: 'flange distributor training',
+    }]);
+    jest.spyOn(service as any, 'searchMultiSourceCompanyCatalog').mockResolvedValue({
+      results: [{ title: 'Acme Distribution', url: 'https://acme.example/', snippet: 'flange distributor', sourceKey: 'industry-directory' }],
+      sources: ['公开行业目录'], errors: [],
+    });
+    jest.spyOn(service as any, 'enrich').mockResolvedValue([{ fitScore: 90, email: 'sales@acme.example' }]);
+
+    const result = await service.discover('flange distributor', ['flange'], ['distributor']);
+
+    expect(result.mode).toBe('multi-source-crawler');
+    expect(result.candidates).toHaveLength(1);
+    expect(result.searched).toBe(1);
   });
 
   it('switches to DuckDuckGo Lite when the HTML endpoint is rate limited', async () => {
@@ -216,6 +236,20 @@ describe('LeadSearchService', () => {
       'Wikidata 公开企业目录', 'Curlie 公开行业目录', 'Common Crawl 企业域名索引',
     ]);
     expect(catalog.errors).toEqual(['公开展商目录: HTTP 403']);
+  });
+
+  it('does not delay a full first batch on the Common Crawl index', async () => {
+    jest.spyOn(service as any, 'searchWikidataCatalog').mockResolvedValue(Array.from({ length: 12 }, (_, index) => ({
+      title: `Company ${index}`, url: `https://company-${index}.example`, snippet: 'flange distributor',
+    })));
+    jest.spyOn(service as any, 'searchIndustryDirectories').mockResolvedValue([]);
+    jest.spyOn(service as any, 'searchExhibitorDirectories').mockResolvedValue([]);
+    const archive = jest.spyOn(service as any, 'searchCommonCrawlDomains');
+
+    const catalog = await (service as any).searchMultiSourceCompanyCatalog(['Global'], [], ['flange'], ['distributor']);
+
+    expect(catalog.results).toHaveLength(12);
+    expect(archive).not.toHaveBeenCalled();
   });
 
   it('extracts company websites from a public industry directory and ignores navigation or social links', () => {
