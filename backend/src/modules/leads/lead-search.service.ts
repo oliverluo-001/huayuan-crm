@@ -290,6 +290,7 @@ export class LeadSearchService {
     let sourceExhausted = false;
     let sources: string[] = [];
     let sourceErrors: string[] = [];
+    let searched = 0;
 
     const preferMultiSource = Boolean(options.preferMultiSourceCrawler || options.preferCatalogCrawler);
     if (!preferMultiSource) {
@@ -303,6 +304,14 @@ export class LeadSearchService {
       mode = 'multi-source-crawler';
     }
 
+    // A successful HTTP response with no usable company is still a failed
+    // discovery attempt; otherwise the task burns through many empty queries.
+    if (mode === 'web-search') {
+      searched = results.length;
+      results = this.dedupeSearchResults(results).filter((result) => this.isRelevantResult(result, productNames, segments));
+      if (!results.length) mode = 'multi-source-crawler';
+    }
+
     if (mode === 'multi-source-crawler') {
       const catalog = await this.searchMultiSourceCompanyCatalog(
         options.regions || [],
@@ -313,6 +322,7 @@ export class LeadSearchService {
       const batch = Math.max(0, Number(options.sourceBatch ?? options.catalogBatch ?? 0));
       const offset = batch * DISCOVERY_BATCH_SIZE;
       results = catalog.results.slice(offset, offset + DISCOVERY_BATCH_SIZE);
+      searched = results.length;
       sources = catalog.sources;
       sourceErrors = catalog.errors;
       sourceExhausted = offset + DISCOVERY_BATCH_SIZE >= catalog.results.length;
@@ -329,7 +339,7 @@ export class LeadSearchService {
       .filter((candidate) => candidate.fitScore >= 45);
     return {
       candidates,
-      searched: results.length,
+      searched,
       crawled: relevant.length,
       mode,
       sourceExhausted,
@@ -372,7 +382,7 @@ export class LeadSearchService {
     url.searchParams.set('format', 'json');
     url.searchParams.set('query', query);
     const response = await fetch(url.toString(), {
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(20_000),
       headers: {
         Accept: 'application/sparql-results+json',
         'User-Agent': 'HuayuanCRM/1.0 (public company discovery; https://crm.huayuanflange.com)',
@@ -430,7 +440,13 @@ export class LeadSearchService {
         load: () => this.searchCommonCrawlDomains(productNames, industries, segments),
       },
     ];
-    const settled = await Promise.allSettled(providers.map((provider) => provider.load()));
+    // Common Crawl is an expensive secondary index. Do not hold up the first
+    // usable batch when live directories already supply enough companies.
+    const primary = await Promise.allSettled(providers.slice(0, 3).map((provider) => provider.load()));
+    const primaryCount = primary.reduce((count, outcome) => count + (outcome.status === 'fulfilled' ? outcome.value.length : 0), 0);
+    const settled = primaryCount >= DISCOVERY_BATCH_SIZE
+      ? primary
+      : [...primary, ...(await Promise.allSettled([providers[3].load()]))];
     const groups: SearchResult[][] = [];
     const sources: string[] = [];
     const errors: string[] = [];
@@ -670,7 +686,7 @@ export class LeadSearchService {
     url.searchParams.set('collapse', 'urlkey');
     url.searchParams.set('limit', '30');
     const response = await fetch(url.toString(), {
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(10_000),
       headers: {
         Accept: 'application/x-ndjson,text/plain',
         'User-Agent': 'HuayuanCRM/1.0 (bounded public company domain discovery; https://crm.huayuanflange.com)',
@@ -789,7 +805,7 @@ export class LeadSearchService {
 
   private publicSearchRequestOptions(): RequestInit {
     return {
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(10_000),
       redirect: 'follow',
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; HuayuanCRM/1.0; +https://crm.huayuanflange.com)',

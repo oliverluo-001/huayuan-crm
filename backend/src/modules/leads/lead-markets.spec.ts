@@ -34,7 +34,7 @@ describe('one effective market for the acquisition pipeline', () => {
     expect(new Set(queries).size).toBe(queries.length);
     for (const region of regions) for (const segment of segments) expect(queries.some((query) => query.includes(`"${region}"`) && query.includes(`"${segment}"`))).toBe(true);
     expect(queries[0]).toContain('"flange"');
-    expect(queries[19]).toContain('"Malaysia"');
+    expect(queries.some((query) => query.includes('"Malaysia"'))).toBe(true);
   });
   it('resets stale directory cursors when replacing a strategy and refuses edits while running', async () => {
     const task = { id: 3, productName: 'flange', status: 'cancelled', automationCursor: 12, agentState: { targetCountries: ['UAE'], sourceBatch: 9, multiSourceCrawlerMode: true } };

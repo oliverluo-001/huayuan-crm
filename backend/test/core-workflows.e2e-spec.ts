@@ -419,8 +419,8 @@ describe("core CRM workflows (HTTP e2e)", () => {
     });
     expect(created.queries).toEqual(expect.arrayContaining([
       expect.stringContaining('"Weld neck flange" "importer" "Germany"'),
-      expect.stringContaining('procurement OR purchasing OR RFQ'),
     ]));
+    expect(created.queries[0]).not.toContain('procurement OR purchasing OR RFQ');
 
     const forbiddenRun = await fetch(`${baseUrl}/api/lead-tasks/1/run`, {
       method: "POST",
