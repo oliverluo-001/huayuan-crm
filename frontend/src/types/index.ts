@@ -774,6 +774,7 @@ export interface LeadAssociation {
   aliases: string[];
   industries: string[];
   companyTypes: string[];
+  recommendedSegments?: string[];
   source?: string;
   warning?: string;
 }

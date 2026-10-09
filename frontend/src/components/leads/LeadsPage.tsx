@@ -140,6 +140,7 @@ export function LeadsPage() {
   const [leadsLoading, setLeadsLoading] = useState(false);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [creatingTask, setCreatingTask] = useState(false);
+  const [createTaskError, setCreateTaskError] = useState("");
 
   // Filters
   const [filterRegion, setFilterRegion] = useState("");
@@ -317,6 +318,10 @@ export function LeadsPage() {
       return;
     }
     setAssociation(associationDraft);
+    setSelectedSegments((previous) => previous.length ? previous :
+      (associationDraft.recommendedSegments || []).filter((segment) =>
+        LEAD_BUYER_TYPE_OPTIONS.some((option) => option.value === segment)));
+    setCreateTaskError("");
     setCurrentStage(2);
   };
 
@@ -343,22 +348,29 @@ export function LeadsPage() {
   };
 
   const handleCreateTask = async () => {
+    if (creatingTask) return;
+    setCreateTaskError("");
     if (!associationDraft) {
-      toast.error("请先完成产品联想并确认买家画像");
+      setCreateTaskError("请先完成产品联想并确认买家画像");
       return;
     }
     if (!selectedSegments.length) {
-      toast.error("请至少选择一种买家类型");
+      setCreateTaskError("请至少选择一种买家类型");
       return;
     }
     const market = marketPayload(marketMode, selectedRegions, targetCountries);
-    if (marketMode === 'countries' && !market.targetCountries.length) { toast.error('请填写至少一个目标国家'); return; }
-    if (marketMode === 'regions' && !market.targetRegions.length) { toast.error('请至少选择一个目标大区'); return; }
+    if (marketMode === 'countries' && !market.targetCountries.length) { setCreateTaskError('请填写至少一个目标国家'); return; }
+    if (marketMode === 'regions' && !market.targetRegions.length) { setCreateTaskError('请至少选择一个目标大区'); return; }
+    const requestedCount = Number(targetCount);
+    if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > 500) {
+      setCreateTaskError('合格邮件线索目标应为 1–500 条');
+      return;
+    }
     setCreatingTask(true);
     try {
       const body: Record<string, any> = {
         productName: associationDraft.productName,
-        targetCount: parseInt(targetCount) || 100,
+        targetCount: requestedCount,
         searchLanguage: 'en',
         ...market,
         targetSegments: selectedSegments,
@@ -370,13 +382,18 @@ export function LeadsPage() {
       const result = await createB2BLeadTask(body);
       const taskId = result.task.id;
       setActiveTaskId(taskId);
-      await runB2BLeadTask(taskId);
       setSelectedLeadIds(new Set());
       setCurrentStage(3);
-      toast(`已确认买家画像并生成 ${(result.queries || []).length} 条搜索策略，任务已启动。`);
       await fetchTasks();
-    } catch {
-      // handled
+      try {
+        await runB2BLeadTask(taskId);
+        toast.success(`任务已创建并启动，已生成 ${(result.queries || []).length} 条搜索策略`);
+      } catch (error) {
+        setCreateTaskError(`任务已创建，但搜索未启动：${error instanceof Error ? error.message : '请在下方任务列表点击“开始自动搜索”重试'}`);
+      }
+      await fetchTasks();
+    } catch (error) {
+      setCreateTaskError(`创建任务失败：${error instanceof Error ? error.message : '请稍后重试'}`);
     } finally {
       setCreatingTask(false);
     }
@@ -1042,7 +1059,8 @@ export function LeadsPage() {
               </div>
               <p className="full meta">检索方式：优先使用英文产品词；按市场轮流查询，先寻找企业与联系页面，再补充采购及行业场景。同义词用于扩展，不重复占用查询预算。</p>
               {renderSegmentOptions()}
-              <Button type="submit" className="full" disabled={creatingTask}>
+              {createTaskError && <p className="lead-create-error full" role="alert">{createTaskError}</p>}
+              <Button type="button" className="full" disabled={creatingTask} onClick={handleCreateTask}>
                 {creatingTask ? "正在创建并启动…" : "确认并开始自动搜索"}
               </Button>
             </form>

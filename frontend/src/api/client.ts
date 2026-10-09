@@ -923,13 +923,14 @@ export async function deleteSendLog(id: string): Promise<void> {
 // B2B Lead Tasks API
 export async function getB2BLeadTasks(): Promise<B2BLeadTask[]> {
   const result = await api<{ tasks: B2BLeadTask[] }>("/api/lead-tasks");
-  return result.tasks || [];
+  return (result.tasks || []).map((task) => ({ ...task, id: String(task.id) }));
 }
 
 export async function createB2BLeadTask(
   data: Partial<B2BLeadTask>,
 ): Promise<{ task: B2BLeadTask; queries?: string[] }> {
-  return api("/api/lead-tasks", { method: "POST", body: data });
+  const result = await api<{ task: B2BLeadTask; queries?: string[] }>("/api/lead-tasks", { method: "POST", body: data });
+  return { ...result, task: { ...result.task, id: String(result.task.id) } };
 }
 
 export async function getB2BLeads(
