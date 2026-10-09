@@ -95,6 +95,29 @@ describe('CustomersService imports', () => {
     );
   });
 
+  it('previews fuzzy column mapping and canonicalizes recognized country aliases', async () => {
+    customerRepository.find.mockResolvedValue([]);
+    const file = upload([{ 'Compny Name': 'Example Industries', 'E-mail Address': 'sales@example.org', 'Country / Region': 'U.S.A.', 'Time Zone': 'America/New_York', Extra: 'keep separate' }]);
+    const preview = await service.parseAndPreview(file);
+    expect(preview.columnMappings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ column: 'Compny Name', field: 'company' }),
+      expect.objectContaining({ column: 'Country / Region', field: 'country' }),
+    ]));
+    expect(preview.unmappedColumns).toContain('Extra');
+    await service.parseAndImport(file);
+    expect(customerRepository.create).toHaveBeenCalledWith(expect.objectContaining({
+      company: 'Example Industries', country: 'United States', timezone: 'America/New_York',
+    }));
+  });
+
+  it('skips email-only rows instead of creating customers with blank company names', async () => {
+    customerRepository.find.mockResolvedValue([]);
+    const file = upload([{ Company: '', Email: 'person@example.org' }]);
+    expect((await service.parseAndPreview(file)).missingCompanyCount).toBe(1);
+    expect((await service.parseAndImport(file)).skipped).toBe(1);
+    expect(customerRepository.create).not.toHaveBeenCalled();
+  });
+
   it('fills blank imported profile data without silently overwriting existing business fields', async () => {
     const existing = {
       id: 1,

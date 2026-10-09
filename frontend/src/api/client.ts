@@ -297,6 +297,15 @@ export async function getDashboard(): Promise<DashboardSnapshot> {
 }
 
 // Customers API
+export interface CustomerMarket {
+  name: string;
+  countries: Array<{ name: string; label: string; aliases: string[]; timezone: string }>;
+}
+
+export async function getCustomerGeography(): Promise<CustomerMarket[]> {
+  return api<CustomerMarket[]>("/api/customers/geography");
+}
+
 export async function getCustomers(
   offset: number,
   limit: number,
@@ -1155,6 +1164,9 @@ export async function previewImport(file: File): Promise<{
   duplicateCount: number;
   duplicateUploadCount: number;
   blockedCount: number;
+  columnMappings: Array<{ column: string; field: string; fieldLabel: string }>;
+  unmappedColumns: string[];
+  missingCompanyCount: number;
 }> {
   const formData = new FormData();
   formData.append("file", file);

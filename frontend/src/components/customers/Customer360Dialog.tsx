@@ -2679,10 +2679,14 @@ function OverviewWorkspace({
           <Summary label="邮箱" value={data.customer.email} />
           <Summary label="电话" value={data.customer.phone} />
           <Summary
-            label="地区"
-            value={[data.customer.region, data.customer.country]
+            label="国家 / 城市 / 州"
+            value={[data.customer.country, data.customer.region]
               .filter(Boolean)
               .join(" · ")}
+          />
+          <Summary
+            label="客户时区"
+            value={data.customer.timezone || "未单独确认；单时区国家按国家推断，多时区国家需手动设置"}
           />
           <Summary
             label="客户分层"

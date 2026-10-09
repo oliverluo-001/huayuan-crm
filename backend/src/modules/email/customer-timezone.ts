@@ -1,3 +1,5 @@
+import { findCustomerCountry } from '../customers/customer-geography';
+
 const LOCATION_TIMEZONES: Array<{ timezone: string; locations: string[] }> = [
   { timezone: "Asia/Bangkok", locations: ["bangkok", "thailand", "泰国", "曼谷"] },
   { timezone: "Asia/Jakarta", locations: ["jakarta", "indonesia", "印度尼西亚", "印尼", "雅加达"] },
@@ -47,13 +49,10 @@ export function resolveCustomerTimezone(
   const explicit = String(timezone || "").trim();
   if (isValidIanaTimezone(explicit)) return explicit;
 
-  const location = [explicit, region, country]
-    .map((value) => String(value || "").trim().toLowerCase())
-    .filter(Boolean)
-    .join(" ");
-  if (!location) return "";
-
-  return LOCATION_TIMEZONES.find(({ locations }) =>
-    locations.some((candidate) => location.includes(candidate)),
-  )?.timezone || "";
+  const city = String(region || '').trim().toLocaleLowerCase();
+  const cityMatch = LOCATION_TIMEZONES.find(({ locations }) =>
+    locations.some((candidate) => candidate === city),
+  );
+  if (cityMatch) return cityMatch.timezone;
+  return findCustomerCountry(country)?.timezone || '';
 }

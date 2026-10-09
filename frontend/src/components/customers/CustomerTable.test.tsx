@@ -10,6 +10,7 @@ vi.mock("@/components/customers/Customer360Dialog", () => ({ Customer360Dialog: 
 vi.mock("@/components/customers/CustomerDuplicatesDialog", () => ({ CustomerDuplicatesDialog: () => null }));
 vi.mock("@/api/client", async (original) => ({
   ...await original<object>(), getCustomers: mocks.customers, getCustomerIds: mocks.ids,
+  getCustomerGeography: async () => [{ name: "东南亚", countries: [{ name: "Thailand", label: "泰国", aliases: ["泰国"], timezone: "Asia/Bangkok" }] }],
   getCustomerTags: async () => [], getCustomerViews: async () => [], getUserDirectory: async () => [],
 }));
 let host: HTMLDivElement;
@@ -67,4 +68,10 @@ it("shows load failures instead of silently presenting stale customers", async (
   await input("new"); await button("应用筛选");
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("connection unavailable");
   expect(host.textContent).not.toContain("Initial buyer");
+});
+
+it("shows a customer's country and local time without requiring an explicit timezone for a single-zone country", async () => {
+  mocks.customers.mockResolvedValueOnce({ customers: [{ ...result("Thai buyer").customers[0], country: "Thailand" }], total: 1 });
+  await input("Thai buyer"); await button("应用筛选");
+  expect(host.textContent).toContain("Thailand · 当地");
 });

@@ -44,6 +44,7 @@ import {
   getCustomerTags,
   importCustomers,
   previewImport,
+  getCustomerGeography,
   getUserDirectory,
   getCustomerViews,
   createCustomerView,
@@ -51,6 +52,7 @@ import {
   type Customer,
   type CustomerView,
   type UserDirectoryEntry,
+  type CustomerMarket,
 } from "@/api/client";
 import { Customer360Dialog } from "@/components/customers/Customer360Dialog";
 import { CustomerMasterDataFields } from "@/components/customers/CustomerMasterDataFields";
@@ -82,11 +84,22 @@ const COMMON_TIMEZONES = [
   "America/Chicago",
   "America/Los_Angeles",
 ];
+function formatCustomerLocalTime(timezone: string) {
+  try {
+    return new Intl.DateTimeFormat("zh-CN", {
+      timeZone: timezone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).format(new Date());
+  } catch {
+    return "时区无效";
+  }
+}
 const emptyCustomerFilters = () => ({
   q: "",
   tag: "",
   tier: "",
   journeyStage: "",
+  marketRegion: "",
+  country: "",
   region: "",
   emailStatus: "",
   health: "",
@@ -107,6 +120,10 @@ export function CustomerTable(_props: CustomerTableProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [tags, setTags] = useState<string[]>([]);
   const [userDirectory, setUserDirectory] = useState<UserDirectoryEntry[]>([]);
+  const [markets, setMarkets] = useState<CustomerMarket[]>([]);
+  useEffect(() => { void getCustomerGeography().then(setMarkets).catch(() => toast.error("国家分区加载失败，请刷新页面")); }, []);
+  const customerTimezone = (customer: Customer) => customer.timezone || markets.flatMap((market) => market.countries)
+    .find((country) => [country.name, country.label, ...country.aliases].some((alias) => alias.toLowerCase() === (customer.country || "").trim().toLowerCase()))?.timezone || "";
 
   // Filters
   const [filters, setFilters] = useState(emptyCustomerFilters);
@@ -154,6 +171,10 @@ export function CustomerTable(_props: CustomerTableProps) {
     setIsImporting(true);
     try {
       const preview = await previewImport(file);
+      const columnDetails = preview.columnMappings.map((item) => `${item.column} → ${item.fieldLabel}`).join("、");
+      const warningDetails = preview.unmappedColumns.length ? `\n未识别列：${preview.unmappedColumns.join("、")}` : "";
+      const confirmedMapping = window.confirm(`导入前请确认字段：${columnDetails || "未识别任何字段"}${warningDetails}\n${preview.missingCompanyCount ? `有 ${preview.missingCompanyCount} 行缺少公司名，将跳过。\n` : ""}是否继续导入？`);
+      if (!confirmedMapping) return;
       const duplicateCount = preview.duplicateCount + preview.duplicateUploadCount;
       if (duplicateCount > 0) {
         const confirmed = window.confirm(
@@ -355,8 +376,9 @@ export function CustomerTable(_props: CustomerTableProps) {
         <p>{customer.phone || "-"}</p>
       </div>
       <div>
-        <p className="text-muted-foreground">地区</p>
-        <p>{customer.region || "-"}</p>
+        <p className="text-muted-foreground">国家 / 地区 · 当地时间</p>
+        <p>{[customer.country, customer.region].filter(Boolean).join(" · ") || "-"}</p>
+        <p className="text-xs text-muted-foreground">{customerTimezone(customer) ? `${formatCustomerLocalTime(customerTimezone(customer))} · ${customerTimezone(customer)}` : "时区待确认，暂不按当地时间发送"}</p>
       </div>
       <div>
         <p className="text-muted-foreground">联系人</p>
@@ -501,13 +523,23 @@ export function CustomerTable(_props: CustomerTableProps) {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-2 min-w-32">
+                <Label>市场大区</Label>
+                <Select value={filters.marketRegion || "__all__"} onValueChange={(value) => setFilters({ ...filters, marketRegion: value === "__all__" ? "" : value || "", country: "" })}>
+                  <SelectTrigger><SelectValue placeholder="全部大区" /></SelectTrigger>
+                  <SelectContent><SelectItem value="__all__">全部大区</SelectItem>{markets.map((market) => <SelectItem key={market.name} value={market.name}>{market.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2 min-w-40">
+                <Label>国家 / 地区</Label>
+                <Select value={filters.country || "__all__"} onValueChange={(value) => setFilters({ ...filters, country: value === "__all__" ? "" : value || "" })}>
+                  <SelectTrigger><SelectValue placeholder="全部国家" /></SelectTrigger>
+                  <SelectContent><SelectItem value="__all__">全部国家</SelectItem>{(markets.find((market) => market.name === filters.marketRegion)?.countries || markets.flatMap((market) => market.countries)).map((country) => <SelectItem key={country.name} value={country.name}>{country.label} · {country.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
               <div className="space-y-2">
-                <Label>地区</Label>
-                <Input
-                  placeholder="如：United States"
-                  value={filters.region}
-                  onChange={(e) => setFilters({ ...filters, region: e.target.value })}
-                />
+                <Label>城市 / 州</Label>
+                <Input placeholder="例如：Bangkok" value={filters.region} onChange={(e) => setFilters({ ...filters, region: e.target.value })} />
               </div>
               <div className="space-y-2">
                 <Label>邮箱状态</Label>
@@ -797,6 +829,7 @@ export function CustomerTable(_props: CustomerTableProps) {
                         {customer.business || "未填写主营业务"}
                       </p>
                       <p className="text-xs text-muted-foreground">{customer.email || "未填写邮箱"}</p>
+                      <p className="text-xs text-muted-foreground">{customer.country || "国家待确认"}{customerTimezone(customer) ? ` · 当地 ${formatCustomerLocalTime(customerTimezone(customer))}` : " · 时区待确认"}</p>
                       {role === "admin" && (
                         <p className="text-xs text-muted-foreground">
                           负责人：{userDirectory.find((user) => user.id === String(customer.ownerId))?.displayName || "未分配"}
@@ -949,6 +982,7 @@ export function CustomerTable(_props: CustomerTableProps) {
       {/* Create Dialog */}
       {canManage && <CustomerCreateDialog
         open={createOpen}
+        markets={markets}
         users={userDirectory}
         canAssignOwner={role === "admin"}
         onOpenChange={setCreateOpen}
@@ -962,6 +996,7 @@ export function CustomerTable(_props: CustomerTableProps) {
       {canManage && editCustomer && (
         <CustomerEditDialog
           customer={editCustomer}
+          markets={markets}
           users={userDirectory}
           canAssignOwner={role === "admin"}
           open={!!editCustomer}
@@ -988,12 +1023,14 @@ export function CustomerTable(_props: CustomerTableProps) {
 // Customer Create Dialog
 function CustomerCreateDialog({
   open,
+  markets,
   users,
   canAssignOwner,
   onOpenChange,
   onSuccess,
 }: {
   open: boolean;
+  markets: CustomerMarket[];
   users: UserDirectoryEntry[];
   canAssignOwner: boolean;
   onOpenChange: (open: boolean) => void;
@@ -1097,7 +1134,7 @@ function CustomerCreateDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label>地区</Label>
+              <Label>城市 / 州</Label>
               <Input
                 value={form.region}
                 onChange={(e) => setForm({ ...form, region: e.target.value })}
@@ -1119,6 +1156,8 @@ function CustomerCreateDialog({
             </div>
             <CustomerMasterDataFields
               form={form}
+              markets={markets}
+              onCountrySelected={(country, timezone) => setForm((current) => ({ ...current, country, timezone }))}
               users={users}
               canAssignOwner={canAssignOwner}
               onChange={(field, value) =>
@@ -1166,6 +1205,7 @@ function CustomerCreateDialog({
 // Customer Edit Dialog
 function CustomerEditDialog({
   customer,
+  markets,
   open,
   users,
   canAssignOwner,
@@ -1173,6 +1213,7 @@ function CustomerEditDialog({
   onSuccess,
 }: {
   customer: Customer;
+  markets: CustomerMarket[];
   open: boolean;
   users: UserDirectoryEntry[];
   canAssignOwner: boolean;
@@ -1274,7 +1315,7 @@ function CustomerEditDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label>地区</Label>
+              <Label>城市 / 州</Label>
               <Input
                 value={form.region}
                 onChange={(e) => setForm({ ...form, region: e.target.value })}
@@ -1299,6 +1340,8 @@ function CustomerEditDialog({
             </div>
             <CustomerMasterDataFields
               form={form as CustomerMasterForm}
+              markets={markets}
+              onCountrySelected={(country, timezone) => setForm((current) => ({ ...current, country, timezone }))}
               users={users}
               canAssignOwner={canAssignOwner}
               onChange={(field, value) =>

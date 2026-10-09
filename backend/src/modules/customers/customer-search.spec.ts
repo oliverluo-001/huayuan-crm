@@ -24,6 +24,11 @@ describe('authorized customer picker search', () => {
     expect(qb.andWhere).toHaveBeenCalledWith('customer.region LIKE :region', { region: '%Thailand%' });
     expect(qb.andWhere).toHaveBeenCalledWith('customer.health IN (:...followupHealth)', { followupHealth: ['warning', 'critical'] });
     expect(qb.innerJoin).toHaveBeenCalledWith('customer.tags', 'filterTag', 'filterTag.name = :tagName', { tagName: 'buyer' });
+    qb.andWhere.mockClear();
+    await service.findAll({ marketRegion: '东南亚', country: '泰国', region: 'Bangkok' });
+    expect(qb.andWhere).toHaveBeenCalledWith(expect.stringContaining('customer.country IN (:...marketCountries)'), expect.objectContaining({ marketCountries: expect.arrayContaining(['Thailand', 'Vietnam']) }));
+    expect(qb.andWhere).toHaveBeenCalledWith(expect.stringContaining('customer.country IN (:...countries)'), expect.objectContaining({ countries: expect.arrayContaining(['Thailand', '泰国']) }));
+    expect(qb.andWhere).toHaveBeenCalledWith('customer.region LIKE :region', { region: '%Bangkok%' });
     qb.andWhere.mockClear(); qb.innerJoin.mockClear();
     await service.findAll({ tag: '(all)', journeyStage: 'new' });
     expect(qb.innerJoin).not.toHaveBeenCalled();
