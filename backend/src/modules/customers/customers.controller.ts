@@ -45,6 +45,7 @@ import {
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { QuoteOutputTemplatesService } from './quote-output-templates.service';
+import { CUSTOMER_MARKETS } from './customer-geography';
 
 interface RequestUser {
   sub: number;
@@ -62,6 +63,11 @@ const opportunityActor = (user: RequestUser) => ({
 @Controller('customers')
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
+
+  @Get('geography')
+  geography() {
+    return CUSTOMER_MARKETS;
+  }
 
   // ==================== Customer CRUD ====================
 

@@ -1,4 +1,6 @@
 import type { UserDirectoryEntry } from "@/api/client";
+import type { CustomerMarket } from "@/api/client";
+import { useState } from "react";
 import {
   CURRENCY_OPTIONS,
   CUSTOMER_SOURCE_OPTIONS,
@@ -21,16 +23,28 @@ export function CustomerMasterDataFields({
   form,
   users,
   canAssignOwner,
+  markets,
+  onCountrySelected,
   onChange,
 }: {
   form: CustomerMasterForm;
   users: UserDirectoryEntry[];
   canAssignOwner: boolean;
+  markets: CustomerMarket[];
+  onCountrySelected?: (country: string, timezone: string) => void;
   onChange: (field: keyof CustomerMasterForm, value: string | string[]) => void;
 }) {
+  const [manualMarket, setManualMarket] = useState("");
   const collaborators = users.filter(
     (user) => user.role !== "viewer" && user.id !== form.ownerId,
   );
+  const selectedMarket = markets.find((market) => market.countries.some((country) =>
+    [country.name, country.label, ...country.aliases].some((alias) => alias.toLowerCase() === form.country.trim().toLowerCase()),
+  ));
+  const selectedCountry = selectedMarket?.countries.find((country) =>
+    [country.name, country.label, ...country.aliases].some((alias) => alias.toLowerCase() === form.country.trim().toLowerCase()),
+  );
+  const activeMarket = selectedMarket?.name || manualMarket;
 
   const toggleCollaborator = (id: string, checked: boolean) => {
     if (!canAssignOwner) return;
@@ -43,8 +57,37 @@ export function CustomerMasterDataFields({
   return (
     <>
       <div className="space-y-2">
+        <Label>市场大区</Label>
+        <Select value={activeMarket || "__none__"} onValueChange={(value) => {
+          setManualMarket(value === "__none__" ? "" : value || "");
+          if (onCountrySelected) onCountrySelected("", ""); else onChange("country", "");
+        }}>
+          <SelectTrigger><SelectValue placeholder="选择市场大区" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">未分类</SelectItem>
+            {markets.map((market) => <SelectItem key={market.name} value={market.name}>{market.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">大区根据国家自动归类，先选大区再选国家。</p>
+      </div>
+      <div className="space-y-2">
         <Label>国家 / 地区</Label>
-        <Input value={form.country} onChange={(event) => onChange("country", event.target.value)} />
+        <Select value={selectedCountry?.name || "__other__"} onValueChange={(value) => {
+          const country = markets.flatMap((market) => market.countries).find((item) => item.name === value);
+          if (onCountrySelected) onCountrySelected(country?.name || "", country?.timezone || "");
+          else onChange("country", country?.name || "");
+        }}>
+          <SelectTrigger><SelectValue placeholder="选择国家 / 地区" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__other__">其他 / 手动填写</SelectItem>
+            {(markets.find((market) => market.name === activeMarket)?.countries || markets.flatMap((market) => market.countries)).map((country) =>
+              <SelectItem key={country.name} value={country.name}>{country.label} · {country.name}</SelectItem>)
+            }
+          </SelectContent>
+        </Select>
+        {!selectedCountry && <Input placeholder="未收录的国家 / 地区可直接填写" value={form.country} onChange={(event) => {
+          if (onCountrySelected) onCountrySelected(event.target.value, ""); else onChange("country", event.target.value);
+        }} />}
       </div>
       <div className="space-y-2">
         <Label>公司类型</Label>

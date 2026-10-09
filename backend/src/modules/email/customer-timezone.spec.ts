@@ -21,6 +21,9 @@ describe("customer timezone resolution", () => {
   it("does not guess an unknown or multi-zone location", () => {
     expect(resolveCustomerTimezone("", "California", "United States"))
       .toBe("");
+    expect(resolveCustomerTimezone("", "", "Indonesia")).toBe("");
+    expect(resolveCustomerTimezone("", "", "U.S.A.")).toBe("");
+    expect(resolveCustomerTimezone("", "Indianapolis", "Germany")).toBe("Europe/Berlin");
     expect(isValidIanaTimezone("Bangkok")).toBe(false);
   });
 });

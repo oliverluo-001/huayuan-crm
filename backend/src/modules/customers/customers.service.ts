@@ -45,6 +45,8 @@ import {
 import { EmailLog } from "../email/entities/email-log.entity";
 import { User } from "../auth/entities/user.entity";
 import { normalizeQuoteOutputLayout } from "./quote-output-layout";
+import { CUSTOMER_MARKETS, findCustomerCountry } from "./customer-geography";
+import { mapCustomerImportColumns } from "./customer-import-columns";
 
 export interface OpportunityActor {
   userId: string;
@@ -171,6 +173,18 @@ export class CustomersService {
         : '1 = 1', { q: `%${q}%`, customerNumber: q })
       .orderBy('customer.createdAt', 'DESC').addOrderBy('customer.id', 'DESC');
     if (queryFilters.ownerId) this.applyCustomerAccess(qb, queryFilters.ownerId);
+    if (queryFilters.marketRegion) {
+      const market = CUSTOMER_MARKETS.find((item) => item.name === queryFilters.marketRegion);
+      if (market) {
+        const names = market.countries.flatMap((country) => [country.name, country.label, ...country.aliases]);
+        qb.andWhere('(customer.country IN (:...marketCountries) OR (COALESCE(customer.country, \'\') = \'\' AND customer.region IN (:...marketCountries)))', { marketCountries: [...new Set(names)] });
+      } else qb.andWhere('1 = 0');
+    }
+    if (queryFilters.country) {
+      const found = findCustomerCountry(queryFilters.country);
+      const names = found ? [found.name, found.label, ...found.aliases] : [String(queryFilters.country).trim()];
+      qb.andWhere('(customer.country IN (:...countries) OR (COALESCE(customer.country, \'\') = \'\' AND customer.region IN (:...countries)))', { countries: [...new Set(names)] });
+    }
     if (queryFilters.region) qb.andWhere('customer.region LIKE :region', { region: `%${queryFilters.region}%` });
     for (const field of ['tier', 'journeyStage', 'emailStatus']) {
       if (queryFilters[field]) qb.andWhere(`customer.${field} = :${field}`, { [field]: queryFilters[field] });
@@ -331,6 +345,7 @@ export class CustomersService {
     }
 
     const { tags, ...rest } = createCustomerDto;
+    if (rest.country) rest.country = findCustomerCountry(rest.country)?.name || rest.country.trim();
     rest.collaboratorIds = this.normalizeCollaboratorIds(
       rest.collaboratorIds,
       rest.ownerId,
@@ -352,6 +367,7 @@ export class CustomersService {
     if (this.dataSource) return this.withActionTransaction((service) => service.update(id, updateCustomerDto));
     const customer = await this.findOne(id);
     const { tags, ...rest } = updateCustomerDto;
+    if (rest.country) rest.country = findCustomerCountry(rest.country)?.name || rest.country.trim();
     if (rest.collaboratorIds !== undefined) {
       rest.collaboratorIds = this.normalizeCollaboratorIds(
         rest.collaboratorIds,
@@ -1961,8 +1977,9 @@ export class CustomersService {
 
   async parseAndPreview(file: UploadedFile, ownerId = "") {
     const rows = await this.parseExcelFile(file);
+    const columns = mapCustomerImportColumns(Object.keys(rows[0] || {}));
     const normalizedRows = rows.map((row) =>
-      this.normalizeImportedMasterRow(row),
+      this.normalizeImportedMasterRow(row, columns.mapped),
     );
     const customers = await this.customerRepository.find();
     const contacts = await this.loadImportContacts();
@@ -2009,6 +2026,9 @@ export class CustomersService {
       blockedCount,
       duplicates: duplicates.slice(0, 20),
       duplicateUploadKeys: [...duplicateUploadKeys].slice(0, 20),
+      columnMappings: columns.columnMappings,
+      unmappedColumns: columns.unmappedColumns,
+      missingCompanyCount: normalizedRows.filter((row) => !row.company).length,
     };
   }
 
@@ -2028,6 +2048,10 @@ export class CustomersService {
 
   private async performImport(file: UploadedFile, ownerId = "") {
     const rows = await this.parseExcelFile(file);
+    const columns = mapCustomerImportColumns(Object.keys(rows[0] || {}));
+    if (!columns.mapped.company && !columns.mapped.email) {
+      throw new BadRequestException('未识别公司名称或邮箱列，请先核对导入预览中的字段映射');
+    }
     let created = 0;
     let updated = 0;
     let skipped = 0;
@@ -2046,8 +2070,8 @@ export class CustomersService {
     );
 
     for (const row of rows) {
-      const data = this.normalizeImportedMasterRow(row);
-      if (!data.email && !data.company) {
+      const data = this.normalizeImportedMasterRow(row, columns.mapped);
+      if (!data.company) {
         skipped++;
         continue;
       }
@@ -2191,8 +2215,11 @@ export class CustomersService {
     };
   }
 
-  private normalizeImportedMasterRow(row: Record<string, unknown>) {
+  private normalizeImportedMasterRow(row: Record<string, unknown>, columns: Record<string, string> = {}) {
     const value = (...keys: string[]) => {
+      const mappedKey = columns[keys[0]];
+      if (mappedKey && row[mappedKey] !== undefined && row[mappedKey] !== null && String(row[mappedKey]).trim())
+        return String(row[mappedKey]).trim();
       for (const key of keys) {
         const candidate = row[key];
         if (
@@ -2222,7 +2249,7 @@ export class CustomersService {
       phone: value("phone", "Phone", "电话", "手机号", "联系电话"),
       website: value("website", "Website", "官网", "网站", "网址"),
       region: value("region", "Region", "地区", "城市", "市场区域"),
-      country: value("country", "Country", "国家", "国家/地区"),
+      country: findCustomerCountry(value("country", "Country", "国家", "国家/地区"))?.name || value("country", "Country", "国家", "国家/地区"),
       address: value("address", "Address", "详细地址", "公司地址"),
       business: value("business", "Business", "主营业务", "行业", "业务"),
       product: value("product", "Product", "产品", "主营产品"),
