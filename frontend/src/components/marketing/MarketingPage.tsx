@@ -612,9 +612,11 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
               <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
                 <div>
                   <div className="font-medium text-primary">发送计划 · 定时分批</div>
-                  <p className="text-sm text-muted-foreground">创建后自动启用，系统会按指定时间和轮次逐批发送。</p>
+                  <p className="text-sm text-muted-foreground">创建后自动启用。开始时间、每轮数量和间隔决定实际发送节奏。</p>
                 </div>
-                <div className="grid gap-4 md:grid-cols-4">
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.sendAll} onChange={(event) => setForm({ ...form, sendAll: event.target.checked })} />发送完整名单（自动计算轮次）</label>
+                <p className="text-sm text-muted-foreground">{form.sendAll ? "将按下方节奏逐批处理所有已选收件人；不是立即同时发送。" : "只按指定轮数处理；超出容量的收件人会保留待续发。"}</p>
+                <div className={`grid gap-4 ${form.sendAll ? "md:grid-cols-3" : "md:grid-cols-4"}`}>
                   <div className="space-y-2">
                     <Label>开始时间 *</Label>
                     <Input
@@ -646,22 +648,20 @@ function EmailTasksTab({ canManage }: { canManage: boolean }) {
                       required
                     />
                   </div>
-                  <div className="space-y-2">
+                  {!form.sendAll && <div className="space-y-2">
                     <Label>总轮数 *</Label>
                     <Input
                       type="number"
                       min="1"
                       max="1000"
                       value={form.totalRuns}
-                      disabled={form.sendAll}
                       onChange={(e) => setForm({ ...form, totalRuns: e.target.value })}
-                      required={!form.sendAll}
+                      required
                     />
-                  </div>
+                  </div>}
                 </div>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.sendAll} onChange={(event) => setForm({ ...form, sendAll: event.target.checked })} />全部发送：自动安排轮次，直到本次名单处理完成</label>
                 <p className="text-sm text-muted-foreground">
-                  {form.sendAll ? `自动轮次：去重前约 ${Math.ceil(selectedRecipientIds.size / Math.max(1, Number(form.batchSize)))} 轮` : `本次最多处理 ${scheduledCapacity} 封，超出部分保留为待继续，不会计为跳过`}；
+                  {form.sendAll ? selectedRecipientIds.size > 0 ? `预计约 ${Math.ceil(selectedRecipientIds.size / Math.max(1, Number(form.batchSize)))} 轮（实际以去重后人数为准）` : "选择收件人后显示预计轮次" : `本次最多处理 ${scheduledCapacity} 封，超出部分保留为待继续，不会计为跳过`}；
                   已选 <span className="font-medium text-foreground">{selectedRecipientIds.size}</span> 个收件人。
                 </p>
               </div>
