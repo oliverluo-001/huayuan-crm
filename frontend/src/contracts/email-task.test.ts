@@ -9,7 +9,10 @@ describe("email task creation contract", () => {
   it("requires an explicit all-recipients choice", () => {
     const form = { name: "开发", taskMode: "scheduled" as const, templateId: "1", batchSize: "20", intervalMinutes: "60", totalRuns: "1", startAt: "2026-10-02T09:00" };
     expect(buildCreateEmailTaskInput(form, ["1", "2"]).sendAll).toBe(false);
-    expect(buildCreateEmailTaskInput({ ...form, sendAll: true }, ["1", "2"]).sendAll).toBe(true);
+    const all = buildCreateEmailTaskInput({ ...form, sendAll: true }, ["1", "2"]);
+    expect(all.sendAll).toBe(true);
+    expect(all).not.toHaveProperty("totalRuns");
+    expect(all).toMatchObject({ batchSize: 20, intervalMinutes: 60 });
   });
   it("does not send server-managed delivery counters", () => {
     const input = buildCreateEmailTaskInput({
