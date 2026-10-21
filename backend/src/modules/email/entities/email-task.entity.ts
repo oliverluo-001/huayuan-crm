@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { OutreachData } from '../outreach-types';
 
 export type EmailTaskStatus = 'pending' | 'active' | 'sending' | 'sent' | 'completed' | 'cancelled' | 'failed';
 
@@ -27,6 +28,9 @@ export class EmailTask {
 
   @Column({ name: 'owner_id', type: 'varchar', length: 32, default: '' })
   ownerId: string;
+
+  @Column({ name: 'outreach_data', type: 'json', nullable: true })
+  outreachData: OutreachData | null;
 
   @Column({ name: 'template_id', type: 'varchar', length: 32, default: '' })
   templateId: string;

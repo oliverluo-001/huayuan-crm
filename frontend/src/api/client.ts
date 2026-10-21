@@ -57,6 +57,7 @@ import type {
   DuplicateMergeResult,
 } from "@/types";
 import type { QuoteOutputLayout, QuoteOutputTemplate } from "@/contracts/quote-output-layout";
+import type { CreateOutreachInput, OutreachDetail, OutreachListItem, OutreachSchedule } from "@/contracts/outreach";
 
 export type {
   AuthStatus,
@@ -1347,6 +1348,22 @@ export async function restoreTrashItem(id: string): Promise<void> {
 
 export async function deleteTrashItem(id: string): Promise<void> {
   await api(`/api/trash/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export function getOutreachAnalyses() {
+  return api<OutreachListItem[]>('/api/outreach-workflows');
+}
+export function getOutreachAnalysis(id: string) {
+  return api<OutreachDetail>(`/api/outreach-workflows/${encodeURIComponent(id)}`);
+}
+export function createOutreachAnalysis(input: CreateOutreachInput) {
+  return api<OutreachDetail>('/api/outreach-workflows', { method: 'POST', body: input });
+}
+export function editOutreachDraft(id: string, key: string, input: { subject: string; body: string; selected: boolean; revision: number }) {
+  return api<OutreachDetail>(`/api/outreach-workflows/${encodeURIComponent(id)}/drafts/${encodeURIComponent(key)}`, { method: 'PUT', body: input });
+}
+export function scheduleOutreachAnalysis(id: string, input: OutreachSchedule) {
+  return api<OutreachDetail>(`/api/outreach-workflows/${encodeURIComponent(id)}/schedule`, { method: 'POST', body: input });
 }
 
 export async function getAccount(): Promise<User> {

@@ -6,10 +6,13 @@ import { EmailRecipientsController, UnsubscribeController } from './email-contro
 import { CustomersModule } from '../customers/customers.module';
 import { SuppressionModule } from '../suppression/suppression.module';
 import { SettingsModule } from '../settings/settings.module';
+import { OutreachController } from './outreach.controller';
+import { OutreachService } from './outreach.service';
+import { OutreachReservation } from './entities/outreach-reservation.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([EmailTemplate, EmailTask, EmailLog, EmailTaskRecipient]),
+    TypeOrmModule.forFeature([EmailTemplate, EmailTask, EmailLog, EmailTaskRecipient, OutreachReservation]),
     CustomersModule,
     SuppressionModule,
     SettingsModule,
@@ -22,8 +25,9 @@ import { SettingsModule } from '../settings/settings.module';
     EmailBouncesController,
     EmailRecipientsController,
     UnsubscribeController,
+    OutreachController,
   ],
-  providers: [EmailService],
+  providers: [EmailService, OutreachService],
   exports: [EmailService],
 })
 export class EmailModule {}

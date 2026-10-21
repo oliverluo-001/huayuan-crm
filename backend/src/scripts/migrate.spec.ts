@@ -10,9 +10,22 @@ import {
   migrateP22QuoteEditor,
   migrateP25QuoteLayoutEditor,
   normalizeLegacyUserEmails,
+  migrateOutreachAnalysis,
 } from './migrate';
 
 describe('database migration', () => {
+  it('adds customer analysis snapshots without rewriting existing email tasks', async () => {
+    let exists = false;
+    const query = jest.fn(async (sql: string) => {
+      if (sql.includes('information_schema.COLUMNS')) return [exists ? [{ COLUMN_NAME: 'outreach_data' }] : [], []];
+      if (sql.startsWith('ALTER TABLE')) exists = true;
+      return [[], []];
+    });
+    await migrateOutreachAnalysis({ query } as any);
+    await migrateOutreachAnalysis({ query } as any);
+    expect(query.mock.calls.filter(([sql]) => sql.startsWith('ALTER TABLE'))).toHaveLength(1);
+    expect(query.mock.calls.some(([sql]) => /DELETE|UPDATE email_tasks/.test(sql))).toBe(false);
+  });
   it('adds round progress once and preserves data on repeated migrations', async () => {
     let exists = false;
     const query = jest.fn(async (sql: string) => {

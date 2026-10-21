@@ -32,6 +32,7 @@ import {
   type SendLog,
 } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { CustomerAnalysisTab } from './CustomerAnalysisTab';
 import { canManageCrmData } from "@/auth/permissions";
 import { CUSTOMER_JOURNEY_STAGES } from "@/contracts/crm-stages";
 import {
@@ -54,10 +55,13 @@ export function MarketingPage() {
   return (
     <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col gap-4">
       <TabsList className="h-12 w-full border bg-card p-1">
+        {canManage && <TabsTrigger value="analysis" className="flex-1">客户解析</TabsTrigger>}
         <TabsTrigger value="templates" className="flex-1">邮件模板</TabsTrigger>
         <TabsTrigger value="tasks" className="flex-1">发信任务</TabsTrigger>
         <TabsTrigger value="logs" className="flex-1">发信记录</TabsTrigger>
       </TabsList>
+
+      {canManage && <TabsContent value="analysis"><CustomerAnalysisTab onTasks={() => setActiveTab('tasks')} /></TabsContent>}
 
       <TabsContent value="templates">
         <TemplatesTab canManage={canManage} role={role} userId={userId || ""} />

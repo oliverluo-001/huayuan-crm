@@ -37,6 +37,9 @@ import {
 } from './email-utils';
 import { formatSmtpError } from './smtp-error';
 import { resolveCustomerTimezone } from './customer-timezone';
+import { NEW_CUSTOMER_STAGES, assertOutreachMessage } from './outreach-types';
+import { OutreachReservation } from './entities/outreach-reservation.entity';
+import { findCustomerCountry } from '../customers/customer-geography';
 
 const MAX_SEND_ATTEMPTS = 3;
 const SCHEDULER_INTERVAL_MS = 15_000;
@@ -166,6 +169,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     return {
       ...task,
       customerIds,
+      ...(task.outreachData ? { templateName: '客户解析 · 逐客邮件' } : {}),
       completedRuns: task.runsCompleted,
     };
   }
@@ -257,6 +261,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   async updateTask(idOrEmailTaskId: string, updateDto: UpdateEmailTaskDto, ownerId?: string) {
     const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
+    if (task.outreachData) throw new BadRequestException('客户解析任务请通过客户解析页面确认内容与排程');
     const { customerIds, scheduledAt, startAt, ...rest } = updateDto;
     Object.assign(task, rest);
     if (customerIds) task.customerIds = JSON.stringify(customerIds.map((id: string | number) => String(id)));
@@ -277,6 +282,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
 
   async runTask(idOrEmailTaskId: string, ownerId?: string) {
     const task = await this.findTaskEntity(idOrEmailTaskId, ownerId);
+    if (task.outreachData && !task.outreachData.approvedAt) throw new BadRequestException('请先在客户解析页面确认邮件并设置定时任务');
     if (this.processingTasks.has(task.id) && task.status === 'pending') {
       throw new BadRequestException('正在完成当前邮件并暂停，请稍后恢复');
     }
@@ -315,6 +321,12 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     task.nextRunAt = null;
     task.lastMessage = '任务已取消';
     await this.taskRepository.save(task);
+    if (task.outreachData) {
+      const queued = await this.recipientRepository.find({ where: { taskId: task.id, status: 'queued' } });
+      // Keep sent and uncertain addresses reserved. Only unattempted recipients may be released.
+      const emails = queued.filter((r) => r.attempts === 0).map((r) => r.email);
+      if (emails.length) await this.taskRepository.manager.getRepository(OutreachReservation).delete({ taskId: task.id, email: In(emails) });
+    }
     return this.formatTask(task);
   }
 
@@ -494,6 +506,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     try {
       const task = await this.taskRepository.findOne({ where: { id: taskId } });
       if (!task || !['active', 'sending'].includes(task.status)) return;
+      if (task.outreachData && !task.outreachData.approvedAt) throw new BadRequestException('客户解析邮件未经确认');
       const owner = task.ownerId || '';
       if (this.processingOwners.has(owner)) return;
       this.processingOwners.add(owner);
@@ -516,7 +529,9 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       }
 
       const [template, smtp, policy] = await Promise.all([
-        this.findTemplateByIdentifier(task.templateId, task.ownerId || undefined),
+        task.outreachData
+          ? Promise.resolve({ templateId: task.emailTaskId, name: '客户解析 · 逐客邮件', subject: '', body: '', images: [] } as unknown as EmailTemplate)
+          : this.findTemplateByIdentifier(task.templateId, task.ownerId || undefined),
         this.settingsService.getSmtpCredentials(task.ownerId || undefined),
         this.settingsService.getEmailPolicy(),
       ]);
@@ -689,8 +704,30 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       product: customer?.product || '',
       email: recipient.email,
     };
-    const subject = renderTemplate(task.subject || template.subject, variables);
-    const body = renderTemplate(task.body || template.body, variables);
+    const draft = task.outreachData?.drafts.find((d) => d.recipientKey === recipient.recipientKey && d.email === recipient.email && d.selected && d.eligible);
+    if (task.outreachData) {
+      if (!task.outreachData.approvedAt || !draft || !assertOutreachMessage(draft.subject, draft.body)) {
+        await this.skipRecipient(recipient, '对应邮件未确认或缺失，禁止回退到通用模板');
+        return false;
+      }
+      const from = String(smtp.smtpFrom || smtp.smtpUser || '').trim();
+      if (normalizeEmail(from.match(/<([^>]+)>/)?.[1] || from) !== normalizeEmail(task.outreachData.sender.email)) {
+        throw new BadRequestException('发件账户已变更，与客户解析签名邮箱不符');
+      }
+      const contact = recipient.contactId ? await this.customersService.findContactByIdentifier(String(recipient.contactId)) : null;
+      const currentEmail = normalizeEmail(contact ? contact.email : customer?.email || '');
+      const previouslySent = await this.logRepository.findOne({ where: { recipientEmail: recipient.email, status: In(['sent', 'bounced']) } });
+      if (!customer || currentEmail !== recipient.email || contact?.marketingAllowed === false
+        || customer.emailStatus === 'invalid'
+        || findCustomerCountry(customer.country)?.name !== findCustomerCountry(task.outreachData.targetCountry)?.name
+        || !(await this.customersService.isCustomerEmailMarketingAllowed(customer.id, recipient.email))
+        || !NEW_CUSTOMER_STAGES.includes(customer.journeyStage || '') || customer.emailSentCount > 0 || previouslySent) {
+        await this.skipRecipient(recipient, '客户已联系、邮箱已变更或营销状态改变，请人工核对');
+        return false;
+      }
+    }
+    const subject = draft ? draft.subject : renderTemplate(task.subject || template.subject, variables);
+    const body = draft ? draft.body : renderTemplate(task.body || template.body, variables);
     const secret = await this.settingsService.getOrCreateUnsubscribeSecret();
     const unsubscribeToken = createUnsubscribeToken(recipient.email, secret);
     const baseUrl = String(
