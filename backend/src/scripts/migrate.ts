@@ -119,11 +119,22 @@ export async function runDatabaseMigrations() {
     await migrateEmailDeliveryMonitoring(connection);
     await migrateLeadRegionCountryCleanup(connection);
     await migrateOpportunityActions(connection);
+    await migrateOutreachAnalysis(connection);
     p03Report.customerSummariesRefreshed += await refreshCustomerSummaries(connection, database);
     return { p03Report };
   } finally {
     await connection.end();
   }
+}
+
+export async function migrateOutreachAnalysis(connection: Connection) {
+  await addColumnToTable(connection, 'email_tasks', 'outreach_data', 'JSON NULL');
+  await connection.query(`CREATE TABLE IF NOT EXISTS outreach_reservations (
+    email VARCHAR(255) NOT NULL PRIMARY KEY,
+    task_id INT NOT NULL,
+    KEY idx_outreach_reservations_task (task_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+  await connection.query('INSERT IGNORE INTO schema_migrations (id) VALUES (?)', ['20261021_outreach_analysis']);
 }
 
 async function migrateAuditMetadata(connection: Connection) {

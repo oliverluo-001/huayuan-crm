@@ -47,6 +47,8 @@ async function seedLegacyFixture(connection: Connection) {
   }
   await connection.query("ALTER TABLE todos DROP COLUMN opportunity_id, DROP COLUMN next_action_key, DROP COLUMN resolution");
   await connection.query("ALTER TABLE email_tasks DROP COLUMN round_processed_count");
+  await connection.query("ALTER TABLE email_tasks DROP COLUMN outreach_data");
+  await connection.query("DROP TABLE IF EXISTS outreach_reservations");
   await connection.query("DROP TABLE IF EXISTS product_assets");
   await connection.query("DROP TABLE IF EXISTS product_variants");
   await connection.query("DROP TABLE IF EXISTS quote_term_templates");
@@ -204,6 +206,14 @@ async function seedLegacyFixture(connection: Connection) {
 }
 
 async function verifyMigratedData(connection: Connection) {
+  const [outreachColumns] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'email_tasks' AND COLUMN_NAME = 'outreach_data'`, [database],
+  );
+  assert.equal(Number(outreachColumns[0].count), 1, '客户解析快照字段未迁移');
+  const [outreachTables] = await connection.query<CheckRow[]>(
+    `SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'outreach_reservations'`, [database],
+  );
+  assert.equal(Number(outreachTables[0].count), 1, '客户解析排程去重表未创建');
   const [roundProgressColumns] = await connection.query<CheckRow[]>(
     `SELECT COUNT(*) AS count FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'email_tasks' AND COLUMN_NAME = 'round_processed_count'`,
     [database],
@@ -535,6 +545,45 @@ async function verifyActionTransactions(connection: Connection) {
     await migrateOpportunityActions(connection);
     assert.equal(await taskRepo.countBy({ opportunityId: opportunity.id }), 2, "重复迁移产生了额外执行待办");
     console.log("Real MySQL opportunity/action transaction check passed");
+    const { OutreachService } = await import('../modules/email/outreach.service');
+    const { EmailService } = await import('../modules/email/email.service');
+    const { EmailTask, EmailTaskRecipient, EmailTemplate } = await import('../modules/email/entities');
+    const { OutreachReservation } = await import('../modules/email/entities/outreach-reservation.entity');
+    const sender = { name: 'CI Seller', company: 'CI Flanges', email: 'ci-seller@example.invalid', whatsapp: '+10000000000', website: 'example.invalid' };
+    const settings = {
+      getSmtpProfile: async () => ({ smtpUser: sender.email, credentialStatus: 'saved' }),
+      getSmtpCredentials: async () => ({ smtpUser: sender.email, smtpHost: 'smtp.example.invalid', pass: 'ci-fixture' }),
+    } as any;
+    const suppressions = { isSuppressed: async () => false } as any;
+    const outreach = new OutreachService(source.getRepository(EmailTask), service, settings, suppressions);
+    const buyer = await source.getRepository(Customer).save(source.getRepository(Customer).create({
+      customerId: 'CI-OUTREACH-1', company: 'CI Piping Buyer', email: 'sales@ci-outreach.invalid', country: 'UAE',
+      timezone: 'Asia/Dubai', business: 'Pipe fittings', ownerId: 'ci-seller', journeyStage: 'new',
+    }));
+    const buyer2 = await source.getRepository(Customer).save(source.getRepository(Customer).create({
+      customerId: 'CI-OUTREACH-2', company: 'CI Second Buyer', email: 'sales@ci-second.invalid', country: 'UAE',
+      timezone: 'Asia/Dubai', business: 'Pipe fittings', ownerId: 'ci-seller', journeyStage: 'new',
+    }));
+    const base = { name: 'CI analysis', targetCountry: 'UAE', productScope: 'Carbon steel flanges.', sender, researchWebsites: false, recipientKeys: [`customer:${buyer.customerId}`] };
+    const a = await outreach.create({ ...base, requestId: 'owf_111111111111111111111111' }, 'ci-seller');
+    const b = await outreach.create({ ...base, requestId: 'owf_222222222222222222222222' }, 'ci-seller');
+    const c = await outreach.create({ ...base, requestId: 'owf_333333333333333333333333', recipientKeys: [`customer:${buyer2.customerId}`, ...base.recipientKeys] }, 'ci-seller');
+    assert.equal((await outreach.create({ ...base, requestId: a.id }, 'ci-seller')).id, a.id, '重复解析请求产生额外任务');
+    await assert.rejects(outreach.detail(a.id, 'ci-other-seller'), /不存在/);
+    const plan = { startAt: new Date(Date.now() + 3600_000).toISOString(), batchSize: 10, intervalMinutes: 10, totalRuns: 2, revision: 0 };
+    await Promise.all([outreach.schedule(a.id, plan, 'ci-seller'), outreach.schedule(a.id, plan, 'ci-seller')]);
+    const taskA = await source.getRepository(EmailTask).findOneByOrFail({ emailTaskId: a.id });
+    assert.equal(await source.getRepository(EmailTaskRecipient).countBy({ taskId: taskA.id }), 1, '重复确认造成重复收件人');
+    await assert.rejects(outreach.schedule(b.id, plan, 'ci-seller'), /其他|待发送/);
+    await assert.rejects(outreach.schedule(c.id, plan, 'ci-seller'), /其他|待发送/);
+    assert.equal(await source.getRepository(OutreachReservation).countBy({ email: buyer2.email }), 0, '排程失败未回滚先前邮箱占用');
+    const taskC = await source.getRepository(EmailTask).findOneByOrFail({ emailTaskId: c.id });
+    assert.equal(await source.getRepository(EmailTaskRecipient).countBy({ taskId: taskC.id }), 0, '排程失败产生部分发信任务');
+    const email = new EmailService(source.getRepository(EmailTemplate), source.getRepository(EmailTask), source.getRepository(EmailLog), source.getRepository(EmailTaskRecipient), service, settings, suppressions);
+    await email.cancelTask(a.id, 'ci-seller');
+    assert.equal(await source.getRepository(OutreachReservation).countBy({ email: buyer.email }), 0, '取消未尝试发送任务后邮箱占用未释放');
+    await outreach.schedule(b.id, plan, 'ci-seller');
+    console.log('Real MySQL customer analysis scheduling, deduplication and rollback check passed (no SMTP calls)');
   } finally { await source.destroy(); }
 }
 
