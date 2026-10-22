@@ -3,6 +3,40 @@ import { createUnsubscribeToken } from '../../common/utils/unsubscribe';
 import { EmailRecipientsController, UnsubscribeController } from './email-controllers';
 
 describe('EmailRecipientsController', () => {
+  it('passes combined customer filters to the scoped full query before recipient pagination', async () => {
+    const customersService = {
+      findAll: jest.fn().mockResolvedValue({ customers: [{ id: 1, customerId: 'CUS-1', company: 'Buyer', email: 'buyer@example.com', country: 'United Arab Emirates', region: 'Dubai', business: 'flange', tier: 'A', journeyStage: 'new' }] }),
+      findContactsForCustomers: jest.fn().mockResolvedValue([{ id: 2, customerId: 1, email: 'contact@example.com', name: 'Buyer contact' }]),
+    };
+    const controller = new EmailRecipientsController({} as any, customersService as any, { findAll: async () => [] } as any);
+    const result = await controller.findAll({ country: 'UAE', marketRegion: '中东', region: 'Dubai', tier: 'A', journeyStage: 'new', ownerId: '999', business: 'flange', emailState: 'sendable', offset: '1', limit: '1' }, { sub: 7, role: 'sales' });
+    expect(customersService.findAll).toHaveBeenCalledWith({ country: 'UAE', marketRegion: '中东', region: 'Dubai', tier: 'A', journeyStage: 'new', ownerId: '7' });
+    expect(result.total).toBe(2);
+    expect(result.recipients).toEqual([expect.objectContaining({ email: 'contact@example.com', country: 'United Arab Emirates' })]);
+  });
+
+  it('returns region choices from the complete accessible pool without loading contacts or applying pagination', async () => {
+    const customersService = {
+      findAll: jest.fn().mockResolvedValue({ customers: Array.from({ length: 30 }, (_, id) => ({ id, region: id === 29 ? 'Sharjah' : 'Dubai' })) }),
+      findContactsForCustomers: jest.fn(),
+    };
+    const controller = new EmailRecipientsController({} as any, customersService as any, {} as any);
+    const result = await controller.findAll({ optionsOnly: 'true', limit: '1', ownerId: '999' }, { sub: 7, role: 'sales' });
+    expect(result.filterOptions).toEqual({ regions: ['Dubai', 'Sharjah'] });
+    expect(customersService.findAll).toHaveBeenCalledWith({ ownerId: '7' });
+    expect(customersService.findContactsForCustomers).not.toHaveBeenCalled();
+  });
+
+  it('treats a primary address marked invalid as an abnormal mailbox while preserving valid alternate contacts', async () => {
+    const customersService = {
+      findAll: async () => ({ customers: [{ id: 1, email: 'bad@example.com', emailStatus: 'invalid' }] }),
+      findContactsForCustomers: async () => [{ id: 2, customerId: 1, email: 'good@example.com' }],
+    };
+    const controller = new EmailRecipientsController({} as any, customersService as any, { findAll: async () => [] } as any);
+    expect((await controller.findAll({ emailState: 'sendable' }, { sub: 1, role: 'admin' })).recipients!.map((row) => row.email)).toEqual(['good@example.com']);
+    expect((await controller.findAll({ emailState: 'invalid' }, { sub: 1, role: 'admin' })).recipients!.map((row) => row.email)).toEqual(['bad@example.com']);
+  });
+
   it('suppresses contacts that did not allow marketing, including the primary customer email row', async () => {
     const customersService = {
       findAll: jest.fn().mockResolvedValue({
