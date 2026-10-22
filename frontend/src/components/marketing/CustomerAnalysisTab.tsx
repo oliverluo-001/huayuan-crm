@@ -5,11 +5,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { createOutreachAnalysis, editOutreachDraft, getEmailRecipients, getCustomerGeography, getOutreachAnalyses, getOutreachAnalysis, scheduleOutreachAnalysis } from '@/api/client';
+import { createOutreachAnalysis, editOutreachDraft, getEmailRecipients, getCustomerGeography, getOutreachAnalyses, getOutreachAnalysis, scheduleOutreachAnalysis, selectOutreachDrafts } from '@/api/client';
 import type { EmailRecipient, CustomerMarket } from '@/api/client';
 import { CUSTOMER_JOURNEY_STAGES } from '@/contracts/crm-stages';
 import { CUSTOMER_TIER_OPTIONS } from '@/contracts/crm-terminology';
-import { defaultOutreachStart, OUTREACH_SEGMENTS, outreachStartIso } from '@/contracts/outreach';
+import { defaultOutreachStart, OUTREACH_SEGMENTS, OUTREACH_ROLES, OUTREACH_FIT, outreachStartIso } from '@/contracts/outreach';
 import type { OutreachDetail, OutreachDraft, OutreachListItem, OutreachSender } from '@/contracts/outreach';
 
 const INITIAL_SENDER: OutreachSender = {
@@ -132,7 +132,7 @@ export function CustomerAnalysisTab({ onTasks }: { onTasks: () => void }) {
         <details className="rounded border p-3"><summary className="cursor-pointer text-sm">发件人签名</summary><div className="mt-3 grid gap-3 md:grid-cols-2">
           {([['name', '姓名'], ['company', '公司'], ['email', '工作邮箱'], ['whatsapp', 'WhatsApp'], ['website', '网站']] as const).map(([key, label]) => <div className={fieldClass} key={key}><Label htmlFor={`sender-${key}`}>{label}</Label><Input id={`sender-${key}`} type={key === 'email' ? 'email' : 'text'} value={sender[key]} onChange={(e) => setSender((previous) => ({ ...previous, [key]: e.target.value }))} /></div>)}
         </div></details>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={research} onChange={(e) => setResearch(e.target.checked)} />读取客户官网，保存业务关键词与来源；读取失败则标记待核验</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={research} onChange={(e) => setResearch(e.target.checked)} />读取官网、产品、公司介绍及供应商准入页面，保存具体依据；读取失败则标记待核验</label>
         <p className="text-sm text-muted-foreground">新名单请先在客户管理导入Excel，再在此选择。每次最多解析20个联系入口；同一客户、重复邮箱及不适合首次开发的记录会被标记。</p>
         <div className="space-y-3 rounded-lg border bg-muted/20 p-3" aria-label="客户解析筛选条件">
           <p className="text-sm font-medium">筛选客户</p>
@@ -165,13 +165,26 @@ export function CustomerAnalysisTab({ onTasks }: { onTasks: () => void }) {
 
     {analysis && <Card><CardHeader><CardTitle>{analysis.name} · 选择生成内容</CardTitle></CardHeader><CardContent className="space-y-4">
       <p className="text-sm">共 {analysis.summary.total} 条 · 可选 {analysis.summary.eligible} 条 · 已选 {analysis.summary.selected} 封</p>
-      <p className="text-sm text-muted-foreground">规则按官网与CRM业务关键词匹配邮件，不等同于采购意向确认。请逐封查看；每次修改需保存后再排程。</p>
+      {!approved && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || Boolean(editing)} onClick={() => perform(async () => setAnalysis(await selectOutreachDrafts(analysis.id, analysis.data.drafts.filter((draft) => draft.eligible && draft.insight?.recommended).map((draft) => draft.recipientKey), analysis.data.revision)))}>仅勾选有明确产品依据的邮件</Button><Button variant="ghost" disabled={busy || Boolean(editing)} onClick={() => perform(async () => setAnalysis(await selectOutreachDrafts(analysis.id, [], analysis.data.revision)))}>清空邮件勾选</Button></div>}
+      <p className="text-sm text-muted-foreground">根据公开页面识别客户类型、产品关联与供应商准入路径，再匹配邮件。采购意向仍需确认；只有明确产品依据的邮件默认勾选，请逐封审核后排程。</p>
+      {analysis.data.drafts.some((draft) => !draft.insight) && <p className="rounded border p-3 text-sm text-muted-foreground">此结果为之前保存的分析。如需核对更多官网页面，请重新选择客户生成解析；已经排程的邮件保持原确认内容。</p>}
       {analysis.data.drafts.map((draft) => <article key={draft.recipientKey} className="space-y-3 rounded-lg border p-4">
         <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 font-medium"><input type="checkbox" aria-label={`发送给 ${draft.email}`} checked={draft.selected} disabled={!draft.eligible || approved || busy || Boolean(editing)} onChange={(e) => updateDraft(draft, { selected: e.target.checked })} />{draft.company}</label><Badge variant="secondary">{OUTREACH_SEGMENTS[draft.segment]}</Badge></div>
         <p className="break-all text-sm text-muted-foreground">{draft.email} · {draft.timezone || '时区待核实'}</p>
         <p className="text-sm">{draft.reason}</p>
+        {draft.insight && <div className="space-y-3 rounded border bg-muted/20 p-3 text-sm">
+          <div className="flex flex-wrap gap-2"><Badge variant="outline">{OUTREACH_ROLES[draft.insight.role]} · {draft.insight.roleBasis === 'website' ? '官网依据' : draft.insight.roleBasis === 'crm' ? 'CRM推断' : '待核实'}</Badge><Badge variant="outline">{OUTREACH_FIT[draft.insight.fit]}</Badge>{draft.insight.recommended && <Badge variant="secondary">建议审核</Badge>}</div>
+          <p>核实页面：{draft.insight.sources.length} 个 · 采购计划及具体规格尚未确认</p>
+          <details><summary className="cursor-pointer">查看具体依据与来源</summary><div className="mt-3 space-y-3">
+            {draft.insight.facts.map((fact, index) => <div key={`${fact.url}-${index}`}><p className="font-medium">{fact.label}</p><blockquote className="mt-1 border-l-2 pl-3 text-muted-foreground">{fact.excerpt}</blockquote>{/^https?:\/\//.test(fact.url) && <a className="break-all underline" href={fact.url} target="_blank" rel="noreferrer">查看来源页面</a>}</div>)}
+            {!draft.insight.facts.length && <p>暂无足够的官网证据，当前邮件仅用于核实采购范围。</p>}
+            {draft.insight.sources.map((source) => <p key={source.url}><a className="break-all underline" href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a></p>)}
+            {draft.insight.researchNotes.map((note) => <p key={note} className="text-muted-foreground">{note}</p>)}
+            <p className="text-muted-foreground">核对时间：{new Date(draft.evidence.checkedAt).toLocaleString()}</p>
+          </div></details>
+        </div>}
         <ul className="list-inside list-disc text-sm text-muted-foreground">{draft.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-        {draft.evidence.status === 'verified' && <details className="text-sm"><summary className="cursor-pointer">查看官网依据与核对时间</summary><p className="mt-2">{draft.evidence.excerpt}</p>{/^https?:\/\//.test(draft.evidence.url) && <a className="break-all underline" href={draft.evidence.url} target="_blank" rel="noreferrer">{draft.evidence.url}</a>}<p>{new Date(draft.evidence.checkedAt).toLocaleString()}</p></details>}
+        {!draft.insight && draft.evidence.status === 'verified' && <details className="text-sm"><summary className="cursor-pointer">查看官网依据与核对时间</summary><p className="mt-2">{draft.evidence.excerpt}</p>{/^https?:\/\//.test(draft.evidence.url) && <a className="break-all underline" href={draft.evidence.url} target="_blank" rel="noreferrer">{draft.evidence.url}</a>}<p>{new Date(draft.evidence.checkedAt).toLocaleString()}</p></details>}
         {editing === draft.recipientKey ? <div className="space-y-3">
           <Label htmlFor="draft-subject">邮件主题</Label><Input id="draft-subject" value={editSubject} maxLength={500} onChange={(e) => setEditSubject(e.target.value)} disabled={busy} />
           <Label htmlFor="draft-body">邮件正文</Label><Textarea id="draft-body" value={editBody} maxLength={6000} rows={16} onChange={(e) => setEditBody(e.target.value)} disabled={busy} />

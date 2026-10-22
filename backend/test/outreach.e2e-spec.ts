@@ -16,7 +16,7 @@ class FixtureIdentity implements CanActivate {
 
 describe('customer analysis HTTP boundary', () => {
   let app: INestApplication; let base: string;
-  const service = { list: jest.fn(async () => []), create: jest.fn(async () => ({ id: 'fixture', status: 'pending' })) };
+  const service = { list: jest.fn(async () => []), create: jest.fn(async () => ({ id: 'fixture', status: 'pending' })), select: jest.fn(async () => ({ id: 'fixture', status: 'pending' })) };
   beforeAll(async () => {
     const module = await Test.createTestingModule({ controllers: [OutreachController], providers: [
       { provide: OutreachService, useValue: service },
@@ -43,5 +43,14 @@ describe('customer analysis HTTP boundary', () => {
   it('passes the authenticated salesperson scope to the analysis service', async () => {
     expect((await post(valid)).status).toBe(201);
     expect(service.create).toHaveBeenCalledWith(expect.objectContaining({ recipientKeys: ['customer:1'] }), '7');
+  });
+  it('validates bulk draft selection and preserves salesperson ownership scope', async () => {
+    const put = (body: unknown, role = 'sales') => fetch(`${base}/outreach-workflows/fixture/selection`, { method: 'PUT', headers: { 'x-test-role': role, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await put({ recipientKeys: [], revision: 0 }, 'viewer')).status).toBe(403);
+    expect((await put({ recipientKeys: ['customer:1'], revision: 0, approvedAt: 'injected' })).status).toBe(400);
+    expect((await put({ recipientKeys: Array(21).fill('customer:1'), revision: 0 })).status).toBe(400);
+    expect(service.select).not.toHaveBeenCalled();
+    expect((await put({ recipientKeys: [], revision: 3 })).status).toBe(200);
+    expect(service.select).toHaveBeenCalledWith('fixture', { recipientKeys: [], revision: 3 }, '7');
   });
 });

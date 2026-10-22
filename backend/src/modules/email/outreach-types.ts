@@ -1,4 +1,19 @@
 export type OutreachSegment = 'piping' | 'valves' | 'projects' | 'water' | 'unknown';
+export type OutreachPageKind = 'home' | 'about' | 'products' | 'suppliers';
+export interface OutreachSource { url: string; title: string; kind: OutreachPageKind; text: string }
+export interface OutreachFact { label: string; excerpt: string; url: string }
+export interface OutreachInsight {
+  version: 2;
+  role: 'manufacturer' | 'distributor' | 'contractor' | 'end_user' | 'unknown';
+  roleBasis: 'website' | 'crm' | 'unknown';
+  fit: 'direct' | 'related' | 'unconfirmed';
+  approach: string;
+  facts: OutreachFact[];
+  gaps: string[];
+  sources: Array<Omit<OutreachSource, 'text'>>;
+  researchNotes: string[];
+  recommended: boolean;
+}
 
 export interface OutreachSender {
   name: string;
@@ -24,6 +39,7 @@ export interface OutreachDraft {
   selected: boolean;
   subject: string;
   body: string;
+  insight?: OutreachInsight;
 }
 
 export interface OutreachData {

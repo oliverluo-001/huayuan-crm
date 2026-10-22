@@ -570,7 +570,9 @@ async function verifyActionTransactions(connection: Connection) {
     const c = await outreach.create({ ...base, requestId: 'owf_333333333333333333333333', recipientKeys: [`customer:${buyer2.customerId}`, ...base.recipientKeys] }, 'ci-seller');
     assert.equal((await outreach.create({ ...base, requestId: a.id }, 'ci-seller')).id, a.id, '重复解析请求产生额外任务');
     await assert.rejects(outreach.detail(a.id, 'ci-other-seller'), /不存在/);
-    const plan = { startAt: new Date(Date.now() + 3600_000).toISOString(), batchSize: 10, intervalMinutes: 10, totalRuns: 2, revision: 0 };
+    assert.equal(a.summary.selected, 0, '没有官网证据的客户不应自动勾选');
+    for (const analysis of [a, b, c]) await outreach.select(analysis.id, { recipientKeys: analysis.data.drafts.map((draft) => draft.recipientKey), revision: 0 }, 'ci-seller');
+    const plan = { startAt: new Date(Date.now() + 3600_000).toISOString(), batchSize: 10, intervalMinutes: 10, totalRuns: 2, revision: 1 };
     await Promise.all([outreach.schedule(a.id, plan, 'ci-seller'), outreach.schedule(a.id, plan, 'ci-seller')]);
     const taskA = await source.getRepository(EmailTask).findOneByOrFail({ emailTaskId: a.id });
     assert.equal(await source.getRepository(EmailTaskRecipient).countBy({ taskId: taskA.id }), 1, '重复确认造成重复收件人');

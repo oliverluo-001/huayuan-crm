@@ -1,4 +1,5 @@
-import { OutreachDraft, OutreachSegment, OutreachSender } from './outreach-types';
+import { OutreachDraft, OutreachSegment, OutreachSender, OutreachSource } from './outreach-types';
+import { analyzeOutreachSources } from './outreach-insight';
 
 const patterns: Array<[OutreachSegment, RegExp, string]> = [
   ['water', /water treatment|desalination|wastewater|水处理|海水淡化/i, 'water treatment'],
@@ -11,29 +12,44 @@ export function classifyOutreach(text: string) {
   return patterns.find(([, pattern]) => pattern.test(text));
 }
 
-export function generateOutreachMessage(company: string, business: string, website: string, sender: OutreachSender, productScope: string) {
-  const verifiedMatch = classifyOutreach(website);
-  const match = verifiedMatch || classifyOutreach(business);
-  const segment = match?.[0] || 'unknown';
-  const questions: Record<OutreachSegment, string> = {
-    piping: 'Would you be open to comparing a quotation on one or two flange items you regularly source?',
-    valves: 'Does your team purchase companion flanges alongside valve orders, or do your customers source these separately?',
-    projects: 'Could you point me to the person or registration process responsible for flange supplier qualification?',
-    water: 'Does your team purchase metal flanges directly for treatment packages, or are they supplied by your installation contractor?',
-    unknown: 'Is metal flange sourcing within your team\'s purchasing scope?',
-  };
-  const subjects: Record<OutreachSegment, string> = {
-    piping: 'An additional source for flange enquiries', valves: 'Companion flanges for valve enquiries',
-    projects: 'Flange supplier qualification', water: 'Metal flanges for water-treatment packages', unknown: 'Who handles metal flange sourcing?',
-  };
-  const opening = verifiedMatch
-    ? `I noticed your website mentions ${verifiedMatch[2]}.`
-    : 'If your team sources metal flanges, we would welcome the opportunity to be considered for a future enquiry.';
+export function generateOutreachMessage(company: string, business: string, website: string, sender: OutreachSender, productScope: string, sources?: OutreachSource[], notes: string[] = []) {
+  const analysis = analyzeOutreachSources(sources || (website ? [{ url: '', title: '官网', kind: 'home', text: website }] : []), business, notes);
+  const { insight, segment, supplier, flangeCategory, sector } = analysis;
+  let subject = 'Metal flange sourcing enquiry';
+  let opening = 'If metal flanges fall within your purchasing scope, we would welcome the opportunity to introduce our range.';
+  let question = 'Does your team handle metal flange sourcing, or could you direct me to the relevant purchasing contact?';
+  if (flangeCategory) {
+    subject = 'Flange supplier qualification';
+    opening = 'I noticed that flanges are listed among the supply categories on your supplier registration page.';
+    question = 'Are you currently open to evaluating an additional supplier for this category?';
+  } else if (supplier && segment !== 'unknown') {
+    subject = 'Flange supply — supplier qualification';
+    opening = 'I came across the supplier registration information on your website.';
+    question = 'Would metal flange supply fall within the categories your procurement team is currently qualifying?';
+  } else if (insight.fit !== 'unconfirmed' && sector) {
+    const controlValves = segment === 'valves' && (sources || []).some((page) => /control valves?/i.test(page.text));
+    const topic = controlValves ? 'control-valve products' : sector.description;
+    opening = `I came across your ${topic} while looking for companies with a potential fit for our flange range.`;
+    if (insight.role === 'manufacturer' && insight.roleBasis === 'website') {
+      subject = segment === 'valves' ? 'Flange sourcing for valve manufacturing' : 'Flange supply for your manufacturing enquiries';
+      question = 'Does your manufacturing team source metal flanges externally for assemblies or project packages?';
+    } else if (insight.role === 'distributor') {
+      subject = 'An additional flange source for your enquiries';
+      question = 'Would your purchasing team be open to comparing a quotation for a flange item when a sourcing need arises?';
+    } else if (insight.role === 'contractor' || segment === 'projects') {
+      subject = 'Flange supply — project vendor qualification';
+      question = 'Could you direct me to the team responsible for flange sourcing or project vendor qualification?';
+    } else if (segment === 'water') {
+      subject = 'Metal flanges for water-treatment enquiries';
+      question = 'Does your team source metal flanges for treatment packages, or is this handled by an installation partner?';
+    } else {
+      subject = 'Flange supply — purchasing enquiry';
+      question = 'Would your purchasing team consider an additional source for future metal flange enquiries?';
+    }
+  }
   return {
-    segment,
-    reason: verifiedMatch ? `官网文字包含相关业务关键词：${verifiedMatch[2]}；采购需求仍待确认` : match ? '根据CRM业务资料推断，官网尚未验证该方向' : '未发现明确产品适配证据，先询问采购范围',
-    subject: subjects[segment],
-    body: `Hello ${company.replace(/[<>\r\n{}]/g, ' ')} team,\n\n${opening}\n\nI'm ${sender.name} from ${sender.company}, China.\n\nOur product scope: ${productScope}\n\n${questions[segment]}\n\nBest regards,\n${sender.name}\n${sender.company}\n${sender.email}\nWhatsApp: ${sender.whatsapp}\n${sender.website}`,
+    segment, insight, reason: insight.approach, subject,
+    body: `Hello ${company.replace(/[<>\r\n{}]/g, ' ')} team,\n\n${opening}\n\nI'm ${sender.name} from ${sender.company} in China. Our product range: ${productScope}\n\n${question}\n\nBest regards,\n${sender.name}\n${sender.company}\n${sender.email}\nWhatsApp: ${sender.whatsapp}\n${sender.website}`,
   };
 }
 
