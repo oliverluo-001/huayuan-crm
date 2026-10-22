@@ -13,7 +13,7 @@ import { defaultOutreachStart, OUTREACH_SEGMENTS, outreachStartIso } from '@/con
 import type { OutreachDetail, OutreachDraft, OutreachListItem, OutreachSender } from '@/contracts/outreach';
 
 const INITIAL_SENDER: OutreachSender = {
-  name: 'Zachary Kael', company: 'Huayuan Flange', email: 'zachary.kael@huayuanflange.co',
+  name: 'Zachary Kael', company: 'Huayuan Flange', email: 'zachary.kael@huayuanflange.com',
   whatsapp: '+86 152-1503-1006', website: 'huayuanflange.com',
 };
 const requestId = () => `owf_${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`;

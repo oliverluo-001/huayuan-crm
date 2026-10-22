@@ -6,7 +6,7 @@ import { generateOutreachMessage } from './outreach-messages';
 import { isPublicResearchAddress, publicResearchUrl, websiteText } from './outreach-research';
 import { EmailService } from './email.service';
 
-const sender = { name: 'Zachary Kael', company: 'Huayuan Flange', email: 'zachary.kael@huayuanflange.co', whatsapp: '+86 152-1503-1006', website: 'huayuanflange.com' };
+const sender = { name: 'Zachary Kael', company: 'Huayuan Flange', email: 'zachary.kael@huayuanflange.com', whatsapp: '+86 152-1503-1006', website: 'huayuanflange.com' };
 const draft = () => ({ recipientKey: 'customer:c1', customerId: 1, contactId: null, company: 'Buyer', email: 'sales@buyer.ae', name: 'Buyer', timezone: 'Asia/Dubai', subject: 'Your piping enquiries', body: 'Hello Buyer,\n\nDo you source flanges?', eligible: true, selected: true });
 
 describe('customer analysis evidence and website boundaries', () => {
