@@ -1,9 +1,24 @@
 export interface OutreachSender { name: string; company: string; email: string; whatsapp: string; website: string }
+export interface OutreachInsight {
+  version: 2;
+  role: 'manufacturer' | 'distributor' | 'contractor' | 'end_user' | 'unknown';
+  roleBasis: 'website' | 'crm' | 'unknown';
+  fit: 'direct' | 'related' | 'unconfirmed';
+  approach: string;
+  facts: Array<{ label: string; excerpt: string; url: string }>;
+  gaps: string[];
+  sources: Array<{ url: string; title: string; kind: 'home' | 'about' | 'products' | 'suppliers' }>;
+  researchNotes: string[];
+  recommended: boolean;
+}
+export const OUTREACH_ROLES = { manufacturer: '制造商', distributor: '经销／库存商', contractor: '工程承包商', end_user: '设施运营方', unknown: '客户类型待确认' };
+export const OUTREACH_FIT = { direct: '有明确法兰／金属产品依据', related: '业务相关，需复核', unconfirmed: '适配性待确认' };
 export interface OutreachDraft {
   recipientKey: string; customerId: number; email: string; company: string; timezone: string;
   segment: 'piping' | 'valves' | 'projects' | 'water' | 'unknown';
   evidence: { url: string; checkedAt: string; excerpt: string; status: 'verified' | 'unavailable' | 'not_requested' };
   reason: string; warnings: string[]; eligible: boolean; selected: boolean; subject: string; body: string;
+  insight?: OutreachInsight;
 }
 export interface OutreachDetail {
   id: string; name: string; status: string;

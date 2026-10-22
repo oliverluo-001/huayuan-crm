@@ -4,13 +4,14 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CustomerAnalysisTab } from './CustomerAnalysisTab';
 
-const mocks = vi.hoisted(() => ({ detail: {} as any, get: vi.fn(), edit: vi.fn(), schedule: vi.fn(), create: vi.fn(), recipients: vi.fn() }));
+const mocks = vi.hoisted(() => ({ detail: {} as any, get: vi.fn(), edit: vi.fn(), select: vi.fn(), schedule: vi.fn(), create: vi.fn(), recipients: vi.fn() }));
 vi.mock('@/api/client', () => ({
   getOutreachAnalyses: async () => [{ id: 'owf_fixture', name: '已保存解析' }],
   getOutreachAnalysis: (...args: any[]) => mocks.get(...args),
   getEmailRecipients: (...args: any[]) => mocks.recipients(...args),
   getCustomerGeography: async () => [{ name: '中东', countries: [{ name: 'United Arab Emirates', label: '阿联酋' }, { name: 'Saudi Arabia', label: '沙特阿拉伯' }] }],
   editOutreachDraft: (...args: any[]) => mocks.edit(...args),
+  selectOutreachDrafts: (...args: any[]) => mocks.select(...args),
   scheduleOutreachAnalysis: (...args: any[]) => mocks.schedule(...args),
   createOutreachAnalysis: (...args: any[]) => mocks.create(...args),
 }));
@@ -23,8 +24,13 @@ beforeEach(async () => {
   mocks.detail = { id: 'owf_fixture', name: '测试解析', status: 'pending', data: { revision: 0, sender: { email: 'seller@example.com' }, drafts: [{ recipientKey: 'customer:c1', company: 'Buyer', email: 'buyer@example.com', segment: 'piping', timezone: 'Asia/Dubai', reason: '已读取官网', warnings: [], eligible: true, selected: true, subject: 'Original subject', body: 'Original body', evidence: { status: 'unavailable' } }] }, summary: { total: 1, eligible: 1, selected: 1 }, senderAccount: { configured: true, from: 'seller@example.com' }, schedule: {}, delivery: {} };
   mocks.get.mockImplementation(async () => structuredClone(mocks.detail));
   mocks.edit.mockImplementation(async (_id, _key, input) => { Object.assign(mocks.detail.data.drafts[0], input); mocks.detail.data.revision += 1; return structuredClone(mocks.detail); });
+  mocks.select.mockImplementation(async (_id, keys) => {
+    mocks.detail.data.drafts.forEach((draft: any) => { draft.selected = keys.includes(draft.recipientKey); });
+    mocks.detail.data.revision += 1; mocks.detail.summary.selected = keys.length;
+    return structuredClone(mocks.detail);
+  });
   mocks.schedule.mockImplementation(async (_id, input) => ({ ...structuredClone(mocks.detail), status: 'active', data: { ...mocks.detail.data, approvedAt: 'approved' }, schedule: input, delivery: { message: '定时任务已启用', sent: 0, failed: 0, skipped: 0 } }));
-  mocks.edit.mockClear(); mocks.schedule.mockClear(); mocks.create.mockClear();
+  mocks.edit.mockClear(); mocks.select.mockClear(); mocks.schedule.mockClear(); mocks.create.mockClear();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<CustomerAnalysisTab onTasks={() => undefined} />));
   await act(async () => findButton('已保存解析').click());
@@ -80,6 +86,22 @@ it('saves recipient selection before a task can be scheduled', async () => {
   mocks.edit.mockImplementationOnce(async () => ({ ...structuredClone(mocks.detail), summary: { total: 1, eligible: 1, selected: 0 } }));
   await act(async () => checkbox.click());
   expect(mocks.edit).toHaveBeenCalledWith('owf_fixture', 'customer:c1', expect.objectContaining({ selected: false }));
+  expect(findButton('创建并启用').disabled).toBe(true);
+  expect(mocks.schedule).not.toHaveBeenCalled();
+});
+
+it('shows source evidence and selects only recommended eligible drafts atomically without sending', async () => {
+  mocks.detail.data.drafts[0].insight = { version: 2, role: 'manufacturer', roleBasis: 'website', fit: 'direct', recommended: true, approach: '供应商评审', gaps: ['采购数量未确认'], researchNotes: ['关于页面待核实'], facts: [{ label: '供应类别', excerpt: 'Scope of Supply: Flanges', url: 'https://buyer.example/suppliers' }], sources: [{ title: 'Suppliers', kind: 'suppliers', url: 'https://buyer.example/suppliers' }] };
+  mocks.detail.data.drafts[0].warnings = ['采购数量未确认'];
+  mocks.detail.data.drafts.push({ ...structuredClone(mocks.detail.data.drafts[0]), recipientKey: 'customer:c3', email: 'review@example.com', insight: { ...mocks.detail.data.drafts[0].insight, recommended: false, fit: 'related' } });
+  await act(async () => findButton('已保存解析').click());
+  expect(host.textContent).toContain('Scope of Supply: Flanges');
+  expect(host.querySelector('a[href="https://buyer.example/suppliers"]')).not.toBeNull();
+  expect(host.textContent).toContain('采购数量未确认');
+  await act(async () => findButton('仅勾选有明确产品依据').click());
+  expect(mocks.select).toHaveBeenLastCalledWith('owf_fixture', ['customer:c1'], 0);
+  await act(async () => findButton('清空邮件勾选').click());
+  expect(mocks.select).toHaveBeenLastCalledWith('owf_fixture', [], 1);
   expect(findButton('创建并启用').disabled).toBe(true);
   expect(mocks.schedule).not.toHaveBeenCalled();
 });

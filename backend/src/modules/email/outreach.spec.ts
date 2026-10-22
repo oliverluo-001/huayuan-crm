@@ -12,10 +12,12 @@ const draft = () => ({ recipientKey: 'customer:c1', customerId: 1, contactId: nu
 describe('customer analysis evidence and website boundaries', () => {
   it('keeps unverified CRM assumptions conditional and uses only retrieved text for noticed claims', () => {
     const unverified = generateOutreachMessage('Buyer', 'pipe fittings', '', sender, 'Carbon steel flanges.');
-    expect(unverified.body).toContain('If your team');
+    expect(unverified.body).toContain('If metal flanges fall within');
     expect(unverified.body).not.toContain('I noticed');
-    const verified = generateOutreachMessage('Buyer', '', 'We supply pipe fittings and flanges.', sender, 'Carbon steel flanges.');
-    expect(verified.body).toContain('I noticed your website mentions piping products');
+    const verified = generateOutreachMessage('Buyer', '', 'We are a distributor of carbon steel pipe fittings and flanges for industrial piping systems and project purchasing teams.', sender, 'Carbon steel flanges.');
+    expect(verified.insight.fit).toBe('direct');
+    expect(verified.insight.facts.length).toBeGreaterThan(0);
+    expect(verified.body).toContain('I came across your piping products');
     expect(verified.body).not.toMatch(/certified|lowest price|7-15/);
   });
   it('rejects private destinations, mapped IPv6, local URLs and embedded credentials', () => {
@@ -56,6 +58,16 @@ function harness() {
 }
 
 describe('customer analysis scheduling', () => {
+  it('keeps batch selection revisioned, rejects ineligible recipients, and protects approved snapshots', async () => {
+    const h = harness();
+    await h.service.select('owf_abc', { recipientKeys: [], revision: 0 }, '7');
+    expect(h.task.outreachData.drafts[0].selected).toBe(false);
+    await expect(h.service.select('owf_abc', { recipientKeys: ['customer:c1'], revision: 0 }, '7')).rejects.toThrow('已更新');
+    h.task.outreachData.drafts[0].eligible = false;
+    await expect(h.service.select('owf_abc', { recipientKeys: ['customer:c1'], revision: 1 }, '7')).rejects.toThrow('不可发送');
+    h.task.outreachData.approvedAt = 'approved';
+    await expect(h.service.select('owf_abc', { recipientKeys: [], revision: 1 }, '7')).rejects.toThrow('已排程');
+  });
   it('commits one selected recipient snapshot and a shared batch plan; repeated confirmation is idempotent', async () => {
     const h = harness();
     await h.service.schedule('owf_abc', h.schedule, '7');

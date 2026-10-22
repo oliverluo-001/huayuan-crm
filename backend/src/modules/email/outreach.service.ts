@@ -9,10 +9,10 @@ import { SuppressionService } from '../suppression/suppression.service';
 import { findCustomerCountry } from '../customers/customer-geography';
 import { resolveCustomerTimezone } from './customer-timezone';
 import { isValidEmail, normalizeEmail } from './email-utils';
-import { CreateOutreachDto, EditOutreachDraftDto, ScheduleOutreachDto } from './dto/outreach.dto';
-import { NEW_CUSTOMER_STAGES, OutreachData, OutreachDraft, assertOutreachMessage } from './outreach-types';
+import { CreateOutreachDto, EditOutreachDraftDto, ScheduleOutreachDto, SelectOutreachDraftsDto } from './dto/outreach.dto';
+import { NEW_CUSTOMER_STAGES, OutreachData, OutreachDraft, OutreachSource, assertOutreachMessage } from './outreach-types';
 import { evidenceExcerpt, generateOutreachMessage, outreachSummary } from './outreach-messages';
-import { readPublicWebsite } from './outreach-research';
+import { readCompanyWebsite } from './outreach-research';
 
 @Injectable()
 export class OutreachService {
@@ -95,20 +95,26 @@ export class OutreachService {
     const keys = [...new Set(dto.recipientKeys)];
     const seen = new Set<string>(); const seenCustomers = new Set<number>();
     const drafts: OutreachDraft[] = [];
+    const researched = new Map<string, ReturnType<typeof readCompanyWebsite>>();
     // Bounded batches avoid an unbounded website crawler behind a single request.
-    for (let index = 0; index < keys.length; index += 3) {
-      const resolved = await Promise.all(keys.slice(index, index + 3).map(async (key) => {
+    for (let index = 0; index < keys.length; index += 4) {
+      const resolved = await Promise.all(keys.slice(index, index + 4).map(async (key) => {
         const state = await this.blocked(key, dto.targetCountry, ownerId || undefined, this.tasks.manager);
         let text = ''; let sourceUrl = state.customer.website || '';
+        let pages: OutreachSource[] = []; let notes: string[] = [];
         let evidenceStatus: OutreachDraft['evidence']['status'] = dto.researchWebsites === false ? 'not_requested' : 'unavailable';
         if (!state.reasons.length && dto.researchWebsites !== false && sourceUrl) {
           try {
-            const page = await readPublicWebsite(sourceUrl);
-            text = page.text; sourceUrl = page.url;
-            if (text.length > 80) evidenceStatus = 'verified';
-          } catch { /* A failed source is a visible gap, never a verified fact. */ }
+            if (!researched.has(sourceUrl)) researched.set(sourceUrl, readCompanyWebsite(sourceUrl));
+            const research = await researched.get(sourceUrl)!;
+            pages = research.pages; notes = research.notes;
+            text = pages.map((page) => page.text).join(' '); sourceUrl = pages[0]?.url || sourceUrl;
+            if (pages.some((page) => page.text.length >= 80)) evidenceStatus = 'verified';
+          } catch { notes.push('官网读取失败，未使用不可访问页面推断事实'); }
         }
-        const message = generateOutreachMessage(state.customer.company, `${state.customer.business || ''} ${state.customer.product || ''}`, evidenceStatus === 'verified' ? text : '', dto.sender, dto.productScope);
+        const message = generateOutreachMessage(state.customer.company, `${state.customer.business || ''} ${state.customer.product || ''}`, evidenceStatus === 'verified' ? text : '', dto.sender, dto.productScope, pages, notes);
+        const primaryFact = message.insight.facts.find((fact) => /供应商|钢制/.test(fact.label)) || message.insight.facts[0];
+        if (primaryFact) { sourceUrl = primaryFact.url; text = primaryFact.excerpt; }
         return { key, state, message, text, sourceUrl, evidenceStatus };
       }));
       for (const { key, state, message, text, sourceUrl, evidenceStatus } of resolved) {
@@ -120,8 +126,8 @@ export class OutreachService {
           company: state.customer.company, name: state.contact?.name || state.customer.contact || state.customer.company,
           timezone: state.timezone, ...message,
           evidence: { url: sourceUrl, checkedAt: new Date().toISOString(), excerpt: evidenceExcerpt(text), status: evidenceStatus },
-          warnings: [...reasons, ...(evidenceStatus !== 'verified' ? ['官网未完成核验，邮件采用条件式探询'] : ['仅核对官网页面关键词，采购意向仍需确认'])],
-          eligible: reasons.length === 0, selected: reasons.length === 0 && message.segment !== 'unknown',
+          warnings: [...reasons, ...message.insight.gaps],
+          eligible: reasons.length === 0, selected: reasons.length === 0 && message.insight.recommended,
         });
       }
     }
@@ -151,6 +157,20 @@ export class OutreachService {
       if (dto.selected && !draft.eligible) throw new BadRequestException('待核对客户不能加入发送');
       if (!assertOutreachMessage(dto.subject, dto.body)) throw new BadRequestException('请填写完整的纯文本主题和正文，移除占位符');
       Object.assign(draft, { subject: dto.subject.trim(), body: dto.body.trim(), selected: dto.selected });
+      task.outreachData.revision += 1;
+      return manager.save(EmailTask, task);
+    });
+    return this.view(task);
+  }
+
+  async select(id: string, dto: SelectOutreachDraftsDto, ownerId?: string) {
+    const task = await this.tasks.manager.transaction(async (manager) => {
+      const task = await this.task(id, ownerId, manager, true);
+      if (task.outreachData.approvedAt || task.status !== 'pending') throw new BadRequestException('已排程的邮件不可修改');
+      if (task.outreachData.revision !== dto.revision) throw new ConflictException('草稿已更新，请刷新后再选择');
+      const keys = new Set(dto.recipientKeys);
+      if ([...keys].some((key) => !task.outreachData.drafts.some((draft) => draft.recipientKey === key && draft.eligible))) throw new BadRequestException('选择包含不存在或不可发送的客户');
+      for (const draft of task.outreachData.drafts) draft.selected = keys.has(draft.recipientKey);
       task.outreachData.revision += 1;
       return manager.save(EmailTask, task);
     });

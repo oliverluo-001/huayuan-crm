@@ -1366,6 +1366,9 @@ export function editOutreachDraft(id: string, key: string, input: { subject: str
 export function scheduleOutreachAnalysis(id: string, input: OutreachSchedule) {
   return api<OutreachDetail>(`/api/outreach-workflows/${encodeURIComponent(id)}/schedule`, { method: 'POST', body: input });
 }
+export function selectOutreachDrafts(id: string, recipientKeys: string[], revision: number) {
+  return api<OutreachDetail>(`/api/outreach-workflows/${encodeURIComponent(id)}/selection`, { method: 'PUT', body: { recipientKeys, revision } });
+}
 
 export async function getAccount(): Promise<User> {
   return api<User>("/api/auth/account");

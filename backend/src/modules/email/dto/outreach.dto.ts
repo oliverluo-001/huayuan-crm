@@ -26,6 +26,11 @@ export class EditOutreachDraftDto {
   @IsInt() @Min(0) revision: number;
 }
 
+export class SelectOutreachDraftsDto {
+  @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) recipientKeys: string[];
+  @IsInt() @Min(0) revision: number;
+}
+
 export class ScheduleOutreachDto {
   @IsDateString() startAt: string;
   @IsInt() @Min(1) @Max(200) batchSize: number;
