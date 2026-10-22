@@ -987,6 +987,7 @@ export interface EmailRecipient {
   customerId: string;
   customerName: string;
   region: string;
+  country?: string;
   tier?: string;
   journeyStage?: string;
   business?: string;

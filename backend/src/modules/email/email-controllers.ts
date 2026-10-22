@@ -38,6 +38,8 @@ export class EmailRecipientsController {
     if (query.tag) filters.tag = query.tag;
     if (query.tier) filters.tier = query.tier;
     if (query.region) filters.region = query.region;
+    if (query.country) filters.country = query.country;
+    if (query.marketRegion) filters.marketRegion = query.marketRegion;
     if (query.journeyStage) filters.journeyStage = query.journeyStage;
     if (query.emailStatus && !['sendable', 'all', 'invalid', 'missing'].includes(query.emailStatus)) {
       filters.emailStatus = query.emailStatus;
@@ -47,6 +49,12 @@ export class EmailRecipientsController {
 
     const result = await this.customersService.findAll(filters);
     const customers = Array.isArray(result) ? result : result.customers || [];
+    if (query.optionsOnly === 'true') {
+      return {
+        recipients: [], total: 0, offset, limit,
+        filterOptions: { regions: [...new Set(customers.map((customer: any) => String(customer.region || '').trim()).filter(Boolean))].sort() },
+      };
+    }
     const customerNumericIds = customers.map((customer: any) => Number(customer.id)).filter(Number.isInteger);
     const [allContacts, suppressions] = await Promise.all([
       this.customersService.findContactsForCustomers(customerNumericIds),
@@ -85,6 +93,7 @@ export class EmailRecipientsController {
             customerId,
             customerName: (customer as any).company || '',
             region: (customer as any).region || '',
+            country: (customer as any).country || '',
             tier: (customer as any).tier || '',
             journeyStage: (customer as any).journeyStage || '',
             emailStatus: isValidEmail(customerEmail) ? ((customer as any).emailStatus || 'valid') : 'invalid',
@@ -118,6 +127,7 @@ export class EmailRecipientsController {
             customerId,
             customerName: (customer as any).company || '',
             region: (customer as any).region || '',
+            country: (customer as any).country || '',
             tier: (customer as any).tier || '',
             journeyStage: (customer as any).journeyStage || '',
             emailStatus: isValidEmail(contactEmail) ? 'valid' : 'invalid',
@@ -135,8 +145,8 @@ export class EmailRecipientsController {
     const emailState = String(query.emailState || query.emailStatus || 'all');
     const filteredRows = rows.filter((row) => {
       if (business && !String(row.business || '').toLowerCase().includes(business)) return false;
-      if (emailState === 'sendable') return isValidEmail(row.email) && !row.suppressed;
-      if (emailState === 'invalid') return !isValidEmail(row.email);
+      if (emailState === 'sendable') return isValidEmail(row.email) && row.emailStatus !== 'invalid' && !row.suppressed;
+      if (emailState === 'invalid') return !isValidEmail(row.email) || row.emailStatus === 'invalid';
       if (emailState === 'missing') return !row.email;
       return true;
     });
@@ -144,7 +154,7 @@ export class EmailRecipientsController {
     if (needIds) {
       return {
         ids: filteredRows
-          .filter((row) => isValidEmail(row.email) && !row.suppressed)
+          .filter((row) => isValidEmail(row.email) && row.emailStatus !== 'invalid' && !row.suppressed)
           .map((row) => row.recipientKey),
       };
     }

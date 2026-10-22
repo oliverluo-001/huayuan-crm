@@ -905,6 +905,7 @@ export async function getEmailRecipients(
   total: number;
   offset: number;
   limit: number;
+  filterOptions?: { regions: string[] };
 }> {
   const qs = params ? "?" + new URLSearchParams(params).toString() : "";
   return api(`/api/email-recipients${qs}`);
