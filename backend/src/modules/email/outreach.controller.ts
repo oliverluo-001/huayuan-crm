@@ -16,5 +16,6 @@ export class OutreachController {
   @Post() create(@Body() dto: CreateOutreachDto, @CurrentUser() user: RequestUser) { return this.outreach.create(dto, scope(user) || ''); }
   @Put(':id/drafts/:key') edit(@Param('id') id: string, @Param('key') key: string, @Body() dto: EditOutreachDraftDto, @CurrentUser() user: RequestUser) { return this.outreach.edit(id, key, dto, scope(user)); }
   @Put(':id/selection') select(@Param('id') id: string, @Body() dto: SelectOutreachDraftsDto, @CurrentUser() user: RequestUser) { return this.outreach.select(id, dto, scope(user)); }
+  @Post(':id/revalidate') revalidate(@Param('id') id: string, @CurrentUser() user: RequestUser) { return this.outreach.revalidate(id, scope(user)); }
   @Post(':id/schedule') schedule(@Param('id') id: string, @Body() dto: ScheduleOutreachDto, @CurrentUser() user: RequestUser) { return this.outreach.schedule(id, dto, scope(user)); }
 }

@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { createOutreachAnalysis, editOutreachDraft, getEmailRecipients, getCustomerGeography, getOutreachAnalyses, getOutreachAnalysis, scheduleOutreachAnalysis, selectOutreachDrafts } from '@/api/client';
+import { createOutreachAnalysis, editOutreachDraft, getEmailRecipients, getCustomerGeography, getOutreachAnalyses, getOutreachAnalysis, revalidateOutreachAnalysis, scheduleOutreachAnalysis, selectOutreachDrafts } from '@/api/client';
 import type { EmailRecipient, CustomerMarket } from '@/api/client';
 import { CUSTOMER_JOURNEY_STAGES } from '@/contracts/crm-stages';
 import { CUSTOMER_TIER_OPTIONS } from '@/contracts/crm-terminology';
@@ -180,7 +180,8 @@ export function CustomerAnalysisTab({ onTasks }: { onTasks: () => void }) {
 
     {analysis && <Card><CardHeader><CardTitle>{analysis.name} · 选择生成内容</CardTitle></CardHeader><CardContent className="space-y-4">
       <p className="text-sm">共 {analysis.summary.total} 条 · 可直接选 {analysis.data.drafts.filter((draft) => draft.eligible).length} 条 · 需人工确认 {analysis.data.drafts.filter((draft) => !draft.eligible && !hardBlocked(draft).length).length} 条 · 不可选 {analysis.data.drafts.filter((draft) => hardBlocked(draft).length > 0).length} 条 · 已选 {analysis.summary.selected} 封</p>
-      {!approved && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || Boolean(editing)} onClick={() => perform(async () => setAnalysis(await selectOutreachDrafts(analysis.id, analysis.data.drafts.filter((draft) => draft.eligible && draft.insight?.recommended).map((draft) => draft.recipientKey), analysis.data.revision)))}>仅勾选有明确产品依据的邮件</Button><Button variant="ghost" disabled={busy || Boolean(editing)} onClick={() => perform(async () => setAnalysis(await selectOutreachDrafts(analysis.id, [], analysis.data.revision)))}>清空邮件勾选</Button></div>}
+      {!approved && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || Boolean(editing)} onClick={() => perform(async () => setAnalysis(await selectOutreachDrafts(analysis.id, analysis.data.drafts.filter((draft) => draft.eligible && draft.insight?.recommended).map((draft) => draft.recipientKey), analysis.data.revision)))}>仅勾选有明确产品依据的邮件</Button><Button variant="ghost" disabled={busy || Boolean(editing)} onClick={() => perform(async () => setAnalysis(await selectOutreachDrafts(analysis.id, [], analysis.data.revision)))}>清空邮件勾选</Button><Button variant="outline" disabled={busy || Boolean(editing)} onClick={() => perform(async () => { setAnalysis(await revalidateOutreachAnalysis(analysis.id)); setSaved(await getOutreachAnalyses()); })}>重新校验全部草稿</Button></div>}
+      {!approved && analysis.data.drafts.some((draft) => hardBlocked(draft).some((reason) => reason.includes('占用') || reason.includes('待核对任务'))) && <p className="rounded border p-3 text-sm text-muted-foreground">有邮箱被其他解析/发信任务占用：请先在「邮件发送 → 发信任务」中取消或删除原任务（已完成任务可直接删除以释放邮箱）；无权限处理时请联系管理员。处理后再点「重新校验全部草稿」。</p>}
       <p className="text-sm text-muted-foreground">根据公开页面识别客户类型、产品关联与供应商准入路径，再匹配邮件。采购意向仍需确认；只有明确产品依据的邮件默认勾选，请逐封审核后排程。</p>
       {analysis.data.drafts.some((draft) => !draft.insight) && <p className="rounded border p-3 text-sm text-muted-foreground">此结果为之前保存的分析。如需核对更多官网页面，请重新选择客户生成解析；已经排程的邮件保持原确认内容。</p>}
       {analysis.data.drafts.map((draft) => {
