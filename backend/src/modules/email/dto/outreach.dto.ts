@@ -23,6 +23,7 @@ export class EditOutreachDraftDto {
   @IsString() @MinLength(1) @MaxLength(500) subject: string;
   @IsString() @MinLength(1) @MaxLength(6000) body: string;
   @IsBoolean() selected: boolean;
+  @IsOptional() @IsBoolean() manualConfirm?: boolean;
   @IsInt() @Min(0) revision: number;
 }
 

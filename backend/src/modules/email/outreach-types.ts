@@ -37,6 +37,7 @@ export interface OutreachDraft {
   warnings: string[];
   eligible: boolean;
   selected: boolean;
+  manualApproved?: boolean;
   subject: string;
   body: string;
   insight?: OutreachInsight;

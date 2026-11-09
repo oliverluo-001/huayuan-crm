@@ -154,9 +154,9 @@ export class OutreachService {
       if (task.outreachData.revision !== dto.revision) throw new ConflictException('草稿已更新，请刷新后再编辑');
       const draft = task.outreachData.drafts.find((d) => d.recipientKey === key);
       if (!draft) throw new NotFoundException('邮件草稿不存在');
-      if (dto.selected && !draft.eligible) throw new BadRequestException('待核对客户不能加入发送');
+      if (dto.selected && !draft.eligible && !dto.manualConfirm) throw new BadRequestException('待核对客户不能加入发送；如已人工核对，请确认后再选择');
       if (!assertOutreachMessage(dto.subject, dto.body)) throw new BadRequestException('请填写完整的纯文本主题和正文，移除占位符');
-      Object.assign(draft, { subject: dto.subject.trim(), body: dto.body.trim(), selected: dto.selected });
+      Object.assign(draft, { subject: dto.subject.trim(), body: dto.body.trim(), selected: dto.selected, manualApproved: Boolean(dto.manualConfirm) || draft.manualApproved });
       task.outreachData.revision += 1;
       return manager.save(EmailTask, task);
     });
@@ -186,7 +186,7 @@ export class OutreachService {
       if (task.outreachData.revision !== dto.revision) throw new ConflictException('草稿已更新，请刷新后重新核对');
       const startAt = new Date(dto.startAt);
       if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(dto.startAt) || !Number.isFinite(startAt.getTime()) || startAt.getTime() < Date.now() + 60_000) throw new BadRequestException('请选择至少一分钟以后的明确开始时间，并包含时区');
-      const selected = task.outreachData.drafts.filter((d) => d.selected && d.eligible);
+      const selected = task.outreachData.drafts.filter((d) => d.selected && (d.eligible || d.manualApproved));
       if (!selected.length) throw new BadRequestException('请至少选择一封可发送邮件');
       if (dto.batchSize * dto.totalRuns < selected.length) throw new BadRequestException('批次容量不足，请增加轮数或减少所选邮件');
       const smtp = await this.settings.getSmtpCredentials(task.ownerId || undefined);

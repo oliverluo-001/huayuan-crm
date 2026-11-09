@@ -88,11 +88,11 @@ export function CustomerAnalysisTab({ onTasks }: { onTasks: () => void }) {
   });
 
   const load = (id: string) => perform(async () => { setAnalysis(await getOutreachAnalysis(id)); setEditing(''); });
-  const updateDraft = (draft: OutreachDraft, changes: { subject?: string; body?: string; selected?: boolean }) => perform(async () => {
+  const updateDraft = (draft: OutreachDraft, changes: { subject?: string; body?: string; selected?: boolean; manualConfirm?: boolean }) => perform(async () => {
     if (!analysis) return;
     setAnalysis(await editOutreachDraft(analysis.id, draft.recipientKey, {
       subject: changes.subject ?? draft.subject, body: changes.body ?? draft.body,
-      selected: changes.selected ?? draft.selected, revision: analysis.data.revision,
+      selected: changes.selected ?? draft.selected, manualConfirm: changes.manualConfirm, revision: analysis.data.revision,
     }));
     setEditing('');
   });
@@ -169,7 +169,11 @@ export function CustomerAnalysisTab({ onTasks }: { onTasks: () => void }) {
       <p className="text-sm text-muted-foreground">根据公开页面识别客户类型、产品关联与供应商准入路径，再匹配邮件。采购意向仍需确认；只有明确产品依据的邮件默认勾选，请逐封审核后排程。</p>
       {analysis.data.drafts.some((draft) => !draft.insight) && <p className="rounded border p-3 text-sm text-muted-foreground">此结果为之前保存的分析。如需核对更多官网页面，请重新选择客户生成解析；已经排程的邮件保持原确认内容。</p>}
       {analysis.data.drafts.map((draft) => <article key={draft.recipientKey} className="space-y-3 rounded-lg border p-4">
-        <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 font-medium"><input type="checkbox" aria-label={`发送给 ${draft.email}`} checked={draft.selected} disabled={!draft.eligible || approved || busy || Boolean(editing)} onChange={(e) => updateDraft(draft, { selected: e.target.checked })} />{draft.company}</label><Badge variant="secondary">{OUTREACH_SEGMENTS[draft.segment]}</Badge></div>
+        <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 font-medium"><input type="checkbox" aria-label={`发送给 ${draft.email}`} checked={draft.selected} disabled={approved || busy || Boolean(editing)} onChange={(e) => {
+          const checked = e.target.checked;
+          if (checked && !draft.eligible && !window.confirm(`该客户尚未通过联系前检查：${draft.warnings.join('；') || draft.reason || '存在待核验信息'}。\n\n确认已人工核对，加入待排程名单吗？排程前系统仍会再次复核。`)) return;
+          updateDraft(draft, { selected: checked, manualConfirm: checked && !draft.eligible });
+        }} />{draft.company}</label><Badge variant="secondary">{OUTREACH_SEGMENTS[draft.segment]}</Badge>{!draft.eligible && <Badge variant="outline">需人工确认后可选</Badge>}</div>
         <p className="break-all text-sm text-muted-foreground">{draft.email} · {draft.timezone || '时区待核实'}</p>
         <p className="text-sm">{draft.reason}</p>
         {draft.insight && <div className="space-y-3 rounded border bg-muted/20 p-3 text-sm">
