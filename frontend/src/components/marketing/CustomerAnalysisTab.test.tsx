@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CustomerAnalysisTab } from './CustomerAnalysisTab';
 
-const mocks = vi.hoisted(() => ({ detail: {} as any, get: vi.fn(), edit: vi.fn(), select: vi.fn(), schedule: vi.fn(), create: vi.fn(), recipients: vi.fn() }));
+const mocks = vi.hoisted(() => ({ detail: {} as any, get: vi.fn(), edit: vi.fn(), select: vi.fn(), schedule: vi.fn(), create: vi.fn(), recipients: vi.fn(), revalidate: vi.fn() }));
 vi.mock('@/api/client', () => ({
   getOutreachAnalyses: async () => [{ id: 'owf_fixture', name: '已保存解析' }],
   getOutreachAnalysis: (...args: any[]) => mocks.get(...args),
@@ -14,6 +14,7 @@ vi.mock('@/api/client', () => ({
   selectOutreachDrafts: (...args: any[]) => mocks.select(...args),
   scheduleOutreachAnalysis: (...args: any[]) => mocks.schedule(...args),
   createOutreachAnalysis: (...args: any[]) => mocks.create(...args),
+  revalidateOutreachAnalysis: (...args: any[]) => mocks.revalidate(...args),
 }));
 let host: HTMLDivElement; let root: Root;
 const findButton = (text: string) => [...host.querySelectorAll('button')].find((button) => button.textContent?.includes(text))!;
@@ -37,7 +38,7 @@ beforeEach(async () => {
     return structuredClone(mocks.detail);
   });
   mocks.schedule.mockImplementation(async (_id, input) => ({ ...structuredClone(mocks.detail), status: 'active', data: { ...mocks.detail.data, approvedAt: 'approved' }, schedule: input, delivery: { message: '定时任务已启用', sent: 0, failed: 0, skipped: 0 } }));
-  mocks.edit.mockClear(); mocks.select.mockClear(); mocks.schedule.mockClear(); mocks.create.mockClear();
+  mocks.edit.mockClear(); mocks.select.mockClear(); mocks.schedule.mockClear(); mocks.create.mockClear(); mocks.revalidate.mockClear();
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => root.render(<CustomerAnalysisTab onTasks={() => undefined} />));
   await act(async () => findButton('已保存解析').click());
@@ -128,6 +129,28 @@ it('disables hard-blocked drafts and lets a review draft be manually confirmed i
   expect(host.textContent).toContain('已人工确认');
   expect(findButton('创建并启用').disabled).toBe(false);
   window.confirm = originalConfirm;
+});
+
+it('revalidates drafts to release a stale task lock', async () => {
+  mocks.detail.data.drafts[0] = {
+    ...mocks.detail.data.drafts[0], eligible: false, selected: false,
+    blockedReasons: ['邮箱已被解析任务「旧任务」（已完成）占用，请先在发信任务中取消或删除原任务；无权处理时请联系管理员'],
+    reviewReasons: [],
+  };
+  mocks.detail.summary = { total: 1, eligible: 0, selected: 0 };
+  mocks.revalidate.mockImplementation(async () => {
+    mocks.detail.data.drafts[0].blockedReasons = [];
+    mocks.detail.data.drafts[0].eligible = true;
+    mocks.detail.data.drafts[0].selected = true;
+    mocks.detail.data.revision += 1;
+    mocks.detail.summary = { total: 1, eligible: 1, selected: 1 };
+    return structuredClone(mocks.detail);
+  });
+  await act(async () => findButton('已保存解析').click());
+  expect(host.textContent).toContain('被其他解析/发信任务占用');
+  await act(async () => findButton('重新校验全部草稿').click());
+  expect(mocks.revalidate).toHaveBeenCalledWith('owf_fixture');
+  expect(host.textContent).toContain('可直接选 1 条');
 });
 
 it('shows source evidence and selects only recommended eligible drafts atomically without sending', async () => {

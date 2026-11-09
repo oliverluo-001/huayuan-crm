@@ -41,8 +41,8 @@ function harness() {
   const repos = new Map<any, any>([
     [EmailTask, { findOne: jest.fn(async () => task) }],
     [EmailLog, { findOne: jest.fn(async () => null) }],
-    [OutreachReservation, { findOne: jest.fn(async () => null) }],
-    [EmailTaskRecipient, { createQueryBuilder: () => qb }],
+    [OutreachReservation, { findOne: jest.fn(async () => null), delete: jest.fn(async () => undefined) }],
+    [EmailTaskRecipient, { findOne: jest.fn(async () => null), createQueryBuilder: () => qb }],
   ]);
   const manager: any = { getRepository: (entity: any) => repos.get(entity), create: (_entity: any, value: any) => value,
     save: jest.fn(async (entity: any, value: any) => { if (entity === EmailTaskRecipient) recipients.push(value); return value; }),
@@ -117,6 +117,52 @@ describe('manual confirmation for reviewable contact checks', () => {
     const hard = await create('b');
     expect(hard.data.drafts[0].eligible).toBe(false);
     expect(hard.data.drafts[0].blockedReasons).toContain('邮箱已退订或在抑制名单');
+  });
+
+  it('releases orphaned reservations and refreshes a saved analysis', async () => {
+    const h = harness();
+    const selected = h.task.outreachData.drafts[0];
+    selected.eligible = false;
+    selected.selected = false;
+    selected.blockedReasons = ['邮箱已被其他客户解析任务占用，请先处理原任务'];
+    h.repos.get(OutreachReservation).findOne.mockResolvedValue({ taskId: 99 });
+    h.repos.get(EmailTask).findOne.mockImplementation(async (options: any) => options?.where?.id === 99 ? null : h.task);
+    const updated = await h.service.revalidate('owf_abc', '7');
+    expect(h.repos.get(OutreachReservation).delete).toHaveBeenCalledWith({ email: selected.email });
+    expect(updated.data.drafts[0]).toMatchObject({ eligible: true, blockedReasons: [], reviewReasons: [] });
+    expect(updated.data.revision).toBe(1);
+  });
+
+  it('keeps an active task lock and names the occupying task', async () => {
+    const h = harness();
+    h.repos.get(OutreachReservation).findOne.mockResolvedValue({ taskId: 99 });
+    h.repos.get(EmailTask).findOne.mockImplementation(async (options: any) => options?.where?.id === 99
+      ? { id: 99, emailTaskId: 'owf_old', name: '旧解析任务', status: 'active' }
+      : h.task);
+    await expect(h.service.schedule('owf_abc', h.schedule, '7')).rejects.toThrow('旧解析任务');
+    expect(h.repos.get(OutreachReservation).delete).not.toHaveBeenCalled();
+  });
+
+  it('releases a cancelled task reservation when the email was never attempted', async () => {
+    const h = harness();
+    h.repos.get(OutreachReservation).findOne.mockResolvedValue({ taskId: 99 });
+    h.repos.get(EmailTask).findOne.mockImplementation(async (options: any) => options?.where?.id === 99
+      ? { id: 99, emailTaskId: 'owf_old', name: '旧解析任务', status: 'cancelled' }
+      : h.task);
+    h.repos.get(EmailTaskRecipient).findOne.mockResolvedValue({ taskId: 99, email: draft().email, status: 'skipped', attempts: 0 });
+    await h.service.schedule('owf_abc', h.schedule, '7');
+    expect(h.repos.get(OutreachReservation).delete).toHaveBeenCalledWith({ email: draft().email });
+    expect(h.recipients).toHaveLength(1);
+  });
+
+  it('keeps the lock when the original task actually sent the email', async () => {
+    const h = harness();
+    h.repos.get(OutreachReservation).findOne.mockResolvedValue({ taskId: 99 });
+    h.repos.get(EmailTask).findOne.mockImplementation(async (options: any) => options?.where?.id === 99
+      ? { id: 99, emailTaskId: 'owf_old', name: '旧解析任务', status: 'completed' }
+      : h.task);
+    h.repos.get(EmailTaskRecipient).findOne.mockResolvedValue({ taskId: 99, email: draft().email, status: 'sent', attempts: 1 });
+    await expect(h.service.schedule('owf_abc', h.schedule, '7')).rejects.toThrow('结果待核对');
   });
 
   it('counts manually confirmed drafts as selected without treating them as eligible', () => {

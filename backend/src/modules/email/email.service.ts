@@ -275,6 +275,10 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     if (['sending', 'active'].includes(task.status) || this.processingTasks.has(task.id)) {
       throw new BadRequestException('请先取消运行中的邮件任务');
     }
+    // Deleting a task releases its first-contact locks. Previously sent addresses
+    // stay blocked by send history; unattempted or uncertain rows no longer keep
+    // an orphaned reservation that could never be resolved again.
+    await this.taskRepository.manager.getRepository(OutreachReservation).delete({ taskId: task.id });
     await this.recipientRepository.delete({ taskId: task.id });
     await this.taskRepository.delete(task.id);
     return { deleted: true };
@@ -322,9 +326,10 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
     task.lastMessage = '任务已取消';
     await this.taskRepository.save(task);
     if (task.outreachData) {
-      const queued = await this.recipientRepository.find({ where: { taskId: task.id, status: 'queued' } });
-      // Keep sent and uncertain addresses reserved. Only unattempted recipients may be released.
-      const emails = queued.filter((r) => r.attempts === 0).map((r) => r.email);
+      // Keep sent and uncertain addresses reserved. Only unattempted recipients
+      // (queued or permanently skipped) may be released for another analysis.
+      const unattempted = await this.recipientRepository.find({ where: { taskId: task.id, status: In(['queued', 'skipped']) } });
+      const emails = unattempted.filter((recipient) => recipient.attempts === 0).map((recipient) => recipient.email);
       if (emails.length) await this.taskRepository.manager.getRepository(OutreachReservation).delete({ taskId: task.id, email: In(emails) });
     }
     return this.formatTask(task);

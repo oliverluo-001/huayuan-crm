@@ -576,8 +576,8 @@ async function verifyActionTransactions(connection: Connection) {
     await Promise.all([outreach.schedule(a.id, plan, 'ci-seller'), outreach.schedule(a.id, plan, 'ci-seller')]);
     const taskA = await source.getRepository(EmailTask).findOneByOrFail({ emailTaskId: a.id });
     assert.equal(await source.getRepository(EmailTaskRecipient).countBy({ taskId: taskA.id }), 1, '重复确认造成重复收件人');
-    await assert.rejects(outreach.schedule(b.id, plan, 'ci-seller'), /其他|待发送/);
-    await assert.rejects(outreach.schedule(c.id, plan, 'ci-seller'), /其他|待发送/);
+    await assert.rejects(outreach.schedule(b.id, plan, 'ci-seller'), /(解析任务|待发送)/);
+    await assert.rejects(outreach.schedule(c.id, plan, 'ci-seller'), /(解析任务|待发送)/);
     assert.equal(await source.getRepository(OutreachReservation).countBy({ email: buyer2.email }), 0, '排程失败未回滚先前邮箱占用');
     const taskC = await source.getRepository(EmailTask).findOneByOrFail({ emailTaskId: c.id });
     assert.equal(await source.getRepository(EmailTaskRecipient).countBy({ taskId: taskC.id }), 0, '排程失败产生部分发信任务');

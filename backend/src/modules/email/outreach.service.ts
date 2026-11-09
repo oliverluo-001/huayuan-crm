@@ -14,6 +14,15 @@ import { NEW_CUSTOMER_STAGES, OutreachData, OutreachDraft, OutreachIssue, Outrea
 import { evidenceExcerpt, generateOutreachMessage, outreachSummary } from './outreach-messages';
 import { readCompanyWebsite } from './outreach-research';
 
+const TASK_STATUS_LABELS: Record<string, string> = {
+  pending: '待启用',
+  active: '已启用',
+  sending: '发送中',
+  completed: '已完成',
+  failed: '发送异常',
+  cancelled: '已取消',
+};
+
 @Injectable()
 export class OutreachService {
   constructor(
@@ -70,7 +79,8 @@ export class OutreachService {
     if (!isValidEmail(email) || customer.emailStatus === 'invalid') add('invalid_email', 'hard', '邮箱无效或已标记异常');
     if (await this.suppressions.isSuppressed(email)) add('suppressed', 'hard', '邮箱已退订或在抑制名单');
     if (contact?.marketingAllowed === false || !(await this.customers.isCustomerEmailMarketingAllowed(customer.id, email))) add('marketing_disallowed', 'hard', '该联系人不允许营销邮件');
-    if (customer.emailSentCount > 0 || await manager.getRepository(EmailLog).findOne({ where: { recipientEmail: email, status: In(['sent', 'bounced']) } })) add('already_sent', 'hard', '已有发送或退信记录，需另行判断跟进');
+    const alreadySent = customer.emailSentCount > 0 || Boolean(await manager.getRepository(EmailLog).findOne({ where: { recipientEmail: email, status: In(['sent', 'bounced']) } }));
+    if (alreadySent) add('already_sent', 'hard', '已有发送或退信记录，需另行判断跟进');
     const stage = customer.journeyStage || '';
     if (!NEW_CUSTOMER_STAGES.includes(stage)) {
       // A customer explicitly marked as contacted may still be re-approached after review.
@@ -84,13 +94,37 @@ export class OutreachService {
     if (!timezone) add('missing_timezone', 'hard', '客户时区缺失，请先在客户资料补全时区后再解析');
     if (/^(hr|careers|jobs|communications|press|customercare)@/i.test(email)) add('non_purchasing_mailbox', 'review', '当前邮箱为非采购职能，需人工核实联系渠道');
     const reserved = await manager.getRepository(OutreachReservation).findOne({ where: { email } });
-    if (reserved && reserved.taskId !== ignoreTaskId) add('reserved', 'hard', '邮箱已被其他客户解析任务占用，请先处理原任务');
+    let reservationBlocked = false;
+    if (reserved && reserved.taskId !== ignoreTaskId) {
+      const reservedTask = await manager.getRepository(EmailTask).findOne({ where: { id: reserved.taskId } });
+      const recipient = reservedTask
+        ? await manager.getRepository(EmailTaskRecipient).findOne({ where: { taskId: reserved.taskId, email } })
+        : null;
+      // Sent or uncertain attempts stay locked; unattempted rows may be released.
+      const retained = Boolean(recipient && (
+        recipient.status === 'sending'
+        || recipient.status === 'sent'
+        || (recipient.status === 'failed' && recipient.attempts > 0)
+      ));
+      // Orphaned reservations and cancelled tasks (which cannot be restarted) are stale locks.
+      const stale = !reservedTask || (reservedTask.status === 'cancelled' && !retained);
+      if (stale) {
+        await manager.getRepository(OutreachReservation).delete({ email });
+      } else if (retained) {
+        if (!alreadySent) add('reserved_history', 'hard', `该邮箱在任务「${reservedTask?.name || reservedTask?.emailTaskId || ''}」中已发送或结果待核对，请先核对发送记录`);
+        reservationBlocked = true;
+      } else {
+        const statusLabel = TASK_STATUS_LABELS[reservedTask!.status] || reservedTask!.status;
+        add('reserved_active', 'hard', `邮箱已被解析任务「${reservedTask!.name || reservedTask!.emailTaskId}」（${statusLabel}）占用，请先在发信任务中取消或删除原任务；无权处理时请联系管理员`);
+        reservationBlocked = true;
+      }
+    }
     const pending = await manager.getRepository(EmailTaskRecipient).createQueryBuilder('r')
       .innerJoin(EmailTask, 't', 't.id = r.taskId').where('r.email = :email', { email })
       .andWhere('r.status IN (:...states)', { states: ['queued', 'sending'] })
       .andWhere('t.status IN (:...taskStates)', { taskStates: ['active', 'sending', 'pending'] })
       .getOne();
-    if (pending && pending.taskId !== ignoreTaskId) add('pending_task', 'hard', '邮箱已有待发送或结果待核对任务，请先处理发信任务');
+    if (pending && pending.taskId !== ignoreTaskId && !reservationBlocked) add('pending_task', 'hard', '邮箱已有待发送或结果待核对任务，请先处理发信任务');
     return { customer, contact, email, timezone, issues };
   }
 
@@ -192,6 +226,39 @@ export class OutreachService {
         selected: dto.selected,
         manualApproved: dto.selected ? (Boolean(dto.manualConfirm) || Boolean(draft.manualApproved)) : false,
       });
+      task.outreachData.revision += 1;
+      return manager.save(EmailTask, task);
+    });
+    return this.view(task);
+  }
+
+  // Re-run all contact checks against current data. Orphaned reservations and
+  // reservations of cancelled tasks are released here, so a saved analysis can be
+  // reused instead of forcing the user to regenerate every draft.
+  async revalidate(id: string, ownerId?: string) {
+    const task = await this.tasks.manager.transaction(async (manager) => {
+      const task = await this.task(id, ownerId, manager, true);
+      if (task.outreachData.approvedAt || task.status !== 'pending') throw new BadRequestException('已排程的邮件不可重新校验');
+      for (const draft of task.outreachData.drafts) {
+        const state = await this.assess(draft.recipientKey, task.outreachData.targetCountry, task.ownerId || undefined, manager, task.id);
+        if (state.email !== draft.email) {
+          draft.blockedReasons = ['邮箱已变更，请重新解析'];
+          draft.reviewReasons = [];
+          draft.eligible = false;
+          draft.selected = false;
+          draft.manualApproved = false;
+          draft.warnings = ['邮箱已变更，请重新解析', ...(draft.insight?.gaps || [])];
+          continue;
+        }
+        const blocked = OutreachService.labels(state.issues, 'hard');
+        const review = OutreachService.labels(state.issues, 'review');
+        draft.blockedReasons = blocked;
+        draft.reviewReasons = review;
+        draft.eligible = blocked.length === 0 && review.length === 0;
+        if (blocked.length) { draft.selected = false; draft.manualApproved = false; }
+        if (state.timezone) draft.timezone = state.timezone;
+        draft.warnings = [...blocked, ...review, ...(draft.insight?.gaps || [])];
+      }
       task.outreachData.revision += 1;
       return manager.save(EmailTask, task);
     });

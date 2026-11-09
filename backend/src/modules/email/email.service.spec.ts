@@ -1,4 +1,5 @@
 import { EmailService } from './email.service';
+import { In } from 'typeorm';
 
 describe('EmailService ownership', () => {
   const templateRepository = {
@@ -8,12 +9,17 @@ describe('EmailService ownership', () => {
     save: jest.fn(async (value) => value),
     delete: jest.fn(),
   };
+  const reservationRepository = {
+    findOne: jest.fn(),
+    delete: jest.fn(),
+  };
   const taskRepository = {
     find: jest.fn(),
     findOne: jest.fn(),
     create: jest.fn((value) => ({ id: 5, ...value })),
     save: jest.fn(async (value) => value),
     delete: jest.fn(),
+    manager: { getRepository: jest.fn(() => reservationRepository) },
   };
   const logRepository = {
     find: jest.fn(),
@@ -326,5 +332,35 @@ describe('EmailService ownership', () => {
     expect(suppressionService.add).toHaveBeenCalledWith(expect.objectContaining({
       email: 'buyer@example.com',
     }));
+  });
+
+  it('releases first-contact reservations when a task is deleted', async () => {
+    taskRepository.findOne.mockResolvedValue({ id: 1, emailTaskId: 'task_1', ownerId: '7', status: 'completed', customerIds: '[]' });
+
+    await expect(service.removeTask('1', '7')).resolves.toEqual({ deleted: true });
+
+    expect(reservationRepository.delete).toHaveBeenCalledWith({ taskId: 1 });
+    expect(recipientRepository.delete).toHaveBeenCalledWith({ taskId: 1 });
+  });
+
+  it('releases only unattempted queued and skipped recipients when cancelling', async () => {
+    taskRepository.findOne.mockResolvedValue({
+      id: 2, emailTaskId: 'task_2', ownerId: '7', status: 'active',
+      outreachData: { version: 1, revision: 1, drafts: [] }, customerIds: '[]',
+    });
+    recipientRepository.find.mockResolvedValue([
+      { email: 'queued@example.com', attempts: 0, status: 'queued' },
+      { email: 'skipped@example.com', attempts: 0, status: 'skipped' },
+      { email: 'attempted@example.com', attempts: 1, status: 'queued' },
+      { email: 'failed@example.com', attempts: 1, status: 'failed' },
+    ]);
+
+    await service.cancelTask('task_2', '7');
+
+    expect(recipientRepository.find).toHaveBeenCalledWith({ where: { taskId: 2, status: In(['queued', 'skipped']) } });
+    expect(reservationRepository.delete).toHaveBeenCalledWith({
+      taskId: 2,
+      email: In(['queued@example.com', 'skipped@example.com']),
+    });
   });
 });
