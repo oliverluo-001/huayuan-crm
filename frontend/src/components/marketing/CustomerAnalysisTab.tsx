@@ -19,6 +19,21 @@ const INITIAL_SENDER: OutreachSender = {
 const requestId = () => `owf_${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`;
 const EMPTY_FILTERS = { q: '', marketRegion: '', country: '', region: '', tier: '', journeyStage: '', business: '', emailState: 'sendable' };
 
+// A draft can carry two kinds of pre-contact checks. Hard blocks can never be
+// overridden; review items only need an explicit manual confirmation.
+const hardBlocked = (draft: OutreachDraft) => draft.blockedReasons ?? [];
+const reviewItems = (draft: OutreachDraft) => draft.reviewReasons ?? (draft.eligible ? [] : draft.warnings);
+const extraWarnings = (draft: OutreachDraft) => {
+  const classified = new Set([...hardBlocked(draft), ...reviewItems(draft)]);
+  return draft.warnings.filter((warning) => !classified.has(warning));
+};
+const manualConfirmText = (draft: OutreachDraft) => [
+  '该邮箱尚未自动通过联系前检查：',
+  ...reviewItems(draft).map((reason) => `· ${reason}`),
+  '',
+  '确认已人工核对，将其加入待排程名单吗？无效邮箱、退订、已发送、被占用等硬性拦截仍会在排程和发信时复核。',
+].join('\n');
+
 export function CustomerAnalysisTab({ onTasks }: { onTasks: () => void }) {
   const [sender, setSender] = useState(INITIAL_SENDER);
   const [name, setName] = useState('阿联酋首次开发');
@@ -153,27 +168,30 @@ export function CustomerAnalysisTab({ onTasks }: { onTasks: () => void }) {
             <input type="checkbox" aria-label={`解析 ${recipient.email}`} checked={selected.has(recipient.recipientKey)} disabled={recipient.emailStatus === 'invalid' || recipient.suppressed || (!selected.has(recipient.recipientKey) && selected.size >= 20)} onChange={(e) => {
               const checked = e.target.checked;
               setSelected((previous) => { const next = new Map(previous); if (checked) next.set(recipient.recipientKey, recipient); else next.delete(recipient.recipientKey); return next; });
-            }} /><span>{recipient.customerName}<span className="block break-all text-muted-foreground">{recipient.email} · {[recipient.country, recipient.region].filter(Boolean).join(' / ')}</span></span>
+            }} /><span>{recipient.customerName}<span className="block break-all text-muted-foreground">{recipient.email} · {[recipient.country, recipient.region].filter(Boolean).join(' / ')}</span>{recipient.emailStatus === 'invalid' && <span className="block text-xs text-destructive">邮箱异常，不能用于首次开发；请先更新客户邮箱</span>}{recipient.suppressed && <span className="block text-xs text-destructive">该邮箱已退订或在禁发名单，不能发送</span>}</span>
           </label>)}
           {loading && <p className="p-4 text-sm" role="status">正在筛选客户…</p>}
           {!loading && !recipients.length && <p className="p-4 text-sm">未找到匹配联系人</p>}
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm"><span>已选 {selected.size} / 20 · 匹配 {total} 个</span><Button variant="outline" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - 25))}>上一页</Button><Button variant="outline" disabled={offset + 25 >= total || loading} onClick={() => setOffset(offset + 25)}>下一页</Button><Button variant="ghost" onClick={() => setSelected(new Map())}>清空选择</Button></div>
+        <div className="flex flex-wrap items-center gap-3 text-sm"><span>已选 {selected.size} / 20 · 匹配 {total} 个</span>{selected.size >= 20 && <span className="text-xs text-muted-foreground">本次最多解析 20 个联系入口，取消勾选后可继续选择其他客户</span>}<Button variant="outline" disabled={offset === 0 || loading} onClick={() => setOffset(Math.max(0, offset - 25))}>上一页</Button><Button variant="outline" disabled={offset + 25 >= total || loading} onClick={() => setOffset(offset + 25)}>下一页</Button><Button variant="ghost" onClick={() => setSelected(new Map())}>清空选择</Button></div>
         <Button disabled={!selected.size || !name.trim() || !country.trim() || !scope.trim()} onClick={generate}>{busy ? '正在解析并保存，请稍候…' : '解析客户并生成对应邮件'}</Button>
       </fieldset>
     </CardContent></Card>
 
     {analysis && <Card><CardHeader><CardTitle>{analysis.name} · 选择生成内容</CardTitle></CardHeader><CardContent className="space-y-4">
-      <p className="text-sm">共 {analysis.summary.total} 条 · 可选 {analysis.summary.eligible} 条 · 已选 {analysis.summary.selected} 封</p>
+      <p className="text-sm">共 {analysis.summary.total} 条 · 可直接选 {analysis.data.drafts.filter((draft) => draft.eligible).length} 条 · 需人工确认 {analysis.data.drafts.filter((draft) => !draft.eligible && !hardBlocked(draft).length).length} 条 · 不可选 {analysis.data.drafts.filter((draft) => hardBlocked(draft).length > 0).length} 条 · 已选 {analysis.summary.selected} 封</p>
       {!approved && <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || Boolean(editing)} onClick={() => perform(async () => setAnalysis(await selectOutreachDrafts(analysis.id, analysis.data.drafts.filter((draft) => draft.eligible && draft.insight?.recommended).map((draft) => draft.recipientKey), analysis.data.revision)))}>仅勾选有明确产品依据的邮件</Button><Button variant="ghost" disabled={busy || Boolean(editing)} onClick={() => perform(async () => setAnalysis(await selectOutreachDrafts(analysis.id, [], analysis.data.revision)))}>清空邮件勾选</Button></div>}
       <p className="text-sm text-muted-foreground">根据公开页面识别客户类型、产品关联与供应商准入路径，再匹配邮件。采购意向仍需确认；只有明确产品依据的邮件默认勾选，请逐封审核后排程。</p>
       {analysis.data.drafts.some((draft) => !draft.insight) && <p className="rounded border p-3 text-sm text-muted-foreground">此结果为之前保存的分析。如需核对更多官网页面，请重新选择客户生成解析；已经排程的邮件保持原确认内容。</p>}
-      {analysis.data.drafts.map((draft) => <article key={draft.recipientKey} className="space-y-3 rounded-lg border p-4">
-        <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 font-medium"><input type="checkbox" aria-label={`发送给 ${draft.email}`} checked={draft.selected} disabled={approved || busy || Boolean(editing)} onChange={(e) => {
+      {analysis.data.drafts.map((draft) => {
+        const blocked = hardBlocked(draft);
+        const review = reviewItems(draft);
+        return <article key={draft.recipientKey} className="space-y-3 rounded-lg border p-4">
+        <div className="flex flex-wrap items-center gap-3"><label className="flex items-center gap-2 font-medium"><input type="checkbox" aria-label={`发送给 ${draft.email}`} checked={draft.selected} disabled={approved || busy || Boolean(editing) || blocked.length > 0} onChange={(e) => {
           const checked = e.target.checked;
-          if (checked && !draft.eligible && !window.confirm(`该客户尚未通过联系前检查：${draft.warnings.join('；') || draft.reason || '存在待核验信息'}。\n\n确认已人工核对，加入待排程名单吗？排程前系统仍会再次复核。`)) return;
+          if (checked && !draft.eligible && !window.confirm(manualConfirmText(draft))) return;
           updateDraft(draft, { selected: checked, manualConfirm: checked && !draft.eligible });
-        }} />{draft.company}</label><Badge variant="secondary">{OUTREACH_SEGMENTS[draft.segment]}</Badge>{!draft.eligible && <Badge variant="outline">需人工确认后可选</Badge>}</div>
+        }} />{draft.company}</label><Badge variant="secondary">{OUTREACH_SEGMENTS[draft.segment]}</Badge>{blocked.length > 0 ? <Badge variant="destructive">不可选</Badge> : !draft.eligible ? <Badge variant="outline">需人工确认后可选</Badge> : null}{draft.selected && draft.manualApproved && <Badge variant="secondary">已人工确认</Badge>}</div>
         <p className="break-all text-sm text-muted-foreground">{draft.email} · {draft.timezone || '时区待核实'}</p>
         <p className="text-sm">{draft.reason}</p>
         {draft.insight && <div className="space-y-3 rounded border bg-muted/20 p-3 text-sm">
@@ -187,14 +205,19 @@ export function CustomerAnalysisTab({ onTasks }: { onTasks: () => void }) {
             <p className="text-muted-foreground">核对时间：{new Date(draft.evidence.checkedAt).toLocaleString()}</p>
           </div></details>
         </div>}
-        <ul className="list-inside list-disc text-sm text-muted-foreground">{draft.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+        <ul className="list-inside list-disc text-sm text-muted-foreground">
+          {blocked.map((reason) => <li key={`blocked-${reason}`} className="text-destructive">不可选：{reason}</li>)}
+          {review.map((reason) => <li key={`review-${reason}`}>需人工核对：{reason}</li>)}
+          {extraWarnings(draft).map((warning) => <li key={`note-${warning}`}>{warning}</li>)}
+        </ul>
         {!draft.insight && draft.evidence.status === 'verified' && <details className="text-sm"><summary className="cursor-pointer">查看官网依据与核对时间</summary><p className="mt-2">{draft.evidence.excerpt}</p>{/^https?:\/\//.test(draft.evidence.url) && <a className="break-all underline" href={draft.evidence.url} target="_blank" rel="noreferrer">{draft.evidence.url}</a>}<p>{new Date(draft.evidence.checkedAt).toLocaleString()}</p></details>}
         {editing === draft.recipientKey ? <div className="space-y-3">
           <Label htmlFor="draft-subject">邮件主题</Label><Input id="draft-subject" value={editSubject} maxLength={500} onChange={(e) => setEditSubject(e.target.value)} disabled={busy} />
           <Label htmlFor="draft-body">邮件正文</Label><Textarea id="draft-body" value={editBody} maxLength={6000} rows={16} onChange={(e) => setEditBody(e.target.value)} disabled={busy} />
           <Button disabled={busy} onClick={() => updateDraft(draft, { subject: editSubject, body: editBody })}>保存本封修改</Button><Button variant="ghost" disabled={busy} onClick={() => setEditing('')}>放弃修改</Button>
         </div> : <><p className="font-medium">Subject: {draft.subject}</p><pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6">{draft.body}</pre>{!approved && <Button variant="outline" disabled={busy || Boolean(editing)} onClick={() => { setEditing(draft.recipientKey); setEditSubject(draft.subject); setEditBody(draft.body); }}>编辑这封邮件</Button>}</>}
-      </article>)}
+      </article>;
+      })}
     </CardContent></Card>}
 
     {analysis && <Card><CardHeader><CardTitle>{approved ? '已创建定时任务' : '用所选邮件创建定时任务'}</CardTitle></CardHeader><CardContent className="space-y-4">

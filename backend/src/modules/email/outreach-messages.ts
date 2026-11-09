@@ -60,5 +60,11 @@ export function evidenceExcerpt(text: string) {
 }
 
 export function outreachSummary(drafts: OutreachDraft[]) {
-  return { total: drafts.length, eligible: drafts.filter((d) => d.eligible).length, selected: drafts.filter((d) => d.eligible && d.selected).length };
+  return {
+    total: drafts.length,
+    eligible: drafts.filter((d) => d.eligible).length,
+    // Manually confirmed drafts count as selected so the schedule capacity and
+    // scheduled total reflect what will actually be queued.
+    selected: drafts.filter((d) => d.selected && (d.eligible || d.manualApproved)).length,
+  };
 }

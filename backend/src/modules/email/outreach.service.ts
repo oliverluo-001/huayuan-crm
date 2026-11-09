@@ -10,7 +10,7 @@ import { findCustomerCountry } from '../customers/customer-geography';
 import { resolveCustomerTimezone } from './customer-timezone';
 import { isValidEmail, normalizeEmail } from './email-utils';
 import { CreateOutreachDto, EditOutreachDraftDto, ScheduleOutreachDto, SelectOutreachDraftsDto } from './dto/outreach.dto';
-import { NEW_CUSTOMER_STAGES, OutreachData, OutreachDraft, OutreachSource, assertOutreachMessage } from './outreach-types';
+import { NEW_CUSTOMER_STAGES, OutreachData, OutreachDraft, OutreachIssue, OutreachSource, assertOutreachMessage } from './outreach-types';
 import { evidenceExcerpt, generateOutreachMessage, outreachSummary } from './outreach-messages';
 import { readCompanyWebsite } from './outreach-research';
 
@@ -60,29 +60,42 @@ export class OutreachService {
     return { customer, contact, email: normalizeEmail(contact ? contact.email : customer.email) };
   }
 
-  private async blocked(key: string, targetCountry: string, ownerId: string | undefined, manager: EntityManager, ignoreTaskId?: number) {
+  // Classify every pre-contact check. Hard issues can never be bypassed; review
+  // issues are blocked by default but can be scheduled after an explicit manual
+  // confirmation. Scheduling and sending re-run the same classification.
+  private async assess(key: string, targetCountry: string, ownerId: string | undefined, manager: EntityManager, ignoreTaskId?: number) {
     const { customer, contact, email } = await this.resolve(key, ownerId);
-    const reasons: string[] = [];
-    if (!isValidEmail(email) || customer.emailStatus === 'invalid') reasons.push('邮箱无效或已标记异常');
-    if (await this.suppressions.isSuppressed(email)) reasons.push('邮箱已退订或在抑制名单');
-    if (contact?.marketingAllowed === false || !(await this.customers.isCustomerEmailMarketingAllowed(customer.id, email))) reasons.push('该联系人不允许营销邮件');
-    if (!NEW_CUSTOMER_STAGES.includes(customer.journeyStage || '')) reasons.push('客户已进入联系或后续阶段，不适合首次开发');
-    if (customer.emailSentCount > 0 || await manager.getRepository(EmailLog).findOne({ where: { recipientEmail: email, status: In(['sent', 'bounced']) } })) reasons.push('已有发送或退信记录，需另行判断跟进');
+    const issues: OutreachIssue[] = [];
+    const add = (code: string, level: OutreachIssue['level'], label: string) => issues.push({ code, level, label });
+    if (!isValidEmail(email) || customer.emailStatus === 'invalid') add('invalid_email', 'hard', '邮箱无效或已标记异常');
+    if (await this.suppressions.isSuppressed(email)) add('suppressed', 'hard', '邮箱已退订或在抑制名单');
+    if (contact?.marketingAllowed === false || !(await this.customers.isCustomerEmailMarketingAllowed(customer.id, email))) add('marketing_disallowed', 'hard', '该联系人不允许营销邮件');
+    if (customer.emailSentCount > 0 || await manager.getRepository(EmailLog).findOne({ where: { recipientEmail: email, status: In(['sent', 'bounced']) } })) add('already_sent', 'hard', '已有发送或退信记录，需另行判断跟进');
+    const stage = customer.journeyStage || '';
+    if (!NEW_CUSTOMER_STAGES.includes(stage)) {
+      // A customer explicitly marked as contacted may still be re-approached after review.
+      if (stage === 'contacted') add('contacted_stage', 'review', '客户已标记为已联系，需人工确认是否再次首次开发');
+      else add('advanced_stage', 'hard', '客户已进入回复或成交阶段，不能再次首次开发');
+    }
     const target = findCustomerCountry(targetCountry);
     const actual = findCustomerCountry(customer.country);
-    if (!actual || actual.name !== target?.name) reasons.push('客户国家缺失或与目标市场不符，请先修正客户资料');
+    if (!actual || actual.name !== target?.name) add('country_mismatch', 'review', '客户国家缺失或与目标市场不符，请先核对客户资料');
     const timezone = resolveCustomerTimezone(customer.timezone, customer.region, customer.country);
-    if (!timezone) reasons.push('客户时区缺失');
-    if (/^(hr|careers|jobs|communications|press|customercare)@/i.test(email)) reasons.push('当前邮箱为非采购职能，先核实联系渠道');
+    if (!timezone) add('missing_timezone', 'hard', '客户时区缺失，请先在客户资料补全时区后再解析');
+    if (/^(hr|careers|jobs|communications|press|customercare)@/i.test(email)) add('non_purchasing_mailbox', 'review', '当前邮箱为非采购职能，需人工核实联系渠道');
     const reserved = await manager.getRepository(OutreachReservation).findOne({ where: { email } });
-    if (reserved && reserved.taskId !== ignoreTaskId) reasons.push('邮箱已被其他客户解析任务排程或处理');
+    if (reserved && reserved.taskId !== ignoreTaskId) add('reserved', 'hard', '邮箱已被其他客户解析任务占用，请先处理原任务');
     const pending = await manager.getRepository(EmailTaskRecipient).createQueryBuilder('r')
       .innerJoin(EmailTask, 't', 't.id = r.taskId').where('r.email = :email', { email })
       .andWhere('r.status IN (:...states)', { states: ['queued', 'sending'] })
       .andWhere('t.status IN (:...taskStates)', { taskStates: ['active', 'sending', 'pending'] })
       .getOne();
-    if (pending && pending.taskId !== ignoreTaskId) reasons.push('邮箱已有待发送或结果待核对任务');
-    return { customer, contact, email, timezone, reasons };
+    if (pending && pending.taskId !== ignoreTaskId) add('pending_task', 'hard', '邮箱已有待发送或结果待核对任务，请先处理发信任务');
+    return { customer, contact, email, timezone, issues };
+  }
+
+  private static labels(issues: OutreachIssue[], level: OutreachIssue['level']) {
+    return issues.filter((issue) => issue.level === level).map((issue) => issue.label);
   }
 
   async create(dto: CreateOutreachDto, ownerId = '') {
@@ -99,11 +112,12 @@ export class OutreachService {
     // Bounded batches avoid an unbounded website crawler behind a single request.
     for (let index = 0; index < keys.length; index += 4) {
       const resolved = await Promise.all(keys.slice(index, index + 4).map(async (key) => {
-        const state = await this.blocked(key, dto.targetCountry, ownerId || undefined, this.tasks.manager);
+        const state = await this.assess(key, dto.targetCountry, ownerId || undefined, this.tasks.manager);
+        const hard = OutreachService.labels(state.issues, 'hard');
         let text = ''; let sourceUrl = state.customer.website || '';
         let pages: OutreachSource[] = []; let notes: string[] = [];
         let evidenceStatus: OutreachDraft['evidence']['status'] = dto.researchWebsites === false ? 'not_requested' : 'unavailable';
-        if (!state.reasons.length && dto.researchWebsites !== false && sourceUrl) {
+        if (!hard.length && dto.researchWebsites !== false && sourceUrl) {
           try {
             if (!researched.has(sourceUrl)) researched.set(sourceUrl, readCompanyWebsite(sourceUrl));
             const research = await researched.get(sourceUrl)!;
@@ -118,16 +132,20 @@ export class OutreachService {
         return { key, state, message, text, sourceUrl, evidenceStatus };
       }));
       for (const { key, state, message, text, sourceUrl, evidenceStatus } of resolved) {
-        const reasons = [...state.reasons];
-        if (seen.has(state.email) || seenCustomers.has(state.customer.id)) reasons.push('本次客户或邮箱重复，仅保留一个采购联系入口');
-        if (!reasons.length) { seen.add(state.email); seenCustomers.add(state.customer.id); }
+        const blockedReasons = OutreachService.labels(state.issues, 'hard');
+        const reviewReasons = OutreachService.labels(state.issues, 'review');
+        const duplicated = seen.has(state.email) || seenCustomers.has(state.customer.id);
+        if (duplicated) blockedReasons.push('本次客户或邮箱重复，仅保留一个采购联系入口');
+        else if (!blockedReasons.length) { seen.add(state.email); seenCustomers.add(state.customer.id); }
         if (!assertOutreachMessage(message.subject, message.body)) throw new BadRequestException('产品描述或签名包含未填写占位符或HTML，请使用完整纯文本');
         drafts.push({ recipientKey: key, customerId: state.customer.id, contactId: state.contact?.id || null, email: state.email,
           company: state.customer.company, name: state.contact?.name || state.customer.contact || state.customer.company,
           timezone: state.timezone, ...message,
           evidence: { url: sourceUrl, checkedAt: new Date().toISOString(), excerpt: evidenceExcerpt(text), status: evidenceStatus },
-          warnings: [...reasons, ...message.insight.gaps],
-          eligible: reasons.length === 0, selected: reasons.length === 0 && message.insight.recommended,
+          warnings: [...blockedReasons, ...reviewReasons, ...message.insight.gaps],
+          blockedReasons, reviewReasons,
+          eligible: !blockedReasons.length && !reviewReasons.length,
+          selected: !blockedReasons.length && !reviewReasons.length && message.insight.recommended,
         });
       }
     }
@@ -154,9 +172,26 @@ export class OutreachService {
       if (task.outreachData.revision !== dto.revision) throw new ConflictException('草稿已更新，请刷新后再编辑');
       const draft = task.outreachData.drafts.find((d) => d.recipientKey === key);
       if (!draft) throw new NotFoundException('邮件草稿不存在');
-      if (dto.selected && !draft.eligible && !dto.manualConfirm) throw new BadRequestException('待核对客户不能加入发送；如已人工核对，请确认后再选择');
+      if (dto.selected && !draft.eligible && !dto.manualConfirm && !draft.manualApproved) throw new BadRequestException('待核对客户不能加入发送；如已人工核对，请确认后再选择');
       if (!assertOutreachMessage(dto.subject, dto.body)) throw new BadRequestException('请填写完整的纯文本主题和正文，移除占位符');
-      Object.assign(draft, { subject: dto.subject.trim(), body: dto.body.trim(), selected: dto.selected, manualApproved: Boolean(dto.manualConfirm) || draft.manualApproved });
+      if (dto.selected) {
+        // Re-classify against current data: a hard block that appeared after the
+        // analysis (or that was never renderable) must not be turned into a send.
+        const state = await this.assess(key, task.outreachData.targetCountry, ownerId || undefined, manager, task.id);
+        const blocked = OutreachService.labels(state.issues, 'hard');
+        if (blocked.length) throw new BadRequestException(`该邮箱存在不可人工放行的拦截项：${blocked.join('；')}，请先处理后再选`);
+        draft.reviewReasons = OutreachService.labels(state.issues, 'review');
+        draft.blockedReasons = [];
+        draft.eligible = draft.reviewReasons.length === 0;
+        if (state.timezone) draft.timezone = state.timezone;
+        draft.warnings = [...draft.reviewReasons, ...(draft.insight?.gaps || [])];
+      }
+      Object.assign(draft, {
+        subject: dto.subject.trim(),
+        body: dto.body.trim(),
+        selected: dto.selected,
+        manualApproved: dto.selected ? (Boolean(dto.manualConfirm) || Boolean(draft.manualApproved)) : false,
+      });
       task.outreachData.revision += 1;
       return manager.save(EmailTask, task);
     });
@@ -194,8 +229,12 @@ export class OutreachService {
       const fromEmail = normalizeEmail(from.match(/<([^>]+)>/)?.[1] || from);
       if (!smtp.smtpHost || !smtp.pass || fromEmail !== normalizeEmail(task.outreachData.sender.email)) throw new BadRequestException('实际发件账户与签名邮箱不符或SMTP配置不完整，请前往设置核对');
       for (const draft of selected) {
-        const state = await this.blocked(draft.recipientKey, task.outreachData.targetCountry, task.ownerId || undefined, manager, task.id);
-        if (state.email !== draft.email || state.reasons.length) throw new BadRequestException(`${draft.company}：${state.reasons.join('；') || '邮箱已变更，请重新解析'}`);
+        const state = await this.assess(draft.recipientKey, task.outreachData.targetCountry, task.ownerId || undefined, manager, task.id);
+        if (state.email !== draft.email) throw new BadRequestException(`${draft.company}：邮箱已变更，请重新解析`);
+        const blocked = OutreachService.labels(state.issues, 'hard');
+        if (blocked.length) throw new BadRequestException(`${draft.company}：${blocked.join('；')}`);
+        const review = OutreachService.labels(state.issues, 'review');
+        if (review.length && !draft.manualApproved) throw new BadRequestException(`${draft.company}：${review.join('；')}，请逐封人工确认后再排程`);
         if (!assertOutreachMessage(draft.subject, draft.body)) throw new BadRequestException(`${draft.company}：邮件内容不完整`);
         draft.timezone = state.timezone;
         try { await manager.insert(OutreachReservation, { email: draft.email, taskId: task.id }); }

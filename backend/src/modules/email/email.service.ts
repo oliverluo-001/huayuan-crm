@@ -704,7 +704,7 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       product: customer?.product || '',
       email: recipient.email,
     };
-    const draft = task.outreachData?.drafts.find((d) => d.recipientKey === recipient.recipientKey && d.email === recipient.email && d.selected && d.eligible);
+    const draft = task.outreachData?.drafts.find((d) => d.recipientKey === recipient.recipientKey && d.email === recipient.email && d.selected && (d.eligible || d.manualApproved));
     if (task.outreachData) {
       if (!task.outreachData.approvedAt || !draft || !assertOutreachMessage(draft.subject, draft.body)) {
         await this.skipRecipient(recipient, '对应邮件未确认或缺失，禁止回退到通用模板');
@@ -717,11 +717,19 @@ export class EmailService implements OnModuleInit, OnModuleDestroy {
       const contact = recipient.contactId ? await this.customersService.findContactByIdentifier(String(recipient.contactId)) : null;
       const currentEmail = normalizeEmail(contact ? contact.email : customer?.email || '');
       const previouslySent = await this.logRepository.findOne({ where: { recipientEmail: recipient.email, status: In(['sent', 'bounced']) } });
+      // Manual confirmation only relaxes reviewable checks (a contacted customer
+      // or a market mismatch). Every hard safety check stays enforced at send time.
+      const manual = Boolean(draft.manualApproved);
+      const stageAllowed = customer
+        ? NEW_CUSTOMER_STAGES.includes(customer.journeyStage || '') || (manual && customer.journeyStage === 'contacted')
+        : false;
+      const actualCountry = customer ? findCustomerCountry(customer.country) : undefined;
+      const targetCountry = findCustomerCountry(task.outreachData.targetCountry);
+      const countryAllowed = manual || Boolean(actualCountry && targetCountry && actualCountry.name === targetCountry.name);
       if (!customer || currentEmail !== recipient.email || contact?.marketingAllowed === false
         || customer.emailStatus === 'invalid'
-        || findCustomerCountry(customer.country)?.name !== findCustomerCountry(task.outreachData.targetCountry)?.name
         || !(await this.customersService.isCustomerEmailMarketingAllowed(customer.id, recipient.email))
-        || !NEW_CUSTOMER_STAGES.includes(customer.journeyStage || '') || customer.emailSentCount > 0 || previouslySent) {
+        || !stageAllowed || !countryAllowed || customer.emailSentCount > 0 || previouslySent) {
         await this.skipRecipient(recipient, '客户已联系、邮箱已变更或营销状态改变，请人工核对');
         return false;
       }

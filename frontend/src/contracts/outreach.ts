@@ -17,7 +17,12 @@ export interface OutreachDraft {
   recipientKey: string; customerId: number; email: string; company: string; timezone: string;
   segment: 'piping' | 'valves' | 'projects' | 'water' | 'unknown';
   evidence: { url: string; checkedAt: string; excerpt: string; status: 'verified' | 'unavailable' | 'not_requested' };
-  reason: string; warnings: string[]; eligible: boolean; selected: boolean; manualApproved?: boolean; subject: string; body: string;
+  reason: string; warnings: string[];
+  /** 硬性拦截（无效邮箱、退订、已发送、被占用等），不可人工放行。 */
+  blockedReasons?: string[];
+  /** 可人工核对后放行的项目（已联系、国家不符、非采购邮箱等）。 */
+  reviewReasons?: string[];
+  eligible: boolean; selected: boolean; manualApproved?: boolean; subject: string; body: string;
   insight?: OutreachInsight;
 }
 export interface OutreachDetail {
