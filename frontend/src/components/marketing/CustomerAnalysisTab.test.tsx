@@ -23,7 +23,14 @@ beforeEach(async () => {
   mocks.recipients.mockImplementation(async (input) => input?.optionsOnly ? { recipients: [], total: 0, filterOptions: { regions: ['Dubai', 'Sharjah'] } } : { recipients: [{ recipientKey: 'customer:c2', customerName: 'UAE Buyer', email: 'uae@example.com', country: 'United Arab Emirates', region: 'Dubai' }], total: 26 });
   mocks.detail = { id: 'owf_fixture', name: '测试解析', status: 'pending', data: { revision: 0, sender: { email: 'seller@example.com' }, drafts: [{ recipientKey: 'customer:c1', company: 'Buyer', email: 'buyer@example.com', segment: 'piping', timezone: 'Asia/Dubai', reason: '已读取官网', warnings: [], eligible: true, selected: true, subject: 'Original subject', body: 'Original body', evidence: { status: 'unavailable' } }] }, summary: { total: 1, eligible: 1, selected: 1 }, senderAccount: { configured: true, from: 'seller@example.com' }, schedule: {}, delivery: {} };
   mocks.get.mockImplementation(async () => structuredClone(mocks.detail));
-  mocks.edit.mockImplementation(async (_id, _key, input) => { Object.assign(mocks.detail.data.drafts[0], input); mocks.detail.data.revision += 1; return structuredClone(mocks.detail); });
+  mocks.edit.mockImplementation(async (_id, key, input) => {
+    const draft = mocks.detail.data.drafts.find((item: any) => item.recipientKey === key) || mocks.detail.data.drafts[0];
+    Object.assign(draft, input);
+    if (input.manualConfirm) draft.manualApproved = true;
+    mocks.detail.data.revision += 1;
+    mocks.detail.summary.selected = mocks.detail.data.drafts.filter((item: any) => item.selected && (item.eligible || item.manualApproved)).length;
+    return structuredClone(mocks.detail);
+  });
   mocks.select.mockImplementation(async (_id, keys) => {
     mocks.detail.data.drafts.forEach((draft: any) => { draft.selected = keys.includes(draft.recipientKey); });
     mocks.detail.data.revision += 1; mocks.detail.summary.selected = keys.length;
@@ -88,6 +95,39 @@ it('saves recipient selection before a task can be scheduled', async () => {
   expect(mocks.edit).toHaveBeenCalledWith('owf_fixture', 'customer:c1', expect.objectContaining({ selected: false }));
   expect(findButton('创建并启用').disabled).toBe(true);
   expect(mocks.schedule).not.toHaveBeenCalled();
+});
+
+it('disables hard-blocked drafts and lets a review draft be manually confirmed into the task', async () => {
+  const confirmSpy = vi.fn(() => true);
+  const originalConfirm = window.confirm;
+  window.confirm = confirmSpy as any;
+  const base = mocks.detail.data.drafts[0];
+  mocks.detail.data.drafts[0] = {
+    ...base, eligible: false, selected: false, manualApproved: false,
+    reviewReasons: ['客户国家缺失或与目标市场不符，请先核对客户资料'],
+    blockedReasons: [],
+    warnings: ['客户国家缺失或与目标市场不符，请先核对客户资料'],
+  };
+  mocks.detail.data.drafts.push({
+    ...structuredClone(base), recipientKey: 'customer:c9', company: 'Blocked buyer', email: 'blocked@example.com',
+    eligible: false, selected: false, blockedReasons: ['邮箱已退订或在抑制名单'], reviewReasons: [],
+    warnings: ['邮箱已退订或在抑制名单'],
+  });
+  mocks.detail.summary = { total: 2, eligible: 0, selected: 0 };
+  await act(async () => findButton('已保存解析').click());
+  expect(host.textContent).toContain('需人工确认 1 条');
+  expect(host.textContent).toContain('不可选 1 条');
+  const blocked = host.querySelector<HTMLInputElement>('[aria-label="发送给 blocked@example.com"]')!;
+  expect(blocked.disabled).toBe(true);
+  expect(host.textContent).toContain('不可选：邮箱已退订或在抑制名单');
+  const review = host.querySelector<HTMLInputElement>('[aria-label="发送给 buyer@example.com"]')!;
+  expect(review.disabled).toBe(false);
+  await act(async () => review.click());
+  expect(confirmSpy).toHaveBeenCalled();
+  expect(mocks.edit).toHaveBeenCalledWith('owf_fixture', 'customer:c1', expect.objectContaining({ selected: true, manualConfirm: true }));
+  expect(host.textContent).toContain('已人工确认');
+  expect(findButton('创建并启用').disabled).toBe(false);
+  window.confirm = originalConfirm;
 });
 
 it('shows source evidence and selects only recommended eligible drafts atomically without sending', async () => {

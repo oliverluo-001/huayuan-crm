@@ -23,6 +23,13 @@ export interface OutreachSender {
   website: string;
 }
 
+export type OutreachIssueLevel = 'hard' | 'review';
+export interface OutreachIssue {
+  code: string;
+  label: string;
+  level: OutreachIssueLevel;
+}
+
 export interface OutreachDraft {
   recipientKey: string;
   customerId: number;
@@ -35,6 +42,10 @@ export interface OutreachDraft {
   evidence: { url: string; checkedAt: string; excerpt: string; status: 'verified' | 'unavailable' | 'not_requested' };
   reason: string;
   warnings: string[];
+  /** Hard blocks cannot be bypassed manually (invalid/suppressed/already sent/occupied...). */
+  blockedReasons?: string[];
+  /** Review items can be sent only after explicit manual confirmation. */
+  reviewReasons?: string[];
   eligible: boolean;
   selected: boolean;
   manualApproved?: boolean;

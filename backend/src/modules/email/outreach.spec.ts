@@ -2,7 +2,7 @@ import { OutreachService } from './outreach.service';
 import { EmailLog, EmailTask, EmailTaskRecipient } from './entities';
 import { OutreachReservation } from './entities/outreach-reservation.entity';
 import { assertOutreachMessage } from './outreach-types';
-import { generateOutreachMessage } from './outreach-messages';
+import { generateOutreachMessage, outreachSummary } from './outreach-messages';
 import { isPublicResearchAddress, publicResearchUrl, websiteText } from './outreach-research';
 import { EmailService } from './email.service';
 
@@ -103,6 +103,68 @@ describe('customer analysis scheduling', () => {
   });
 });
 
+describe('manual confirmation for reviewable contact checks', () => {
+  it('classifies hard and review checks on a fresh analysis', async () => {
+    const h = harness();
+    h.repos.get(EmailTask).findOne.mockResolvedValueOnce(null);
+    h.customer.country = 'United Kingdom';
+    const create = (suffix: string) => h.service.create({ requestId: `owf_${suffix.repeat(24)}`, name: '测试解析', targetCountry: 'UAE', productScope: 'Carbon steel flanges', recipientKeys: ['customer:c1'], sender, researchWebsites: false }, '7');
+    const review = await create('a');
+    expect(review.data.drafts[0]).toMatchObject({ eligible: false, selected: false, blockedReasons: [] });
+    expect(review.data.drafts[0].reviewReasons).toContain('客户国家缺失或与目标市场不符，请先核对客户资料');
+    h.repos.get(EmailTask).findOne.mockResolvedValue(null);
+    h.suppressions.isSuppressed.mockResolvedValue(true);
+    const hard = await create('b');
+    expect(hard.data.drafts[0].eligible).toBe(false);
+    expect(hard.data.drafts[0].blockedReasons).toContain('邮箱已退订或在抑制名单');
+  });
+
+  it('counts manually confirmed drafts as selected without treating them as eligible', () => {
+    const summary = outreachSummary([
+      { ...draft(), eligible: false, manualApproved: true, selected: true } as any,
+      { ...draft(), eligible: true } as any,
+    ]);
+    expect(summary).toEqual({ total: 2, eligible: 1, selected: 2 });
+  });
+
+  it('schedules a manually confirmed review item and rejects it without confirmation', async () => {
+    const h = harness();
+    // Data changed after the analysis: stored draft is still eligible/selected but
+    // the live country no longer matches the target market.
+    h.customer.country = 'United Kingdom';
+    const selected = h.task.outreachData.drafts[0];
+    selected.reviewReasons = ['客户国家缺失或与目标市场不符，请先核对客户资料'];
+    await expect(h.service.schedule('owf_abc', h.schedule, '7')).rejects.toThrow('人工确认');
+    selected.manualApproved = true;
+    await h.service.schedule('owf_abc', h.schedule, '7');
+    expect(h.recipients).toHaveLength(1);
+  });
+
+  it('never lets manual confirmation bypass hard contact blocks', async () => {
+    const h = harness();
+    h.suppressions.isSuppressed.mockResolvedValue(true);
+    const selected = h.task.outreachData.drafts[0];
+    selected.eligible = false;
+    selected.manualApproved = true;
+    await expect(h.service.schedule('owf_abc', h.schedule, '7')).rejects.toThrow('退订');
+    expect(h.manager.insert).not.toHaveBeenCalled();
+  });
+
+  it('requires manual confirmation for review items on edit and keeps hard blocks closed', async () => {
+    const h = harness();
+    h.customer.country = 'United Kingdom';
+    const selected = h.task.outreachData.drafts[0];
+    selected.eligible = false;
+    const edit = (manualConfirm?: boolean) => h.service.edit('owf_abc', 'customer:c1', { subject: 'Hi', body: 'Body', selected: true, manualConfirm, revision: h.task.outreachData.revision }, '7');
+    await expect(edit()).rejects.toThrow('确认');
+    const updated = await edit(true);
+    expect(updated.data.drafts[0]).toMatchObject({ selected: true, manualApproved: true, eligible: false });
+    selected.selected = false;
+    h.suppressions.isSuppressed.mockResolvedValue(true);
+    await expect(edit(true)).rejects.toThrow('抑制名单');
+  });
+});
+
 describe('personalized scheduler delivery', () => {
   it.each(['replied', 'invalid', 'country'])('skips a customer whose %s status changed after scheduling', async (change) => {
     const h = harness(); h.task.outreachData.approvedAt = 'approved';
@@ -129,6 +191,25 @@ describe('personalized scheduler delivery', () => {
     await service.sendRecipient(h.task, { subject: 'Generic', body: 'Generic' }, recipient, transport, { smtpUser: sender.email }, {});
     expect(transport.sendMail).toHaveBeenCalledWith(expect.objectContaining({ subject: draft().subject, to: draft().email }));
     expect(transport.sendMail.mock.calls[0][0].text).toContain('Do you source flanges?');
+  });
+  it('delivers a manually approved review draft while keeping replied customers blocked', async () => {
+    const h = harness();
+    h.task.outreachData.approvedAt = new Date().toISOString();
+    h.customer.country = 'United Kingdom';
+    h.customers.markEmailSent = jest.fn();
+    h.settings.getOrCreateUnsubscribeSecret = async () => 'fixture';
+    h.task.outreachData.drafts[0] = { ...draft(), eligible: false, manualApproved: true } as any;
+    const recipients: any = { save: jest.fn(async (value: any) => value) };
+    const logs: any = { findOne: jest.fn(async () => null), create: (value: any) => value, save: async () => undefined };
+    const service: any = new EmailService({} as any, {} as any, logs, recipients, h.customers, h.settings, h.suppressions);
+    service.createLog = jest.fn(async () => undefined);
+    const transport = { sendMail: jest.fn(async () => ({ messageId: 'test@example.com' })) };
+    await expect(service.sendRecipient(h.task, {}, { ...draft(), attempts: 0 }, transport, { smtpUser: sender.email }, {})).resolves.toBe(true);
+    expect(transport.sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: draft().email, subject: draft().subject }));
+    h.customer.journeyStage = 'replied';
+    const replied = { ...draft(), attempts: 0 } as any;
+    await expect(service.sendRecipient(h.task, {}, replied, transport, { smtpUser: sender.email }, {})).resolves.toBe(false);
+    expect(replied.status).toBe('skipped');
   });
   it('does not fall back to a generic message when an approved recipient snapshot is missing', async () => {
     const service: any = new EmailService({} as any, {} as any, {} as any, { save: async () => undefined } as any, { findOne: async () => ({}) } as any, {} as any, {} as any);
