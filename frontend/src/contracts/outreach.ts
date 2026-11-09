@@ -17,7 +17,7 @@ export interface OutreachDraft {
   recipientKey: string; customerId: number; email: string; company: string; timezone: string;
   segment: 'piping' | 'valves' | 'projects' | 'water' | 'unknown';
   evidence: { url: string; checkedAt: string; excerpt: string; status: 'verified' | 'unavailable' | 'not_requested' };
-  reason: string; warnings: string[]; eligible: boolean; selected: boolean; subject: string; body: string;
+  reason: string; warnings: string[]; eligible: boolean; selected: boolean; manualApproved?: boolean; subject: string; body: string;
   insight?: OutreachInsight;
 }
 export interface OutreachDetail {

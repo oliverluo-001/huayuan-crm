@@ -1360,7 +1360,7 @@ export function getOutreachAnalysis(id: string) {
 export function createOutreachAnalysis(input: CreateOutreachInput) {
   return api<OutreachDetail>('/api/outreach-workflows', { method: 'POST', body: input });
 }
-export function editOutreachDraft(id: string, key: string, input: { subject: string; body: string; selected: boolean; revision: number }) {
+export function editOutreachDraft(id: string, key: string, input: { subject: string; body: string; selected: boolean; revision: number; manualConfirm?: boolean }) {
   return api<OutreachDetail>(`/api/outreach-workflows/${encodeURIComponent(id)}/drafts/${encodeURIComponent(key)}`, { method: 'PUT', body: input });
 }
 export function scheduleOutreachAnalysis(id: string, input: OutreachSchedule) {
