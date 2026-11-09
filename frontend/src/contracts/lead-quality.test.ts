@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { B2BLead } from "@/types";
-import { isLeadImportable } from "./lead-quality";
+import { isLeadImportable, leadSelectionBlockReason } from "./lead-quality";
 
 const eligible = (): B2BLead => ({ id: "1", taskId: "t", company: "Buyer", status: "candidate", createdAt: "", email: "sales@buyer.com", sourceUrl: "https://buyer.com/contact", emailStatus: "domain_valid", recommendedAction: "Ready to Email", rawData: { contactQuality: { version: 2, email: "sales@buyer.com", sourceUrl: "https://buyer.com/contact", sourceStatus: 200, checkedAt: new Date().toISOString(), published: true, suppressed: false, reasons: [] } } });
 describe("lead contact quality gate", () => {
@@ -17,5 +17,10 @@ describe("lead contact quality gate", () => {
       const lead = eligible(); Object.assign(lead.rawData!.contactQuality!, patch);
       expect(isLeadImportable(lead)).toBe(false);
     }
+  });
+  it("reports the actionable reason instead of leaving a silent disabled checkbox", () => {
+    expect(leadSelectionBlockReason({ ...eligible(), recommendedAction: "Needs Review", reviewReason: "产品及规格待确认" })).toBe("产品及规格待确认");
+    const stale = eligible(); Object.assign(stale.rawData!.contactQuality!, { checkedAt: new Date(Date.now() - 7 * 3600_000).toISOString() });
+    expect(leadSelectionBlockReason(stale)).toContain("过期");
   });
 });
