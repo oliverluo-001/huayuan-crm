@@ -17,7 +17,7 @@ import {
   statusLabel,
 } from "@/contracts/crm-terminology";
 import "./LeadsPage.css";
-import { isLeadImportable } from "@/contracts/lead-quality";
+import { isLeadImportable, leadSelectionBlockReason } from "@/contracts/lead-quality";
 import { effectiveMarkets, marketPayload, type MarketMode } from "@/contracts/lead-market";
 import {
   getB2BLeadTasks,
@@ -829,6 +829,8 @@ export function LeadsPage() {
                           type="checkbox"
                           checked={selectedLeadIds.has(lead.id)}
                           disabled={!importable}
+                          title={importable ? "选择此线索" : `暂不可选择：${leadSelectionBlockReason(lead)}`}
+                          aria-label={importable ? `选择 ${lead.company || "该线索"}` : `无法选择 ${lead.company || "该线索"}：${leadSelectionBlockReason(lead)}`}
                           onChange={(e) => handleSelectLead(lead.id, e.target.checked)}
                         />
                       </TableCell>
@@ -875,7 +877,7 @@ export function LeadsPage() {
                       {lead.crmCustomerId ? (
                         <span className="status-pill success">已入客户库</span>
                       ) : (
-                        <div className="cleaning-notes">{lead.reviewReason || (isLeadImportable(lead) ? "来源、域名及业务匹配检查通过；实际投递待确认" : lead.cleaningNotes || "待处理")}</div>
+                        <div className="cleaning-notes">{lead.reviewReason || (isLeadImportable(lead) ? "来源、域名及业务匹配检查通过；实际投递待确认" : leadSelectionBlockReason(lead))}</div>
                       )}
                     </TableCell>
                   </TableRow>
